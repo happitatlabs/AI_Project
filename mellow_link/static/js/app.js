@@ -51,7 +51,7 @@ async function handleFileUpload(input) {
     const f=input.files[0]; if(!f) return;
     const fd=new FormData(); fd.append('file',f);
     document.getElementById('uploadStatusText').textContent='Uploading...'; document.getElementById('uploadPreview').classList.remove('hidden');
-    const url = CURRENT_FOLDER_ID ? `${API_BASE}/folders/${CURRENT_FOLDER_ID}/upload` : `${API_BASE}/chat/upload/temp`;
+    const url = CURRENT_FOLDER_ID ? `${API_BASE}/folders/${CURRENT_FOLDER_ID}/upload` : `${API_BASE}/chat/upload-temp`;
     if(!CURRENT_FOLDER_ID && TEMP_SESSION_ID) fd.append('session_id', TEMP_SESSION_ID);
     const res = await fetch(url, {method:'POST',body:fd, headers:CURRENT_FOLDER_ID?{'Authorization':`Bearer ${AUTH_TOKEN}`}:{}});
     if(res.ok) { 

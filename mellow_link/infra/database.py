@@ -211,11 +211,11 @@ def get_db():
 def create_default_folders_for_user(db: Session, user_id: int, role: str = UserRole.USER.value):
     """회원가입 시 기본 폴더 생성"""
     default_folders = [
-        {"name": "일반 대화", "icon": "💬", "system_prompt": "친절한 AI.", "use_rag": False, "rag_collection_name": None},
+        {"name": "일반 대화", "icon": "💬", "system_prompt": "친절한 AI.", "use_rag": True, "rag_collection_name": None},
     ]
     # Admin일 경우 추가 폴더 (선택사항)
     if role == UserRole.ADMIN.value:
-        default_folders.insert(0, {"name": "비서", "icon": "🎀", "system_prompt": "비서 모드", "use_rag": False, "rag_collection_name": None})
+        default_folders.insert(0, {"name": "비서", "icon": "🎀", "system_prompt": "비서 모드", "use_rag": True, "rag_collection_name": None})
 
     created = []
     for folder_data in default_folders:

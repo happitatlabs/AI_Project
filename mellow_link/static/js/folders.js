@@ -42,7 +42,15 @@ function selectFolder(id) {
     CURRENT_FOLDER=FOLDERS.find(x=>x.id===id);
     document.getElementById('chatMessages').innerHTML='<div class="text-center text-gray-500 py-8"><p class="text-xl">New Chat in '+escapeHtml(CURRENT_FOLDER.name)+'</p></div>';
     document.getElementById('sessionInfo').textContent=`Folder: ${CURRENT_FOLDER.name}`;
-    document.getElementById('ragStatus').classList.remove('hidden');
+    // AFTER: (조건문 추가)
+    const ragStatusInfo = document.getElementById('ragStatus');
+    if (ragStatusInfo) {
+        if (CURRENT_FOLDER.use_rag) {
+            ragStatusInfo.classList.remove('hidden');
+        } else {
+            ragStatusInfo.classList.add('hidden');
+        }
+    }
 }
 
  

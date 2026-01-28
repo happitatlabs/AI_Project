@@ -1998,8 +1998,9 @@ exit
                     search_results = await rag.search(
                         query=question,
                         folder_id=current_folder.id,
+                        session_id=str(session_id) if session_id else None,  # 👈 핵심 칩 추가
                         top_k=3,
-                        min_score=0.3
+                        min_score=0.3,
                     )
 
                     if search_results:
