@@ -137,6 +137,10 @@ vtuber_relay: Optional[VTuberRelayService] = None
 vtuber_proc: Optional[Any] = None  # VTuber 백엔드 프로세스 관리 (subprocess.Popen)
 rag_service: Optional[RAGService] = None  # RAG 문서 검색 서비스
 
+# Temp Upload Context Store (RAG 비사용 - 순수 텍스트 메모리)
+# Key: session_id (str), Value: extracted text (str)
+TEMP_CONTEXT_STORE: Dict[str, str] = {}
+
 shutdown_event: asyncio.Event = asyncio.Event()
 
 
@@ -571,10 +575,12 @@ exit
 
     class ChatRequest(BaseModel):
         """Chat request model."""
-        message: str = Field(..., description="User message")
+        question: str = Field(..., description="User message")
         system_prompt: str = Field("", description="System prompt")
         mode: str = Field("thinking", description="Mode: fast, thinking, research, auto")
         session_id: Optional[str] = Field(None, description="Session ID for context")
+        folder_id: Optional[int] = Field(None, description="Folder ID for RAG")
+        temp_session_id: Optional[str] = Field(None, description="Temp upload session key for TEMP_CONTEXT_STORE")
         stream: bool = Field(True, description="Enable streaming")
 
     class StatusResponse(BaseModel):
@@ -1330,20 +1336,21 @@ exit
 
     @app.post("/chat/upload-temp", tags=["Chat"])
     async def upload_temp_document(
-        background_tasks: BackgroundTasks,
         file: UploadFile = File(...),
         session_id: str = Form(...),
     ):
         """
         Upload a document for temporary/ephemeral chat context.
 
-        - Stored in MEMORY ONLY (not in database)
-        - Lost on server restart
-        - For one-time file context in chat sessions
-        - Returns immediately; processing happens in background
+        - RAG(벡터DB)를 사용하지 않음
+        - 텍스트를 추출하여 TEMP_CONTEXT_STORE(메모리)에 저장
+        - 서버 재시작 시 소멸
+        - /chat/ask 에서 system_prompt에 직접 주입됨
 
         Supports: PDF, DOCX, TXT, MD, HTML
         """
+        from mellow_link.services.rag_service import extract_text_from_file
+
         if file is None or not file.filename:
             raise HTTPException(status_code=400, detail="No file uploaded")
 
@@ -1351,76 +1358,42 @@ exit
             raise HTTPException(status_code=400, detail="session_id is required")
 
         try:
-            # Read file content immediately
             content_bytes = await file.read()
             filename = file.filename
 
             if not content_bytes or len(content_bytes) == 0:
                 raise HTTPException(status_code=400, detail="Empty file")
 
-            logger.info(f"[RAG Temp] Received temp file: {filename} ({len(content_bytes)} bytes) for session {session_id}")
+            logger.info(f"[TempUpload] Received: {filename} ({len(content_bytes)} bytes) for session {session_id}")
 
-            # Background task function (sync wrapper for async processing)
-            def process_temp_document_sync(
-                session_id: str,
-                filename: str,
-                content_bytes: bytes
-            ):
-                """Background task to process temp document embeddings (sync wrapper)."""
-                import asyncio
+            # 텍스트 추출 (RAG 임베딩 없이 원문 텍스트만)
+            extracted_text = extract_text_from_file(Path(filename), content_bytes)
 
-                async def _process():
-                    rag = get_rag_service()
-                    if not rag:
-                        logger.error(f"[RAG Temp] RAG service not available for session {session_id}")
-                        return
+            if not extracted_text or len(extracted_text.strip()) < 5:
+                raise HTTPException(status_code=400, detail="텍스트를 추출할 수 없는 파일입니다.")
 
-                    try:
-                        success, chunk_count, message = await rag.process_temp_document(
-                            session_id=session_id,
-                            filename=filename,
-                            content_bytes=content_bytes
-                        )
+            # 기존 세션 텍스트가 있으면 누적 (여러 파일 업로드 지원)
+            if session_id in TEMP_CONTEXT_STORE:
+                TEMP_CONTEXT_STORE[session_id] += f"\n\n--- [{filename}] ---\n{extracted_text}"
+            else:
+                TEMP_CONTEXT_STORE[session_id] = f"--- [{filename}] ---\n{extracted_text}"
 
-                        if success:
-                            logger.info(f"[RAG Temp] Temp document processed: {chunk_count} chunks for session {session_id}")
-                        else:
-                            logger.error(f"[RAG Temp] Temp document processing failed: {message}")
+            stored_length = len(TEMP_CONTEXT_STORE[session_id])
+            logger.info(f"[TempUpload] Stored {len(extracted_text)} chars for session {session_id} (total: {stored_length} chars)")
 
-                    except Exception as e:
-                        logger.error(f"[RAG Temp] Background processing error: {e}")
-                        import traceback
-                        logger.error(traceback.format_exc())
-
-                # Run async function in new event loop for background thread
-                try:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    loop.run_until_complete(_process())
-                finally:
-                    loop.close()
-
-            # Schedule background processing using FastAPI BackgroundTasks
-            background_tasks.add_task(
-                process_temp_document_sync,
-                session_id=session_id,
-                filename=filename,
-                content_bytes=content_bytes
-            )
-
-            # Return immediately to prevent spinner hang
             return {
                 "success": True,
-                "message": f"Temp document '{filename}' uploaded. Processing embeddings...",
+                "message": f"'{filename}' 업로드 완료. 텍스트 {len(extracted_text)}자 추출됨.",
                 "session_id": session_id,
                 "filename": filename,
-                "size_bytes": len(content_bytes)
+                "extracted_chars": len(extracted_text),
+                "total_chars": stored_length,
             }
 
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"[RAG Temp] Upload error: {e}")
+            logger.error(f"[TempUpload] Error: {e}")
             import traceback
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=f"Temp upload failed: {str(e)}")
@@ -1428,35 +1401,33 @@ exit
     @app.delete("/chat/temp/{session_id}", tags=["Chat"])
     async def clear_temp_session(session_id: str):
         """
-        Clear all temporary documents for a session.
+        Clear temporary upload context for a session.
 
         Use this to free memory after a chat session ends.
         """
-        rag = get_rag_service()
-        if not rag:
-            raise HTTPException(status_code=503, detail="RAG service not available")
-
         try:
-            stats_before = rag.get_temp_stats(session_id)
-            rag.clear_temp_session(session_id)
+            had_data = session_id in TEMP_CONTEXT_STORE
+            chars_cleared = len(TEMP_CONTEXT_STORE.pop(session_id, ""))
 
             return {
                 "success": True,
                 "message": f"Cleared temp session {session_id}",
-                "chunks_cleared": stats_before.get("chunk_count", 0)
+                "had_data": had_data,
+                "chars_cleared": chars_cleared,
             }
         except Exception as e:
-            logger.error(f"[RAG Temp] Clear error: {e}")
+            logger.error(f"[TempUpload] Clear error: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.get("/chat/temp/{session_id}/stats", tags=["Chat"])
     async def get_temp_session_stats(session_id: str):
-        """Get statistics about temporary documents for a session."""
-        rag = get_rag_service()
-        if not rag:
-            raise HTTPException(status_code=503, detail="RAG service not available")
-
-        return rag.get_temp_stats(session_id)
+        """Get statistics about temporary upload context for a session."""
+        text = TEMP_CONTEXT_STORE.get(session_id, "")
+        return {
+            "session_id": session_id,
+            "has_data": bool(text),
+            "total_chars": len(text),
+        }
 
     @app.delete("/folders/{folder_id}/documents/{doc_id}", tags=["Folders"])
     async def delete_folder_document(
@@ -1832,8 +1803,12 @@ exit
         question = body.get("question", "").strip()
         session_id = body.get("session_id")
         folder_id = body.get("folder_id")
+        temp_session_id = body.get("temp_session_id")  # 임시 업로드 세션 ID
         mode = body.get("mode", "general")
         skip_user_message = body.get("skip_user_message", False)
+
+        # ---- Debug: 수신 파라미터 확인 ----
+        logger.info(f"[/chat/ask] question={question[:50]}..., session_id={session_id}, folder_id={folder_id}, temp_session_id={temp_session_id}")
 
         if not question:
             raise HTTPException(status_code=400, detail="Question is required")
@@ -1978,7 +1953,7 @@ exit
         )
 
         # =====================================================================
-        # [RAG Context Injection] - 문서 기반 답변 최우선
+        # [RAG Context Injection] - 영구 지식베이스 (폴더 RAG)
         # =====================================================================
         rag_context_section = ""
         rag_used = False
@@ -1994,11 +1969,9 @@ exit
             rag = get_rag_service()
             if rag and rag.is_available():
                 try:
-                    # Search for relevant chunks
                     search_results = await rag.search(
                         query=question,
                         folder_id=current_folder.id,
-                        session_id=str(session_id) if session_id else None,  # 👈 핵심 칩 추가
                         top_k=3,
                         min_score=0.3,
                     )
@@ -2013,15 +1986,9 @@ exit
                             logger.info(f"[RAG] Found chunk from {result.filename} (score={result.score:.3f})")
 
                         rag_context_section = (
-                            "\n\n=== DOCUMENT CONTEXT (최우선 참조) ===\n"
+                            "\n\n=== 참고 문서 (영구 지식베이스) ===\n"
                             + "\n\n".join(context_parts)
-                            + "\n\n"
-                            + "CRITICAL INSTRUCTION:\n"
-                            + "1. 위 문서 내용에 기반하여 사실적으로 답변하세요.\n"
-                            + "2. 문서에 없는 내용은 추측하거나 지어내지 마세요.\n"
-                            + "3. 문서에서 찾을 수 없는 정보는 '문서에서 해당 정보를 찾을 수 없습니다'라고 답변하세요.\n"
-                            + "4. 아래 페르소나는 '말투'로만 사용하고, 내용은 반드시 문서 기반으로 답변하세요.\n"
-                            + "=== END OF DOCUMENT CONTEXT ===\n"
+                            + "\n=== END ===\n"
                         )
                         logger.info(f"[RAG] Injected {len(search_results)} chunks into system prompt")
                     else:
@@ -2034,20 +2001,49 @@ exit
             else:
                 logger.warning(f"[RAG] RAG service not available")
 
+        # =====================================================================
+        # [Temp Context Injection] - 사용자가 방금 업로드한 파일 (메모리)
+        # =====================================================================
+        temp_context_section = ""
+        temp_session_key = str(temp_session_id) if temp_session_id else None
+        logger.info(f"[TempContext] Lookup: key={temp_session_key}, store_keys={list(TEMP_CONTEXT_STORE.keys())}")
+
+        if temp_session_key and temp_session_key in TEMP_CONTEXT_STORE:
+            raw_temp = TEMP_CONTEXT_STORE[temp_session_key]
+            # 토큰 제한 고려: 약 3000자로 슬라이싱
+            temp_text = raw_temp[:3000]
+            if len(raw_temp) > 3000:
+                temp_text += "\n...(이하 생략됨)..."
+            temp_context_section = (
+                "\n\n=== 사용자가 방금 업로드한 파일 내용 ===\n"
+                + temp_text
+                + "\n=== END ===\n"
+            )
+            logger.info(f"[TempContext] Injected {len(temp_text)} chars from temp upload for session {temp_session_key}")
+
+        # =====================================================================
         # 4. 최종 시스템 프롬프트 합성
-        # 우선순위: 가드레일 > RAG Context > 페르소나(말투)
-        if rag_context_section:
-            # RAG가 활성화된 경우: 문서 내용 최우선, 페르소나는 말투로만 사용
+        # 우선순위: 가드레일 > RAG Context > Temp Context > 페르소나(말투)
+        # =====================================================================
+        has_document_context = bool(rag_context_section or temp_context_section)
+
+        if has_document_context:
             system_prompt = (
                 f"{mandatory_guardrail}"
                 f"{rag_context_section}"
+                f"{temp_context_section}"
+                "\nCRITICAL INSTRUCTION:\n"
+                "1. 위 문서 내용에 기반하여 사실적으로 답변하세요.\n"
+                "2. 문서에 없는 내용은 추측하거나 지어내지 마세요.\n"
+                "3. 문서에서 찾을 수 없는 정보는 '문서에서 해당 정보를 찾을 수 없습니다'라고 답변하세요.\n"
+                "4. 아래 페르소나는 '말투'로만 사용하고, 내용은 반드시 문서 기반으로 답변하세요.\n"
                 f"\n[Character/Tone (말투만 참조)]\n{selected_persona_content}"
             )
         else:
-            # RAG가 비활성화된 경우: 기존 방식 (일반 대화)
+            # 문서 컨텍스트 없음: 기존 방식 (일반 대화)
             system_prompt = f"{mandatory_guardrail}\n\n[Character Context]\n{selected_persona_content}"
 
-        logger.info(f"[System] Persona Active: {'Aventurine (VTuber)' if is_vtuber_active else 'Default (Web)'}, RAG Used: {rag_used}")
+        logger.info(f"[System] Persona Active: {'Aventurine (VTuber)' if is_vtuber_active else 'Default (Web)'}, RAG Used: {rag_used}, Temp Context: {bool(temp_context_section)}")
 
         # Save user message (if not skipped) - ensure DB save with error handling
         user_message_id = None
@@ -2218,11 +2214,32 @@ exit
 
         Delegates to Orchestrator which manages GPU state transitions.
         Supports both streaming and non-streaming responses.
+        Supports TEMP_CONTEXT_STORE injection via temp_session_id.
         """
         if not llm_service or not llm_service.is_available():
             raise HTTPException(status_code=503, detail="LLM Service unavailable")
         if not orchestrator:
             raise HTTPException(status_code=503, detail="Orchestrator not initialized")
+
+        # ---- Debug: temp_session_id 수신 확인 ----
+        logger.info(f"[/chat] question={request.question[:50]}..., temp_session_id={request.temp_session_id}, folder_id={request.folder_id}")
+
+        # ---- Temp Context Injection ----
+        effective_system_prompt = request.system_prompt
+        if request.temp_session_id:
+            temp_text = TEMP_CONTEXT_STORE.get(request.temp_session_id, "")
+            logger.info(f"[/chat] TEMP_CONTEXT_STORE lookup: key={request.temp_session_id}, found={bool(temp_text)}, chars={len(temp_text)}")
+            if temp_text:
+                sliced = temp_text[:3000]
+                if len(temp_text) > 3000:
+                    sliced += "\n...(이하 생략됨)..."
+                effective_system_prompt = (
+                    f"{request.system_prompt}\n\n"
+                    f"=== 사용자가 업로드한 파일 내용 ===\n{sliced}\n=== END ===\n"
+                    "위 문서 내용에 기반하여 사실적으로 답변하세요."
+                )
+        else:
+            logger.info(f"[/chat] No temp_session_id provided")
 
         # Request state transition to TEXT (LLM)
         result = await orchestrator.request_state_change(
@@ -2242,8 +2259,8 @@ exit
                 async def stream_generator():
                     try:
                         async for chunk in llm_service.generate_stream(
-                            prompt=request.message,
-                            system_prompt=request.system_prompt,
+                            prompt=request.question,
+                            system_prompt=effective_system_prompt,
                             mode=request.mode,
                             context_id=request.session_id
                         ):
@@ -2261,8 +2278,8 @@ exit
             else:
                 # Non-streaming response
                 gen_result = await llm_service.generate(
-                    prompt=request.message,
-                    system_prompt=request.system_prompt,
+                    prompt=request.question,
+                    system_prompt=effective_system_prompt,
                     mode=request.mode,
                     context_id=request.session_id
                 )

@@ -178,7 +178,7 @@ async function sendMessage(prompt = null, options = {}) {
             body: JSON.stringify({
                 question, session_id: CURRENT_SESSION_ID,
                 folder_id: CURRENT_FOLDER_ID,
-                temp_session_id: (!CURRENT_FOLDER_ID && TEMP_SESSION_ID) ? TEMP_SESSION_ID : null,
+                temp_session_id: TEMP_SESSION_ID || null,
                 mode: CURRENT_MODE,
                 skip_user_message: skipAddUserMessage  // ✅ [FIX] 서버로 플래그 전달
             }),
@@ -819,7 +819,7 @@ async function sendMessage(prompt = null, options = {}) {
             body: JSON.stringify({
                 question, session_id: CURRENT_SESSION_ID,
                 folder_id: CURRENT_FOLDER_ID,
-                temp_session_id: (!CURRENT_FOLDER_ID && TEMP_SESSION_ID) ? TEMP_SESSION_ID : null,
+                temp_session_id: TEMP_SESSION_ID || null,
                 mode: CURRENT_MODE,
                 skip_user_message: skipAddUserMessage
             }),

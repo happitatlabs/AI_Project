@@ -45,19 +45,99 @@ function toggleMode() {
 }
 
 /**
- * 파일 업로드 핸들러
+ * 파일 업로드 핸들러 (최종 수정본: 세션 ID 강제 발급)
  */
 async function handleFileUpload(input) {
-    const f=input.files[0]; if(!f) return;
-    const fd=new FormData(); fd.append('file',f);
-    document.getElementById('uploadStatusText').textContent='Uploading...'; document.getElementById('uploadPreview').classList.remove('hidden');
-    const url = CURRENT_FOLDER_ID ? `${API_BASE}/folders/${CURRENT_FOLDER_ID}/upload` : `${API_BASE}/chat/upload-temp`;
-    if(!CURRENT_FOLDER_ID && TEMP_SESSION_ID) fd.append('session_id', TEMP_SESSION_ID);
-    const res = await fetch(url, {method:'POST',body:fd, headers:CURRENT_FOLDER_ID?{'Authorization':`Bearer ${AUTH_TOKEN}`}:{}});
-    if(res.ok) { 
-        const d=await res.json(); if(!CURRENT_FOLDER_ID) TEMP_SESSION_ID=d.session_id; 
-        document.getElementById('uploadStatusText').textContent='Done!'; 
-    } else document.getElementById('uploadStatusText').textContent='Failed';
+    const f = input.files[0]; 
+    if (!f) return;
+
+    const fd = new FormData(); 
+    fd.append('file', f);
+
+    // [UI] 상태 요소 확보
+    const preview = document.getElementById('uploadPreview');
+    const spinner = document.getElementById('uploadSpinner');
+    const successIcon = document.getElementById('uploadSuccessIcon');
+    const statusText = document.getElementById('uploadStatusText');
+
+    // [State: Uploading]
+    if (preview) preview.classList.remove('hidden');
+    if (spinner) spinner.classList.remove('hidden');
+    if (successIcon) successIcon.classList.add('hidden');
+    if (statusText) statusText.textContent = '⏳ Uploading...'; 
+
+    // [Logic] URL 설정
+    // 혹시 API_BASE가 없을 경우를 대비해 기본값 처리
+    const baseUrl = (typeof API_BASE !== 'undefined') ? API_BASE : '';
+    const url = `${baseUrl}/chat/upload-temp`;
+
+    // -----------------------------------------------------------
+    // 🔑 [Critical Fix] 세션 ID 없으면 즉석 발급 (Deadlock 해결)
+    // -----------------------------------------------------------
+    let activeSessionId = null;
+    
+    // 1. 현재 폴더 세션 확인
+    if (typeof CURRENT_SESSION_ID !== 'undefined' && CURRENT_SESSION_ID) {
+        activeSessionId = CURRENT_SESSION_ID;
+    } 
+    // 2. 임시 세션 확인
+    else if (typeof TEMP_SESSION_ID !== 'undefined' && TEMP_SESSION_ID) {
+        activeSessionId = TEMP_SESSION_ID;
+    }
+
+    // 3. 둘 다 없으면? -> 여기서 만듦! (타임스탬프 + 난수)
+    if (!activeSessionId) {
+        activeSessionId = 'temp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        // 전역 변수에 저장해서 계속 쓰게 만듦
+        TEMP_SESSION_ID = activeSessionId;
+        window.TEMP_SESSION_ID = activeSessionId;
+        console.log("[Upload] 임시 세션 ID 신규 발급:", activeSessionId);
+    }
+
+    // 이제 무조건 ID가 있으니 안심하고 첨부
+    fd.append('session_id', activeSessionId);
+    // -----------------------------------------------------------
+
+    try {
+        console.log(`[Upload] Sending to ${url} with session ${activeSessionId}`);
+        
+        const res = await fetch(url, { method: 'POST', body: fd });
+
+        if (res.ok) { 
+            const d = await res.json(); 
+            console.log("[Upload] Success:", d);
+            // ----------------------------------------------------------------
+            // ✅ [FIX] 영수증 동기화: "방금 업로드한 세션이 곧 현재 세션이다"
+            // ----------------------------------------------------------------
+            if (typeof TEMP_SESSION_ID !== 'undefined') {
+                // 서버가 확정해준 ID(d.session_id)가 있으면 쓰고, 없으면 우리가 보낸 거(activeSessionId) 씀
+                const usedSessionId = d.session_id || activeSessionId;
+                
+                TEMP_SESSION_ID = usedSessionId;       // 내부 변수 갱신
+                window.TEMP_SESSION_ID = usedSessionId; // 전역 변수(Window) 갱신 (chat.js가 볼 수 있게)
+                
+                console.log(`[Upload] Temp Session synced to: ${usedSessionId}`);
+            }
+            // ----------------------------------------------------------------
+
+            // [State: Done]
+            if (spinner) spinner.classList.add('hidden');
+            if (successIcon) successIcon.classList.remove('hidden');
+            if (statusText) statusText.textContent = '✅ Done!'; 
+            
+        } else {
+            // 에러 내용을 확인하기 위해 텍스트로 읽어봄
+            const errText = await res.text();
+            console.error(`[Upload Error] Status: ${res.status}, Msg: ${errText}`);
+            throw new Error(`Server Error: ${res.status}`);
+        }
+    } catch (e) {
+        // [State: Failed]
+        console.error(e);
+        if (spinner) spinner.classList.add('hidden');
+        if (successIcon) successIcon.classList.add('hidden');
+        if (statusText) statusText.textContent = '❌ Failed'; 
+    }
 }
 
 /**
