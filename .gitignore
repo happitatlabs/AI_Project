@@ -1,0 +1,113 @@
+# ========================================================
+# 🛡️ Mellow + Vtuber 통합 보안 방패 (.gitignore)
+# ========================================================
+
+# --------------------------------------------------------
+# 1. 🐍 Python & 가상환경 (기본 공통)
+# --------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+# 가상환경 폴더들
+.venv/
+venv/
+env/
+.conda/
+conda/
+
+# --------------------------------------------------------
+# 2. 🔑 보안 및 설정 (절대 유출 금지 🚫)
+# --------------------------------------------------------
+.env
+.env.*
+.env.local
+api_keys.py
+config.py
+secrets.json
+user_credentials.json
+src/open_llm_vtuber/llm/user_credentials.json
+
+# 사용자 설정 파일 (개인정보 포함 가능성)
+conf.yaml
+conf.yaml.backup
+openapi_assistants.json
+openapi_memgpt.json
+mcp_servers.json
+
+# --------------------------------------------------------
+# 3. 💻 IDE & OS 시스템 파일 (잡동사니)
+# --------------------------------------------------------
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.cursor/
+*.swp
+
+# --------------------------------------------------------
+# 4. 📜 로그, DB, 임시 파일
+# --------------------------------------------------------
+*.log
+logs/
+server.log
+tmp/
+temp/
+# 데이터베이스 파일
+*.sqlite3
+memory.db
+memory.db.bk
+mem.json
+# RAG 데이터 (Mellow-Link)
+chroma_db/
+data/
+
+# --------------------------------------------------------
+# 5. 🎨 Open_llm_Vtuber 에셋 관리 (Heavy Assets)
+# --------------------------------------------------------
+# 배경 이미지 (기본값 제외하고 무시)
+/backgrounds/*
+!/backgrounds/README.md
+
+# Live2D 모델 (용량 큼, 기본 모델만 허용)
+/live2d-models/*
+!/live2d-models/mao_pro
+!/live2d-models/shizuku
+!/live2d-models/haruto
+
+# 캐릭터 설정
+/characters/*
+!/characters/README.md
+
+# 아바타 이미지
+avatars/*
+
+# TTS/ASR 모델 및 캐시 (재다운로드 가능하므로 무시)
+cache/*
+asset/
+src/open_llm_vtuber/tts/asset
+src/open_llm_vtuber/tts/config
+src/open_llm_vtuber/asr/models*
+!src/open_llm_vtuber/asr/models/silero_vad.onnx
+
+# LLM/Voice 모델 가중치
+models/*
+!models/piper_voice
+models/piper_voice/*
+
+# --------------------------------------------------------
+# 6. 🧹 레거시 및 기타
+# --------------------------------------------------------
+legacy/
+chat_history/
+knowledge_base/
+submodules/MeloTTS
+*.exe
+private/
+
+# --------------------------------------------------------
+# 7. 🛠️ 개인용 유틸리티 (로컬 테스트용)
+# --------------------------------------------------------
+check_rag_alive.py
+lab.py

@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ipconfig:*)",
+      "Bash(route print:*)",
+      "Bash(netsh interface ip show addresses:*)",
+      "Bash(netsh interface ipv6:*)",
+      "Bash(dir:*)",
+      "Bash(python -m py_compile:*)",
+      "Bash(python:*)",
+      "Bash(tree:*)"
+    ]
+  }
+}
