@@ -1,0 +1,59 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Open-LLM-Vtuber</title>
+    <script>
+      // [Mellow-Patch] VAD/Microphone 없이도 오디오 재생 가능하도록 패치
+      (function() {
+        // 1. AudioContext를 미리 생성해서 오디오 재생 준비
+        window.mellowAudioContext = null;
+
+        // 2. VAD 에러 무시 - getUserMedia 실패해도 앱이 계속 작동
+        const originalGetUserMedia = navigator.mediaDevices?.getUserMedia?.bind(navigator.mediaDevices);
+        if (navigator.mediaDevices) {
+          navigator.mediaDevices.getUserMedia = async function(constraints) {
+            try {
+              return await originalGetUserMedia(constraints);
+            } catch (e) {
+              console.warn('[Mellow-Patch] Microphone not available, VAD disabled:', e.message);
+              // 가짜 빈 스트림 반환해서 앱이 크래시하지 않도록
+              const ctx = new AudioContext();
+              const oscillator = ctx.createOscillator();
+              const dest = ctx.createMediaStreamDestination();
+              oscillator.connect(dest);
+              oscillator.start();
+              oscillator.stop(0.001);
+              return dest.stream;
+            }
+          };
+        }
+
+        // 3. Canvas 크기 0 에러 방지
+        const originalGetContext = HTMLCanvasElement.prototype.getContext;
+        HTMLCanvasElement.prototype.getContext = function(type, attrs) {
+          if (this.width === 0) this.width = 1;
+          if (this.height === 0) this.height = 1;
+          return originalGetContext.call(this, type, attrs);
+        };
+
+        // 4. 첫 클릭 시 AudioContext 활성화 (Autoplay 정책 대응)
+        document.addEventListener('click', function initAudio() {
+          if (!window.mellowAudioContext) {
+            window.mellowAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+            console.log('[Mellow-Patch] AudioContext activated on user interaction');
+          }
+          document.removeEventListener('click', initAudio);
+        }, { once: true });
+
+        console.log('[Mellow-Patch] VAD bypass and Canvas fix loaded');
+      })();
+    </script>
+    <script type="module" crossorigin src="./assets/main-nu7uwxNJ.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/main-QEkl09-0.css">
+  </head>
+
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
