@@ -287,8 +287,10 @@ def login(
         if not access_token:
             raise AuthenticationCancelledError("Token creation failed")
 
-        # [Admin Hook] Launch avatar service on admin login
-        if is_admin_user(user):
+        # [Admin Hook] Launch avatar service on admin login only when VTuber integration is enabled.
+        vtuber_enabled = bool(app_state.settings and getattr(app_state.settings, "vtuber_relay_enabled", 0) == 1)
+        avatar_auto_launch_enabled = bool(app_state.settings and getattr(app_state.settings, "avatar_auto_launch_enabled", True))
+        if is_admin_user(user) and vtuber_enabled and avatar_auto_launch_enabled:
             logger.info(f"[Auth] Admin login detected: {user.username}")
             if background_tasks:
                 background_tasks.add_task(_launch_avatar_on_admin_login, user.username)

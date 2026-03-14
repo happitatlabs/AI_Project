@@ -2,1297 +2,322 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width:device-width, initial-scale=1">
-    <title>Dev Console: State-Centric View | Mellow-Link</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dev Console | Mellow-Link</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: { extend: {} },
-            darkMode: 'class',
-        };
-    </script>
-    <style>
-        :root {
-            --chain-pending: #475569;
-            --chain-active: #3B82F6;
-            --chain-success: #10B981;
-            --chain-warning: #F59E0B;
-            --chain-error: #EF4444;
-        }
-        .chain-node.pending { border-color: var(--chain-pending); color: #64748b; }
-        .chain-node.active { border-color: var(--chain-active); box-shadow: 0 0 0 1px var(--chain-active); }
-        .chain-node.success { border-color: var(--chain-success); color: #34d399; }
-        .chain-node.warning { border-color: var(--chain-warning); color: #fbbf24; }
-        .chain-node.error { border-color: var(--chain-error); color: #f87171; }
-        .chain-node.pulse { animation: pulse 1.5s ease-in-out infinite; }
-        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.85; } }
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 10px; }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .chat-sidebar { width: 320px; min-width: 320px; flex-shrink: 0; display: flex; flex-direction: column; transition: width 0.2s ease, min-width 0.2s ease; overflow: hidden; background: #11111a; border-radius: 1rem; border: 1px solid rgba(255,255,255,0.05); }
-        .chat-sidebar.chat-sidebar--collapsed { width: 48px; min-width: 48px; }
-        .chat-sidebar.chat-sidebar--collapsed .chat-sidebar__body { display: none !important; }
-        .chat-sidebar__strip { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.75rem; cursor: pointer; background: #16161f; border-bottom: 1px solid rgba(255,255,255,0.05); min-height: 120px; writing-mode: vertical-rl; text-orientation: mixed; letter-spacing: 0.05em; color: #64748b; font-size: 10px; font-weight: 600; text-transform: uppercase; }
-        .chat-sidebar__strip:hover { background: #1c1c28; color: #94a3b8; }
-        .chat-sidebar:not(.chat-sidebar--collapsed) .chat-sidebar__strip { writing-mode: horizontal-tb; flex-direction: row; justify-content: space-between; min-height: auto; padding: 0.5rem 0.75rem; cursor: default; }
-        .chat-sidebar:not(.chat-sidebar--collapsed) .chat-sidebar__strip:hover { background: #16161f; }
-        .chat-sidebar:not(.chat-sidebar--collapsed) .chat-sidebar__strip .chat-sidebar__strip-label { writing-mode: horizontal-tb; }
-        .chat-sidebar__body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-        .chat-sidebar__main { min-width: 0; overflow: hidden; overflow-x: hidden; display: flex; flex-direction: column; }
-    </style>
 </head>
-<body class="min-h-screen bg-[#0a0a0f] text-slate-300 font-sans selection:bg-blue-500/30 flex flex-col">
-    <!-- Header -->
-    <header class="flex items-center justify-between mb-4 bg-[#16161f]/50 p-3 rounded-xl border border-white/5 backdrop-blur-md shrink-0 mx-4 mt-4">
-        <div class="flex items-center gap-6">
-            <h1 class="text-xl font-bold bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">
-                Dev Console: Detailed State-Centric View
-            </h1>
-            <div class="flex bg-[#0f0f15] rounded-lg p-1 border border-white/5">
-                <a id="linkDashboard" href="/dev-dashboard" class="px-4 py-1 rounded-md hover:bg-white/5 text-sm transition-colors text-slate-500">Dashboard</a>
-                <button id="tabDev" class="tab-view px-4 py-1 rounded-md bg-blue-600 text-white text-sm font-medium shadow-lg shadow-blue-900/20">Dev</button>
-                <a id="linkOperator" href="/operator-console" class="px-4 py-1 rounded-md hover:bg-white/5 text-sm transition-colors text-slate-500">Operator</a>
-                <a id="linkUser" href="/user-console" class="px-4 py-1 rounded-md hover:bg-white/5 text-sm transition-colors text-slate-500">User</a>
+<body class="min-h-screen bg-[linear-gradient(180deg,_#07111d,_#020617)] text-slate-100">
+    <div class="max-w-7xl mx-auto px-6 py-8">
+        <header class="flex flex-wrap items-center justify-between gap-4 mb-8">
+            <div>
+                <p class="text-xs uppercase tracking-[0.25em] text-fuchsia-300/80">Dev Console</p>
+                <h1 class="text-3xl font-semibold mt-2">특정 run 디버깅 뷰</h1>
+                <p class="text-slate-400 mt-2">raw event log, step trace, prompt/response, tool usage, error detail만 다룹니다. 다중 run 비교는 dev-dashboard에서 처리합니다.</p>
             </div>
-        </div>
-        <div class="flex items-center gap-2">
-            <button id="btnSettings" class="p-2 hover:bg-white/5 rounded-lg transition-colors border border-white/5" title="설정">
-                <svg class="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-            </button>
-        </div>
-    </header>
+            <nav class="flex flex-wrap gap-2 text-sm">
+                <a href="/dev-dashboard" class="px-4 py-2 rounded-full border border-white/10 hover:bg-white/5">Dashboard</a>
+                <a id="linkOperator" href="/operator-console" class="px-4 py-2 rounded-full border border-white/10 hover:bg-white/5">Operator</a>
+                <a id="linkRuns" href="/runs" class="px-4 py-2 rounded-full border border-white/10 hover:bg-white/5">Runs</a>
+            </nav>
+        </header>
 
-    <!-- Connect bar (when no run) -->
-    <div id="connectBar" class="mx-4 mb-4 flex items-center gap-2 flex-wrap">
-        <select id="recentRuns" class="bg-[#16161f] border border-white/10 rounded-lg px-3 py-2 text-sm w-52 focus:ring-1 focus:ring-blue-500 text-slate-300">
-            <option value="">최근 run (20개)</option>
-        </select>
-        <select id="moduleFilter" class="bg-[#16161f] border border-white/10 rounded-lg px-3 py-2 text-sm w-40 focus:ring-1 focus:ring-blue-500 text-slate-300">
-            <option value="">모든 모듈</option>
-        </select>
-        <select id="kindFilter" class="bg-[#16161f] border border-white/10 rounded-lg px-3 py-2 text-sm w-40 focus:ring-1 focus:ring-blue-500 text-slate-300">
-            <option value="">모든 유형</option>
-        </select>
-        <input type="text" id="runIdInput" placeholder="run_id 입력 또는 URL에 ?run_id=..." class="bg-[#16161f] border border-white/10 rounded-lg px-3 py-2 text-sm w-64 focus:ring-1 focus:ring-blue-500 text-slate-300 placeholder-slate-500" />
-        <button id="btnConnect" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium text-white">Connect</button>
-    </div>
+        <section class="rounded-3xl border border-white/10 bg-slate-900/60 p-5 mb-6">
+            <div class="flex flex-wrap gap-3">
+                <select id="recentRuns" class="rounded-xl bg-slate-950/70 border border-white/10 px-4 py-3 text-sm min-w-[240px]">
+                    <option value="">최근 run 선택</option>
+                </select>
+                <input id="runIdInput" type="text" placeholder="run_id 입력" class="flex-1 min-w-[280px] rounded-xl bg-slate-950/70 border border-white/10 px-4 py-3 text-sm">
+                <button id="btnOpen" class="px-5 py-3 rounded-xl bg-fuchsia-400 text-slate-950 font-medium hover:bg-fuchsia-300">Open</button>
+            </div>
+        </section>
 
-    <div id="noRun" class="mx-4 text-slate-500 text-center py-8 text-sm rounded-xl border border-white/5 bg-[#11111a]">run_id를 입력하고 Connect를 누르거나, URL에 ?run_id=... 로 열어주세요.</div>
-
-    <!-- Main content (visible when connected) -->
-    <div id="dashboardView" class="hidden flex flex-col flex-1 min-h-0 px-4 pb-14">
-        <!-- Status Bar -->
-        <div class="flex flex-wrap items-center gap-4 mb-4 text-xs font-mono shrink-0">
-            <div class="flex items-center gap-2 px-3 py-1.5 bg-[#16161f] rounded-lg border border-white/5">
-                <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-                <span class="text-slate-500 uppercase tracking-wider">Run ID:</span>
-                <span id="statusRunId" class="text-blue-400">-</span>
-            </div>
-            <div id="statusBadge" class="flex items-center gap-2 px-3 py-1.5 bg-[#251b14] border border-orange-500/20 rounded-lg text-orange-400 animate-pulse">
-                <div class="w-1.5 h-1.5 rounded-full bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.6)]"></div>
-                <span id="statusLabel">IDLE</span>
-            </div>
-            <div class="px-3 py-1.5 bg-[#16161f] rounded-lg border border-white/5">
-                Turn <span id="statusStep" class="text-white">0</span>/<span id="statusTotal">0</span>
-            </div>
-            <div class="px-3 py-1.5 bg-[#16161f] rounded-lg border border-white/5">
-                Mode: <span id="statusMode" class="text-blue-400">-</span>
-            </div>
-            <div class="flex items-center gap-2 px-3 py-1.5 bg-[#16161f] rounded-lg border border-white/5 text-slate-400">
-                <span>Module:</span>
-                <span id="statusModuleId" class="inline-flex items-center rounded-full bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-300 border border-sky-500/20">-</span>
-                <span id="statusRunKind" class="inline-flex items-center rounded-full bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium text-violet-300 border border-violet-500/20">-</span>
-            </div>
-            <div id="statusBlockWrap" class="relative hidden">
-                <button type="button" id="statusBlockBadge" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium cursor-pointer hover:opacity-90 transition-opacity" title="">
-                    <svg id="statusBlockIcon" class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-                    <span id="statusBlockLabel">BLOCK</span>
-                    <span id="statusBlockMsg" class="max-w-[140px] truncate text-[10px] opacity-90"></span>
-                </button>
-                <div id="statusBlockPopover" class="hidden absolute left-0 top-full mt-1 z-50 min-w-[220px] py-2 px-3 bg-[#1a1a24] border border-white/10 rounded-lg shadow-xl text-[11px] font-mono">
-                    <div id="statusBlockSince" class="text-slate-500 mb-1 hidden"></div>
-                    <div class="text-slate-500 mb-1">Related</div>
-                    <div id="statusBlockRelated" class="space-y-0.5 text-slate-300 mb-2"></div>
-                    <div id="statusBlockActions" class="flex flex-wrap gap-1"></div>
-                </div>
-            </div>
-            <div id="statusEvHc" class="flex items-center gap-1 px-3 py-1.5 bg-green-500/10 border border-green-500/20 rounded-lg text-green-400 hidden">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
-                <span>EV_HC ON</span>
-            </div>
+        <div id="emptyState" class="rounded-3xl border border-dashed border-white/10 px-6 py-16 text-center text-slate-500">
+            디버깅할 run을 선택하거나 입력하세요.
         </div>
 
-        <!-- Console Main: Chat Sidebar + Main Content (same pattern as Operator/User; key: mellow_dev_chat_collapsed) -->
-        <div class="console-main-wrap flex flex-1 min-h-0 overflow-hidden gap-4">
-            <aside id="chatSidebar" class="chat-sidebar chat-sidebar--collapsed" data-collapsed="true" title="Chat / 상담">
-                <div class="chat-sidebar__strip" id="chatSidebarStrip" role="button" tabindex="0" title="Chat / 상담" aria-label="Chat 패널 열기">
-                    <span id="chatSidebarBadge" class="hidden" aria-hidden="true"></span>
-                    <svg class="w-5 h-5 text-slate-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
-                    <span class="chat-sidebar__strip-label">Chat</span>
-                    <button type="button" id="chatSidebarToggle" class="shrink-0 p-1 rounded hover:bg-white/10 text-slate-500" aria-label="Chat 패널 접기/펼치기" aria-expanded="false">&#8250;</button>
-                </div>
-                <div class="chat-sidebar__body flex flex-col flex-1 min-h-0 overflow-hidden rounded-2xl">
-                    <!-- Activity Timeline (collapsible, default collapsed) -->
-                    <div class="flex-1 flex flex-col min-h-0 overflow-hidden border-b border-white/5">
-                        <button type="button" id="activityTimelineToggle" class="w-full px-4 py-2.5 flex items-center justify-between bg-[#16161f]/20 hover:bg-[#16161f]/40 transition-colors text-left shrink-0 border-b border-white/5">
-                            <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-2">
-                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                                Activity Timeline
-                            </h2>
-                            <span id="activityTimelineChevron" class="text-slate-500 transform transition-transform">▼</span>
-                        </button>
-                        <div id="activityTimelineBody" class="hidden flex-1 overflow-y-auto p-3 space-y-1.5 custom-scrollbar min-h-0" style="max-height: 200px;">
-                            <div id="activityTimeline" class="space-y-1.5">
-                                <div id="activityPlaceholder" class="text-xs text-slate-500 text-center py-6">Run 연결 후 활동 요약이 표시됩니다.</div>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- Plan card: 계획 카드 + 진행하기 -->
-                    <div id="planCardContainer" class="hidden shrink-0 p-3 border-t border-white/5"></div>
-                    <!-- Run Launcher: sticky bottom, min height -->
-                    <div class="shrink-0 sticky bottom-0 left-0 right-0 z-20 bg-[#11111a] border-t border-white/10 pt-3 pb-3 px-3 mt-auto">
-                        <div class="flex flex-col gap-2 min-h-[120px]">
-                            <textarea id="chatInput" rows="3" autocomplete="off" placeholder="테스트 프롬프트 / 명령 입력... (Ctrl+Enter 실행, Shift+Enter 줄바꿈)" class="w-full min-h-[72px] max-h-[160px] resize-y bg-[#16161f] border border-white/5 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500/50 text-slate-300 placeholder-slate-500 font-sans" tabindex="0"></textarea>
-                            <div class="flex items-center gap-2">
-                                <button type="button" id="chatSendBtn" class="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors" title="Ctrl+Enter">
-                                    <span id="chatSendBtnIcon" class="inline-block w-4 h-4"><svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></span>
-                                    <span id="chatSendBtnSpinner" class="hidden inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-                                    <span>Run</span>
-                                </button>
-                                <div class="flex gap-2 overflow-x-auto no-scrollbar">
-                                    <button type="button" class="cmd-btn whitespace-nowrap px-2 py-1 bg-[#16161f] border border-white/5 rounded-md text-[10px] font-mono text-slate-500 hover:text-slate-300 hover:border-white/10 transition-colors">/pause</button>
-                                    <button type="button" class="cmd-btn whitespace-nowrap px-2 py-1 bg-[#16161f] border border-white/5 rounded-md text-[10px] font-mono text-slate-500 hover:text-slate-300 hover:border-white/10 transition-colors">/retry</button>
-                                    <button type="button" class="cmd-btn whitespace-nowrap px-2 py-1 bg-amber-500/10 border border-amber-500/20 rounded-md text-[10px] font-mono text-amber-400 hover:bg-amber-500/20 transition-colors" title="오래된 run이 진행 지연으로 남아 있을 때 강제 종료">/force_finish</button>
-                                    <button type="button" class="cmd-btn whitespace-nowrap px-2 py-1 bg-[#16161f] border border-white/5 rounded-md text-[10px] font-mono text-slate-500 hover:text-slate-300 hover:border-white/10 transition-colors">/force_fast</button>
-                                    <button type="button" class="cmd-btn whitespace-nowrap px-2 py-1 bg-[#16161f] border border-white/5 rounded-md text-[10px] font-mono text-slate-500 hover:text-slate-300 hover:border-white/10 transition-colors">/create_tool</button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </aside>
-            <main class="chat-sidebar__main flex-1 min-w-0 overflow-hidden">
-        <div class="grid grid-cols-12 gap-4 flex-1 min-h-0 overflow-hidden">
-            <!-- Center: State Chain + Logs -->
-            <div class="col-span-6 flex flex-col gap-4 min-h-0">
-                <!-- State Chain -->
-                <section class="bg-[#11111a] rounded-2xl border border-white/5 p-6 flex-[1.4] relative overflow-hidden flex flex-col shadow-2xl min-h-0">
-                    <div class="flex items-center justify-between mb-4 shrink-0">
-                        <h2 class="text-sm font-semibold flex items-center gap-2">
-                            <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-                            State Chain
-                        </h2>
-                    </div>
-                    <div id="stateChainContainer" class="flex-1 flex flex-wrap items-center gap-2 content-start overflow-y-auto custom-scrollbar min-h-0">
-                        <!-- filled by JS -->
-                    </div>
-                </section>
-
-                <!-- Tabbed Logs -->
-                <section class="bg-[#11111a] rounded-2xl border border-white/5 flex-1 overflow-hidden flex flex-col shadow-2xl min-h-0">
-                    <div class="px-4 pt-3 border-b border-white/5 flex items-center justify-between shrink-0 bg-[#16161f]/30">
-                        <div class="flex gap-6">
-                            <button type="button" class="log-tab pb-3 text-xs font-medium transition-all relative text-white border-b-2 border-blue-500" data-tab="logs">Logs</button>
-                            <button type="button" class="log-tab pb-3 text-xs font-medium transition-all text-slate-500 hover:text-slate-300" data-tab="events">Events</button>
-                            <button type="button" class="log-tab pb-3 text-xs font-medium transition-all text-slate-500 hover:text-slate-300" data-tab="metrics">Metrics</button>
-                            <button type="button" class="log-tab pb-3 text-xs font-medium transition-all text-slate-500 hover:text-slate-300" data-tab="toolcalls">Tool Calls</button>
-                            <button type="button" class="log-tab pb-3 text-xs font-medium transition-all text-slate-500 hover:text-slate-300" data-tab="raw">Raw Data</button>
-                        </div>
-                    </div>
-                    <div id="logsPane" class="log-pane flex-1 p-4 font-mono text-[11px] overflow-y-auto custom-scrollbar bg-[#0d0d14] min-h-0">
-                        <div id="logsContent" class="space-y-2"></div>
-                    </div>
-                    <div id="eventsPane" class="log-pane hidden flex-1 p-4 font-mono text-[11px] overflow-y-auto custom-scrollbar bg-[#0d0d14] min-h-0">
-                        <table class="w-full text-left text-[11px]"><thead><tr class="text-slate-500"><th class="pb-2 pr-4">TIME</th><th class="pb-2 pr-4">EVENT</th><th class="pb-2">DETAIL</th></tr></thead><tbody id="eventsBody"></tbody></table>
-                    </div>
-                    <div id="metricsPane" class="log-pane hidden flex-1 p-4 overflow-y-auto custom-scrollbar bg-[#0d0d14] min-h-0">
-                        <div id="metricsContent" class="text-xs text-slate-400">메트릭 데이터가 없습니다.</div>
-                    </div>
-                    <div id="toolcallsPane" class="log-pane hidden flex-1 p-4 overflow-y-auto custom-scrollbar bg-[#0d0d14] min-h-0">
-                        <div id="toolcallsContent" class="text-xs text-slate-400">도구 호출 목록이 여기 표시됩니다.</div>
-                    </div>
-                    <div id="rawPane" class="log-pane hidden flex-1 p-4 overflow-y-auto custom-scrollbar bg-[#0d0d14] min-h-0">
-                        <pre id="rawContent" class="text-[11px] text-slate-400 whitespace-pre-wrap">Run을 선택하세요.</pre>
-                    </div>
-                </section>
-            </div>
-
-            <!-- Right: Task Step Details + Raw Data -->
-            <section class="col-span-3 flex flex-col gap-4 min-h-0">
-                <div class="bg-[#11111a] rounded-2xl border border-white/5 p-4 flex-none shadow-2xl overflow-hidden">
-                    <h2 class="text-sm font-semibold mb-4 text-slate-500 flex items-center gap-2 uppercase tracking-tight">Task Step Details</h2>
-                    <div id="stepDetailsCard" class="bg-[#1c1c28] rounded-xl p-4 border border-white/5 relative overflow-hidden">
-                        <div class="text-sm text-slate-500">Run 연결 후 현재 스텝 정보가 표시됩니다.</div>
-                    </div>
-                </div>
-                <div class="bg-[#11111a] rounded-2xl border border-white/5 p-4 flex-1 overflow-hidden flex flex-col shadow-2xl min-h-0">
-                    <div class="flex items-center justify-between mb-4 shrink-0">
-                        <h2 class="text-sm font-semibold text-slate-500 uppercase tracking-tight">Raw Data</h2>
-                    </div>
-                    <div class="flex justify-between border-b border-white/5 mb-4 pb-2 shrink-0">
-                        <button type="button" class="raw-sub-tab text-[10px] font-medium text-slate-300 border-b border-blue-500 pb-1" data-sub="chat">Chat History</button>
-                        <button type="button" class="raw-sub-tab text-[10px] font-medium text-slate-600 hover:text-slate-400 pb-1" data-sub="routing">Routing Log</button>
-                        <button type="button" class="raw-sub-tab text-[10px] font-medium text-slate-600 hover:text-slate-400 pb-1" data-sub="prompt">Prompt Stats</button>
-                    </div>
-                    <div id="rawChatBlock" class="raw-sub-block space-y-4 flex-1 overflow-y-auto custom-scrollbar pr-1 min-h-0">
+        <main id="consoleView" class="hidden space-y-6">
+            <section class="grid xl:grid-cols-[0.95fr_1.05fr] gap-6">
+                <div class="rounded-3xl border border-white/10 bg-slate-900/60 p-6">
+                    <div class="flex items-start justify-between gap-4">
                         <div>
-                            <div class="flex justify-between items-end mb-2">
-                                <span class="text-[11px] text-slate-500">Tokens (output)</span>
-                                <span class="text-sm font-mono text-white"><span id="tokenCurrent" class="text-blue-500 font-bold">0</span> <span class="text-[10px] text-slate-600">/ <span id="tokenMax">-</span></span></span>
-                            </div>
-                            <div class="h-16 rounded-lg overflow-hidden bg-[#0d0d14] border border-white/5">
-                                <svg class="w-full h-full" viewBox="0 0 100 40" preserveAspectRatio="none">
-                                    <defs><linearGradient id="grad1" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" style="stop-color:rgb(59,130,246);stop-opacity:0.3"/><stop offset="100%" style="stop-color:rgb(59,130,246);stop-opacity:0"/></linearGradient></defs>
-                                    <path id="tokenChartPath" d="M0,40 L0,30 L25,25 L50,20 L75,18 L100,15 L100,40 Z" fill="url(#grad1)"/>
-                                    <path id="tokenChartLine" d="M0,30 L25,25 L50,20 L75,18 L100,15" stroke="#3b82f6" fill="none" stroke-width="1"/>
-                                </svg>
-                            </div>
+                            <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Run</p>
+                            <h2 id="runIdLabel" class="mt-2 font-mono text-lg text-fuchsia-300">-</h2>
+                            <p id="runMeta" class="mt-2 text-sm text-slate-400">-</p>
                         </div>
-                        <div>
-                            <div class="flex justify-between items-end mb-2">
-                                <span class="text-[11px] text-slate-500">Cost (USD)</span>
-                                <span class="text-sm font-mono text-white"><span id="costCurrent" class="font-bold">$0</span> <span class="text-[10px] text-slate-600">/ <span id="costMax">-</span></span></span>
-                            </div>
-                            <div class="h-16 rounded-lg overflow-hidden bg-[#0d0d14] border border-white/5">
-                                <svg class="w-full h-full" viewBox="0 0 100 40" preserveAspectRatio="none">
-                                    <defs><linearGradient id="grad2" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" style="stop-color:rgb(139,92,246);stop-opacity:0.3"/><stop offset="100%" style="stop-color:rgb(139,92,246);stop-opacity:0"/></linearGradient></defs>
-                                    <path id="costChartPath" d="M0,40 L0,35 L100,20 L100,40 Z" fill="url(#grad2)"/>
-                                    <path id="costChartLine" d="M0,35 L100,20" stroke="#8b5cf6" fill="none" stroke-width="1"/>
-                                </svg>
-                            </div>
+                        <span id="statusBadge" class="px-3 py-1 rounded-full text-xs border border-white/10 bg-slate-800 text-slate-300">idle</span>
+                    </div>
+                    <div class="grid sm:grid-cols-2 gap-4 mt-5 text-sm">
+                        <div class="rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-3">
+                            <div class="text-slate-500 text-xs uppercase tracking-[0.15em]">Module</div>
+                            <div id="moduleLabel" class="mt-2 text-slate-200">-</div>
+                        </div>
+                        <div class="rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-3">
+                            <div class="text-slate-500 text-xs uppercase tracking-[0.15em]">Run Kind</div>
+                            <div id="runKindLabel" class="mt-2 text-slate-200">-</div>
+                        </div>
+                        <div class="rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-3">
+                            <div class="text-slate-500 text-xs uppercase tracking-[0.15em]">Selected Mode</div>
+                            <div id="modeLabel" class="mt-2 text-slate-200">-</div>
+                        </div>
+                        <div class="rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-3">
+                            <div class="text-slate-500 text-xs uppercase tracking-[0.15em]">Health</div>
+                            <div id="healthLabel" class="mt-2 text-slate-200">-</div>
                         </div>
                     </div>
-                    <div id="rawRoutingBlock" class="hidden flex-1 overflow-y-auto custom-scrollbar pr-1 min-h-0 raw-sub-block">
-                        <pre class="text-[11px] text-slate-500">Routing log (준비 중)</pre>
-                    </div>
-                    <div id="rawPromptStatsBlock" class="hidden flex-1 overflow-y-auto custom-scrollbar pr-1 min-h-0 raw-sub-block">
-                        <div id="rawPromptStatsContent" class="text-[11px] text-slate-400">Prompt Stats 데이터가 없습니다.</div>
+                </div>
+
+                <div class="rounded-3xl border border-white/10 bg-slate-900/60 p-6">
+                    <h2 class="text-lg font-medium mb-4">Error Detail</h2>
+                    <div id="errorBox" class="rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-4 text-sm text-slate-300 whitespace-pre-wrap break-words min-h-[13rem]">
+                        에러가 없습니다.
                     </div>
                 </div>
             </section>
-        </div>
-            </main>
-        </div>
-    </div>
 
-    <!-- Footer -->
-    <footer class="fixed bottom-0 left-0 right-0 h-10 bg-[#0d0d14]/80 backdrop-blur-xl border-t border-white/5 flex items-center px-4 gap-6 text-[11px] font-medium text-slate-500 z-50">
-        <div class="flex items-center gap-2 text-blue-400 border-r border-white/10 pr-4">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-            <span>Logs</span>
-        </div>
-        <span id="footerStatus" class="text-slate-500">연결 대기</span>
-        <div class="ml-auto flex items-center gap-4 text-[10px] font-mono text-slate-600">
-            <span id="footerUptime">UPTIME: -</span>
-            <span id="footerSystem">SYSTEM: -</span>
-        </div>
-    </footer>
+            <section class="grid xl:grid-cols-2 gap-6">
+                <div class="rounded-3xl border border-white/10 bg-slate-900/60 p-6">
+                    <h2 class="text-lg font-medium mb-4">Step Trace</h2>
+                    <div id="stepTrace" class="space-y-3">
+                        <div class="text-sm text-slate-500">step trace가 없습니다.</div>
+                    </div>
+                </div>
+
+                <div class="rounded-3xl border border-white/10 bg-slate-900/60 p-6">
+                    <h2 class="text-lg font-medium mb-4">Tool Usage</h2>
+                    <div id="toolUsage" class="space-y-3">
+                        <div class="text-sm text-slate-500">tool usage가 없습니다.</div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="rounded-3xl border border-white/10 bg-slate-900/60 p-6">
+                <div class="flex flex-wrap gap-2 mb-5">
+                    <button data-tab="events" class="tab-btn px-4 py-2 rounded-full border border-white/10 bg-white/5 text-sm">Raw Events</button>
+                    <button data-tab="prompts" class="tab-btn px-4 py-2 rounded-full border border-white/10 text-sm">Prompt / Response</button>
+                    <button data-tab="snapshot" class="tab-btn px-4 py-2 rounded-full border border-white/10 text-sm">Raw Snapshot</button>
+                </div>
+                <div id="tabEvents" class="tab-panel">
+                    <pre id="rawEvents" class="rounded-2xl border border-white/10 bg-slate-950/50 p-4 text-xs leading-6 text-slate-300 overflow-x-auto max-h-[34rem] overflow-y-auto">[]</pre>
+                </div>
+                <div id="tabPrompts" class="tab-panel hidden">
+                    <div id="promptResponseList" class="space-y-4">
+                        <div class="text-sm text-slate-500">prompt/response 이벤트가 없습니다.</div>
+                    </div>
+                </div>
+                <div id="tabSnapshot" class="tab-panel hidden">
+                    <pre id="rawSnapshot" class="rounded-2xl border border-white/10 bg-slate-950/50 p-4 text-xs leading-6 text-slate-300 overflow-x-auto max-h-[34rem] overflow-y-auto">{}</pre>
+                </div>
+            </section>
+        </main>
+    </div>
 
     <script>
         const API = window.location.origin;
-        const __nativeFetch = window.fetch.bind(window);
-        window.fetch = function (input, init) {
-            init = init || {};
-            const headers = new Headers(init.headers || {});
-            const token = localStorage.getItem('authToken');
-            if (token && !headers.has('Authorization')) headers.set('Authorization', 'Bearer ' + token);
-            init.headers = headers;
-            return __nativeFetch(input, init);
-        };
-        const NODES = ['MODE', 'PLAN', 'TOOL', 'SANITIZER', 'POLICY', 'OUTPUT', 'KPI'];
-        let state = {
-            status: 'idle',
-            mode: '',
-            moduleId: 'engine',
-            runKind: 'generic',
-            chainNodes: Object.fromEntries(NODES.map(n => [n, 'pending'])),
-            todos: [],
-            todos_view: [],
-            progress: { done: 0, total: 0 },
-            currentTodo: null,
-            block: null,
-            activity: [],
-            decision: null,
-            health: null,
-            events: [],
-            runId: null,
-            lastUpdate: null,
-            launcherUserInput: '',
-        };
-        let recentRunsCache = [];
-        let eventSource = null;
-        let lastEventId = null;
-        let lastProcessedEventId = 0;
-        let reconnectTimeoutId = null;
-        const SSE_RECONNECT_DELAY_MS = 3000;
-        var launcherRunning = false;
+        const state = { runId: null, snapshot: null, raw: null, events: [] };
 
-        function closeSSE() {
-            if (reconnectTimeoutId) { clearTimeout(reconnectTimeoutId); reconnectTimeoutId = null; }
-            if (eventSource) { eventSource.close(); eventSource = null; }
-        }
-        window.addEventListener('beforeunload', closeSSE);
-
-        function updateViewLinks() {
-            const runId = state.runId || new URLSearchParams(window.location.search).get('run_id') || '';
-            const q = runId ? '?run_id=' + encodeURIComponent(runId) : '';
-            const dash = document.getElementById('linkDashboard');
-            const op = document.getElementById('linkOperator');
-            const us = document.getElementById('linkUser');
-            if (dash) dash.href = '/dev-dashboard' + q;
-            if (op) op.href = '/operator-console' + q;
-            if (us) us.href = '/user-console' + q;
+        function authHeaders() {
+            const token = localStorage.getItem('authToken') || localStorage.getItem('auth_token');
+            const headers = { 'Accept': 'application/json' };
+            if (token) headers['Authorization'] = 'Bearer ' + token;
+            return headers;
         }
 
-        function pushActivity(list, item) {
-            const next = [item, ...list];
-            return next.slice(0, 24);
+        function statusTone(status) {
+            if (status === 'completed') return 'bg-emerald-500/10 border-emerald-400/20 text-emerald-300';
+            if (status === 'running') return 'bg-fuchsia-500/10 border-fuchsia-400/20 text-fuchsia-300';
+            if (status === 'failed') return 'bg-rose-500/10 border-rose-400/20 text-rose-300';
+            return 'bg-slate-800 border-white/10 text-slate-300';
         }
 
-        function reduceEvent(ev, s) {
-            const p = ev.payload || {};
-            s.lastUpdate = ev.ts != null ? ev.ts : (Date.now() / 1000);
-            switch (ev.type) {
-                case 'run_started':
-                    s.status = 'running';
-                    s.mode = p.mode || '';
-                    if (p.user_input) s.launcherUserInput = p.user_input;
-                    s.chainNodes = { ...s.chainNodes, MODE: 'active' };
-                    s.activity = pushActivity(s.activity, { ts: ev.ts, text: 'Run started', type: 'info' });
-                    break;
-                case 'mode_decision':
-                    s.mode = p.selected_mode || s.mode;
-                    s.chainNodes = { ...s.chainNodes, MODE: 'success' };
-                    s.decision = p;
-                    s.activity = pushActivity(s.activity, { ts: ev.ts, text: 'Mode: ' + (p.selected_mode || '') + (p.escalated ? ' (escalated)' : ''), type: 'info' });
-                    break;
-                case 'plan_created':
-                    s.chainNodes = { ...s.chainNodes, PLAN: 'success' };
-                    s.todos = p.todos || [];
-                    s.progress = { done: 0, total: (p.todos || []).length };
-                    s.activity = pushActivity(s.activity, { ts: ev.ts, text: 'Plan: ' + (p.todos || []).length + ' steps', type: 'info' });
-                    break;
-                case 'todo_started':
-                    s.currentTodo = p.todo_id || p.title;
-                    s.activity = pushActivity(s.activity, { ts: ev.ts, text: 'Todo: ' + (p.title || p.todo_id), type: 'info' });
-                    break;
-                case 'todo_done':
-                    const doneCount = (s.todos.filter(t => (t.status || '').toString().toLowerCase() === 'completed').length) + 1;
-                    s.progress = { ...s.progress, done: Math.min(doneCount, s.progress.total || 1) };
-                    s.activity = pushActivity(s.activity, { ts: ev.ts, text: 'Done: ' + (p.title || p.todo_id), type: 'success' });
-                    break;
-                case 'tool_started':
-                    s.chainNodes = { ...s.chainNodes, TOOL: 'active' };
-                    s.activity = pushActivity(s.activity, { ts: ev.ts, text: 'Tool: ' + (p.tool_name || ''), type: 'info' });
-                    break;
-                case 'tool_done':
-                    s.chainNodes = { ...s.chainNodes, TOOL: (p.success !== false ? 'success' : 'error') };
-                    s.activity = pushActivity(s.activity, { ts: ev.ts, text: (p.tool_name || '') + ' ' + (p.success ? 'OK' : 'ERR') + (p.duration_ms != null ? ' ' + Math.round(p.duration_ms) + 'ms' : ''), type: p.success ? 'success' : 'error' });
-                    break;
-                case 'sanitizer_result':
-                    s.chainNodes = { ...s.chainNodes, SANITIZER: (String(p.kind || '').indexOf('blocked') >= 0 || String(p.kind || '').indexOf('removed') >= 0) ? 'warning' : 'success' };
-                    break;
-                case 'run_finished':
-                    s.status = p.success !== false ? 'finished' : 'error';
-                    s.block = null;
-                    s.chainNodes = { ...s.chainNodes, POLICY: 'success', OUTPUT: 'success', KPI: (p.success !== false ? 'success' : 'error') };
-                    s.activity = pushActivity(s.activity, { ts: ev.ts, text: 'Run ' + (p.success !== false ? 'finished' : 'failed'), type: p.success !== false ? 'success' : 'error' });
-                    var finalStatus = p.success !== false ? 'skipped' : 'aborted';
-                    var autoCloseDetail = 'auto-closed on run_finished';
-                    var totalTodos = (s.todos && s.todos.length) ? s.todos.length : (s.progress && s.progress.total) || 0;
-                    if (s.todos && s.todos.length) {
-                        s.todos = s.todos.map(function (t) {
-                            var st = (t.status || '').toString().toLowerCase();
-                            if (st === 'completed') return t;
-                            return Object.assign({}, t, { status: finalStatus, detail: autoCloseDetail });
-                        });
-                    }
-                    if (s.todos_view && s.todos_view.length) {
-                        s.todos_view = s.todos_view.map(function (v) {
-                            if ((v.status || '').toLowerCase() === 'completed') return v;
-                            return Object.assign({}, v, { status: finalStatus, detail: autoCloseDetail });
-                        });
-                    }
-                    s.progress = { done: totalTodos, total: totalTodos };
-                    s.currentTodo = null;
-                    break;
-                case 'error':
-                    s.status = 'error';
-                    s.block = null;
-                    s.chainNodes = { ...s.chainNodes, KPI: 'error' };
-                    s.activity = pushActivity(s.activity, { ts: ev.ts, text: 'Error: ' + (p.message || '').slice(0, 80), type: 'error' });
-                    break;
-                default:
-                    break;
-            }
-            return s;
+        function escapeHtml(value) {
+            return String(value || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
         }
 
-        function applyDevSnapshot(dev) {
-            if (!dev) return;
-            state.health = dev.health || null;
-            state.decision = dev.decision || null;
-            if (dev.todos && dev.todos.length) state.todos = dev.todos;
-            state.events = dev.events || [];
-            let s = state;
-            state.events.forEach(ev => { s = reduceEvent(ev, s); });
-            state = s;
-            if (dev.status === 'completed') { state.status = 'finished'; state.block = null; }
-            if (dev.status === 'failed') { state.status = 'error'; state.block = null; }
-            if (state.status === 'finished' || state.status === 'error') {
-                var total = (state.todos && state.todos.length) ? state.todos.length : (state.progress && state.progress.total) || 0;
-                var autoCloseDetail = 'auto-closed on run_finished';
-                if (state.todos && state.todos.length) {
-                    var finalStatus = state.status === 'finished' ? 'skipped' : 'aborted';
-                    state.todos = state.todos.map(function (t) {
-                        if ((t.status || '').toString().toLowerCase() === 'completed') return t;
-                        return Object.assign({}, t, { status: finalStatus, detail: autoCloseDetail });
-                    });
+        function formatTs(value) {
+            if (value == null) return '-';
+            if (typeof value === 'number') return new Date(value * 1000).toLocaleString();
+            const date = new Date(value);
+            return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+        }
+
+        function summarizeHealth(health) {
+            if (!health || typeof health !== 'object') return '-';
+            const parts = [];
+            if (health.status) parts.push('status ' + health.status);
+            if (health.score != null) parts.push('score ' + health.score);
+            if (health.last_error) parts.push('last_error');
+            return parts.length ? parts.join(' / ') : '-';
+        }
+
+        function findError(events, snapshot) {
+            const reversed = events.slice().reverse();
+            for (const ev of reversed) {
+                const payload = ev.payload || {};
+                if (ev.type === 'error') return payload.message || JSON.stringify(payload, null, 2);
+                if (ev.type === 'run_finished' && payload.success === false) {
+                    return payload.summary || payload.finish_reason || 'run finished with failure';
                 }
-                if (state.todos_view && state.todos_view.length) {
-                    var fs = state.status === 'finished' ? 'skipped' : 'aborted';
-                    state.todos_view = state.todos_view.map(function (v) {
-                        if ((v.status || '').toLowerCase() === 'completed') return v;
-                        return Object.assign({}, v, { status: fs, detail: autoCloseDetail });
-                    });
+            }
+            if (snapshot && snapshot.health && snapshot.health.last_error) return String(snapshot.health.last_error);
+            return '에러가 없습니다.';
+        }
+
+        function renderStepTrace(events) {
+            const items = [];
+            for (const ev of events) {
+                const payload = ev.payload || {};
+                if (ev.type === 'todo_started' || ev.type === 'todo_done' || ev.type === 'plan_created') {
+                    const label = payload.title || payload.todo_id || payload.step || ev.type;
+                    const tone = ev.type === 'todo_done' ? 'text-emerald-300' : 'text-slate-300';
+                    items.push(
+                        '<div class="rounded-2xl border border-white/8 bg-slate-950/40 px-4 py-3">' +
+                        '<div class="text-xs text-slate-500 mb-1">' + escapeHtml(formatTs(ev.ts)) + '</div>' +
+                        '<div class="text-sm ' + tone + '">' + escapeHtml(ev.type + ' · ' + label) + '</div>' +
+                        '</div>'
+                    );
                 }
-                state.progress = { done: total, total: total };
-                state.currentTodo = null;
             }
-            if (state.events.length) {
-                const last = state.events[state.events.length - 1];
-                if (last.id != null) { lastEventId = last.id; lastProcessedEventId = last.id; }
+            document.getElementById('stepTrace').innerHTML = items.length
+                ? items.join('')
+                : '<div class="text-sm text-slate-500">step trace가 없습니다.</div>';
+        }
+
+        function renderToolUsage(events) {
+            const items = [];
+            for (const ev of events) {
+                const payload = ev.payload || {};
+                if (ev.type === 'tool_started' || ev.type === 'tool_done' || ev.type === 'operator_action') {
+                    const label = payload.tool || payload.action || payload.name || ev.type;
+                    const detail = payload.args ? JSON.stringify(payload.args) : (payload.result_summary || payload.message || '');
+                    items.push(
+                        '<div class="rounded-2xl border border-white/8 bg-slate-950/40 px-4 py-3">' +
+                        '<div class="text-xs text-slate-500 mb-1">' + escapeHtml(formatTs(ev.ts)) + '</div>' +
+                        '<div class="text-sm text-slate-200">' + escapeHtml(ev.type + ' · ' + label) + '</div>' +
+                        '<div class="text-xs text-slate-500 mt-2 break-words">' + escapeHtml(detail || '-') + '</div>' +
+                        '</div>'
+                    );
+                }
             }
+            document.getElementById('toolUsage').innerHTML = items.length
+                ? items.join('')
+                : '<div class="text-sm text-slate-500">tool usage가 없습니다.</div>';
         }
 
-        function loadRunSnapshot(runId) {
-            if (!runId) return Promise.resolve(null);
-            return fetch(API + '/runs/' + encodeURIComponent(runId))
-                .then(function (r) { return r.ok ? r.json() : null; })
-                .then(function (snap) {
-                    if (!snap) return null;
-                    state.moduleId = snap.module_id || state.moduleId || 'engine';
-                    state.runKind = snap.run_kind || state.runKind || 'generic';
-                    state.todos = snap.todos || [];
-                    state.todos_view = snap.todos_view || [];
-                    var st = (snap.status || '').toLowerCase();
-                    if (st === 'completed') {
-                        state.status = 'finished';
-                        state.block = null;
-                    } else if (st === 'failed') {
-                        state.status = 'error';
-                        state.block = null;
-                    } else if (st === 'running') {
-                        state.status = 'running';
-                        state.block = snap.block || null;
-                    } else {
-                        state.block = snap.block || null;
-                    }
-                    if (st === 'completed' || st === 'failed') {
-                        var total = (state.todos_view.length > 0) ? state.todos_view.length : state.todos.length;
-                        state.progress = { done: total, total: total };
-                        state.currentTodo = null;
-                    } else if (state.todos_view.length > 0) {
-                        var done = state.todos_view.filter(function (v) { return (v.status || '').toLowerCase() === 'completed'; }).length;
-                        state.progress = { done: done, total: state.todos_view.length };
-                    } else if (state.todos.length) {
-                        var doneCount = state.todos.filter(function (t) { return (t.status || '').toString().toLowerCase() === 'completed'; }).length;
-                        state.progress = { done: doneCount, total: state.todos.length };
-                    }
-                    state.currentTodo = (st === 'running') ? (snap.current_todo_id || state.currentTodo) : null;
-                    if (snap.last_event_id != null) { lastEventId = snap.last_event_id; lastProcessedEventId = snap.last_event_id; }
-                    renderAll();
-                    return snap;
-                })
-                .catch(function (e) { console.warn('loadRunSnapshot failed', e); return null; });
+        function renderPromptResponse(events) {
+            const items = [];
+            for (const ev of events) {
+                const payload = ev.payload || {};
+                const textParts = [];
+                if (payload.prompt) textParts.push('<div><div class="text-xs uppercase tracking-[0.15em] text-slate-500 mb-2">Prompt</div><pre class="rounded-xl border border-white/10 bg-slate-950/40 p-3 text-xs leading-6 overflow-x-auto whitespace-pre-wrap break-words">' + escapeHtml(payload.prompt) + '</pre></div>');
+                if (payload.response) textParts.push('<div><div class="text-xs uppercase tracking-[0.15em] text-slate-500 mb-2">Response</div><pre class="rounded-xl border border-white/10 bg-slate-950/40 p-3 text-xs leading-6 overflow-x-auto whitespace-pre-wrap break-words">' + escapeHtml(payload.response) + '</pre></div>');
+                if (payload.messages) textParts.push('<div><div class="text-xs uppercase tracking-[0.15em] text-slate-500 mb-2">Messages</div><pre class="rounded-xl border border-white/10 bg-slate-950/40 p-3 text-xs leading-6 overflow-x-auto whitespace-pre-wrap break-words">' + escapeHtml(JSON.stringify(payload.messages, null, 2)) + '</pre></div>');
+                if (payload.tool_call) textParts.push('<div><div class="text-xs uppercase tracking-[0.15em] text-slate-500 mb-2">Tool Call</div><pre class="rounded-xl border border-white/10 bg-slate-950/40 p-3 text-xs leading-6 overflow-x-auto whitespace-pre-wrap break-words">' + escapeHtml(JSON.stringify(payload.tool_call, null, 2)) + '</pre></div>');
+                if (textParts.length) {
+                    items.push(
+                        '<article class="rounded-2xl border border-white/8 bg-slate-950/30 p-4">' +
+                        '<div class="text-xs text-slate-500 mb-3">' + escapeHtml(ev.type + ' · ' + formatTs(ev.ts)) + '</div>' +
+                        textParts.join('<div class="h-4"></div>') +
+                        '</article>'
+                    );
+                }
+            }
+            document.getElementById('promptResponseList').innerHTML = items.length
+                ? items.join('')
+                : '<div class="text-sm text-slate-500">prompt/response 이벤트가 없습니다.</div>';
         }
 
-        function renderStateChain() {
-            const el = document.getElementById('stateChainContainer');
-            if (!el) return;
-            const nodes = NODES.map((name, i) => {
-                const status = state.chainNodes[name] || 'pending';
-                const pulse = status === 'active' ? ' pulse' : '';
-                const cls = 'chain-node ' + status + ' px-3 py-2 rounded-lg border text-xs font-medium' + pulse;
-                const arrow = i > 0 ? '<span class="text-slate-600 mx-1">→</span>' : '';
-                return arrow + '<div class="' + cls + '">' + name + '</div>';
-            }).join('');
-            el.innerHTML = nodes;
-        }
-
-        function renderStatusBar() {
-            const runIdEl = document.getElementById('statusRunId');
-            const labelEl = document.getElementById('statusLabel');
-            const stepEl = document.getElementById('statusStep');
-            const totalEl = document.getElementById('statusTotal');
-            const modeEl = document.getElementById('statusMode');
-            const moduleEl = document.getElementById('statusModuleId');
-            const kindEl = document.getElementById('statusRunKind');
+        function renderHeader(snapshot) {
+            document.getElementById('runIdLabel').textContent = snapshot.run_id || '-';
+            document.getElementById('runMeta').textContent = (snapshot.created_at ? new Date(snapshot.created_at).toLocaleString() : '-') + ' · ' + (snapshot.status || '-') + ' · ' + (snapshot.summary || '').slice(0, 120);
+            document.getElementById('moduleLabel').textContent = snapshot.module_id || 'engine';
+            document.getElementById('runKindLabel').textContent = snapshot.run_kind || 'generic';
+            document.getElementById('modeLabel').textContent = (snapshot.decision && (snapshot.decision.selected_mode || snapshot.decision.initial_mode)) || '-';
+            document.getElementById('healthLabel').textContent = summarizeHealth(snapshot.health);
             const badge = document.getElementById('statusBadge');
-            if (runIdEl) runIdEl.textContent = state.runId || '-';
-            if (labelEl) {
-                const labels = { running: 'PROCESSING', finished: 'DONE', error: 'ERROR', idle: 'IDLE' };
-                labelEl.textContent = labels[state.status] || state.status.toUpperCase();
-            }
-            if (badge) {
-                badge.classList.remove('bg-[#251b14]', 'border-orange-500/20', 'text-orange-400', 'animate-pulse');
-                badge.classList.remove('bg-green-500/10', 'border-green-500/20', 'text-green-400');
-                badge.classList.remove('bg-red-500/10', 'border-red-500/20', 'text-red-400');
-                if (state.status === 'running') {
-                    badge.classList.add('bg-[#251b14]', 'border-orange-500/20', 'text-orange-400', 'animate-pulse');
-                } else if (state.status === 'finished') {
-                    badge.classList.add('bg-green-500/10', 'border-green-500/20', 'text-green-400');
-                } else if (state.status === 'error') {
-                    badge.classList.add('bg-red-500/10', 'border-red-500/20', 'text-red-400');
-                } else {
-                    badge.classList.add('bg-[#16161f]', 'border-white/5', 'text-slate-500');
-                }
-            }
-            const total = state.progress.total || 0;
-            const done = state.progress.done ?? 0;
-            if (stepEl) stepEl.textContent = String(done);
-            if (totalEl) totalEl.textContent = String(total);
-            if (modeEl) modeEl.textContent = state.mode || '-';
-            if (moduleEl) moduleEl.textContent = state.moduleId || 'engine';
-            if (kindEl) kindEl.textContent = state.runKind || 'generic';
-            const evHc = document.getElementById('statusEvHc');
-            if (evHc) {
-                const on = (state.decision && state.decision.escalated) || (state.health && state.health.score != null);
-                if (on) evHc.classList.remove('hidden'); else evHc.classList.add('hidden');
-            }
-            var blockWrap = document.getElementById('statusBlockWrap');
-            var blockBadge = document.getElementById('statusBlockBadge');
-            var blockLabel = document.getElementById('statusBlockLabel');
-            var blockMsg = document.getElementById('statusBlockMsg');
-            var blockIcon = document.getElementById('statusBlockIcon');
-            if (blockWrap && blockBadge) {
-                var b = state.block;
-                var isBlocked = b && b.is_blocked === true;
-                var reason = (b && b.reason_code) || 'none';
-                if (reason === 'stuck' && state.status !== 'running') isBlocked = false;
-                var msg = (b && b.message) || '';
-                if (!isBlocked || reason === 'none') {
-                    blockWrap.classList.add('hidden');
-                } else {
-                    blockWrap.classList.remove('hidden');
-                    blockBadge.title = msg;
-                    blockMsg.textContent = msg;
-                    blockMsg.title = msg;
-                    var styleMap = {
-                        tool_error: { bg: 'bg-red-500/10', border: 'border-red-500/30', text: 'text-red-400', label: 'BLOCK' },
-                        stuck: { bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-400', label: 'STUCK' },
-                        disconnected: { bg: 'bg-slate-500/10', border: 'border-slate-500/30', text: 'text-slate-400', label: 'DISCONNECTED' },
-                        paused: { bg: 'bg-blue-500/10', border: 'border-blue-500/30', text: 'text-blue-400', label: 'PAUSED' },
-                        approval_required: { bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', text: 'text-yellow-400', label: 'APPROVAL' }
-                    };
-                    var s = styleMap[reason] || styleMap.tool_error;
-                    blockBadge.className = 'flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium cursor-pointer hover:opacity-90 transition-opacity ' + s.bg + ' ' + s.border + ' ' + s.text;
-                    blockLabel.textContent = s.label;
-                    blockIcon.className = 'w-3.5 h-3.5 shrink-0 ' + s.text;
-                }
-            }
-        }
-
-        function renderLogs() {
-            const el = document.getElementById('logsContent');
-            if (!el) return;
-            const events = state.events || [];
-            if (!events.length) { el.innerHTML = '<div class="text-slate-500">이벤트 없음</div>'; return; }
-            const typeColors = { mode_decision: 'text-blue-400', tool_started: 'text-yellow-500', tool_done: 'text-green-500', run_finished: 'text-green-500', error: 'text-red-400', plan_created: 'text-blue-400' };
-            el.innerHTML = events.slice(-50).map(ev => {
-                const timeStr = ev.ts != null ? new Date(ev.ts * 1000).toLocaleTimeString() : '-';
-                const typeLabel = (ev.type || '').toUpperCase().replace(/_/g, ' ');
-                const color = typeColors[ev.type] || 'text-slate-400';
-                let detail = '';
-                if (ev.payload) {
-                    if (ev.type === 'tool_started' || ev.type === 'tool_done') detail = ev.payload.tool_name || JSON.stringify(ev.payload).slice(0, 60);
-                    else detail = JSON.stringify(ev.payload).slice(0, 80);
-                }
-                return '<div class="flex gap-4"><span class="text-slate-600 shrink-0">' + timeStr + '</span><span class="' + color + ' shrink-0 font-bold">' + typeLabel + '</span><span class="text-slate-400">' + detail + '</span></div>';
-            }).join('');
-        }
-
-        function renderEventsTable() {
-            const tbody = document.getElementById('eventsBody');
-            if (!tbody) return;
-            const events = state.events || [];
-            tbody.innerHTML = events.map(ev => {
-                const timeStr = ev.ts != null ? new Date(ev.ts * 1000).toLocaleTimeString() : '-';
-                const detail = ev.payload ? JSON.stringify(ev.payload).slice(0, 120) : '';
-                return '<tr class="border-b border-white/5"><td class="py-1 pr-4 text-slate-600">' + timeStr + '</td><td class="py-1 pr-4 text-slate-300">' + (ev.type || '') + '</td><td class="py-1 text-slate-400">' + detail + '</td></tr>';
-            }).join('');
-        }
-
-        function renderMetrics() {
-            const el = document.getElementById('metricsContent');
-            if (!el) return;
-            const events = state.events || [];
-            const toolStarted = events.filter(function (e) { return e.type === 'tool_started'; });
-            const toolDone = events.filter(function (e) { return e.type === 'tool_done'; });
-            const doneSuccess = toolDone.filter(function (e) { return (e.payload && e.payload.success) === true; });
-            const durations = toolDone.map(function (e) { return e.payload && e.payload.duration_ms; }).filter(function (n) { return typeof n === 'number'; });
-            const avgDuration = durations.length ? durations.reduce(function (a, b) { return a + b; }, 0) / durations.length : null;
-            const runStartedEv = events.find(function (e) { return e.type === 'run_started'; });
-            const runFinishedEv = events.findLast ? events.findLast(function (e) { return e.type === 'run_finished'; }) : events.filter(function (e) { return e.type === 'run_finished'; }).pop();
-            const totalRunSec = (runStartedEv && runFinishedEv && runStartedEv.ts != null && runFinishedEv.ts != null) ? (runFinishedEv.ts - runStartedEv.ts) : null;
-            const todoDoneCount = events.filter(function (e) { return e.type === 'todo_done'; }).length;
-
-            if (!events.length) {
-                el.innerHTML = '<div class="text-slate-500">메트릭 데이터가 없습니다.</div>';
-                return;
-            }
-            const rows = [
-                { label: '총 도구 호출 수', value: toolStarted.length },
-                { label: '도구 성공률', value: toolDone.length ? (Math.round((doneSuccess.length / toolDone.length) * 100) + '%') : '-' },
-                { label: '평균 도구 응답 시간', value: avgDuration != null ? (Math.round(avgDuration) + ' ms') : '-' },
-                { label: '총 실행 시간', value: totalRunSec != null ? (Math.round(totalRunSec) + ' s') : '-' },
-                { label: 'Turn 수', value: todoDoneCount },
-            ];
-            el.innerHTML = '<div class="grid grid-cols-1 gap-3 text-xs">' + rows.map(function (r) {
-                return '<div class="flex justify-between items-center py-1.5 border-b border-white/5"><span class="text-slate-500">' + r.label + '</span><span class="font-mono text-slate-300">' + String(r.value) + '</span></div>';
-            }).join('') + '</div>';
-        }
-
-        function renderToolCalls() {
-            const el = document.getElementById('toolcallsContent');
-            if (!el) return;
-            const events = state.events || [];
-            var unpairedStarted = [];
-            var pairs = [];
-            events.forEach(function (ev) {
-                if (ev.type === 'tool_started') {
-                    unpairedStarted.push({ ev: ev, payload: ev.payload || {} });
-                } else if (ev.type === 'tool_done') {
-                    var p = ev.payload || {};
-                    var name = p.tool_name;
-                    var idx = -1;
-                    for (var i = unpairedStarted.length - 1; i >= 0; i--) {
-                        if ((unpairedStarted[i].payload.tool_name || '') === name) { idx = i; break; }
-                    }
-                    var st = idx >= 0 ? unpairedStarted.splice(idx, 1)[0] : null;
-                    pairs.push({
-                        tool_name: name || '-',
-                        args: (st && st.payload.args_summary) || {},
-                        success: (p.success !== false),
-                        duration_ms: p.duration_ms,
-                        observation_preview: p.observation_preview || '',
-                        ts: st ? st.ev.ts : ev.ts,
-                    });
-                }
-            });
-            unpairedStarted.forEach(function (st) {
-                pairs.push({
-                    tool_name: (st.payload.tool_name || '-'),
-                    args: st.payload.args_summary || {},
-                    success: false,
-                    duration_ms: null,
-                    observation_preview: '(실행 중)',
-                    ts: st.ev.ts,
-                });
-            });
-            pairs.sort(function (a, b) { return (a.ts || 0) - (b.ts || 0); });
-            if (!pairs.length) {
-                el.innerHTML = '<div class="text-slate-500">도구 호출 목록이 여기 표시됩니다.</div>';
-                return;
-            }
-            el.innerHTML = '<div class="space-y-3">' + pairs.map(function (p) {
-                const argsStr = typeof p.args === 'object' && Object.keys(p.args || {}).length ? JSON.stringify(p.args).slice(0, 120) : '-';
-                const obsStr = (p.observation_preview || '').slice(0, 200).replace(/</g, '&lt;');
-                const statusCls = p.success ? 'text-green-400' : 'text-red-400';
-                return '<div class="p-3 rounded-lg border border-white/5 bg-[#16161f]/50">' +
-                    '<div class="flex justify-between items-center mb-1"><span class="font-mono text-blue-400">' + (p.tool_name || '').replace(/</g, '&lt;') + '</span><span class="text-[10px] ' + statusCls + '">' + (p.success ? 'OK' : 'FAIL') + (p.duration_ms != null ? ' · ' + Math.round(p.duration_ms) + ' ms' : '') + '</span></div>' +
-                    '<div class="text-[10px] text-slate-500 mb-1">Input: ' + (argsStr || '-').replace(/</g, '&lt;') + '</div>' +
-                    (obsStr ? '<div class="text-[10px] text-slate-400 font-mono break-words">' + obsStr + '</div>' : '') +
-                    '</div>';
-            }).join('') + '</div>';
-        }
-
-        function renderStepDetails() {
-            const el = document.getElementById('stepDetailsCard');
-            if (!el) return;
-            const total = state.progress.total || 0;
-            const done = state.progress.done ?? 0;
-            const cur = state.currentTodo || (state.todos && state.todos[done]);
-            const title = (cur && (cur.title || cur.todo_id)) || (total ? 'Task Step ' + (done + 1) + '/' + total : '현재 스텝');
-            const d = state.decision || {};
-            if (!state.runId) {
-                el.innerHTML = '<div class="text-sm text-slate-500">Run 연결 후 현재 TASK STEP 정보가 표시됩니다.</div>';
-                return;
-            }
-            el.innerHTML = '<div class="absolute top-0 right-0 w-12 h-12 bg-blue-500/5 -mr-4 -mt-4 rounded-full pointer-events-none"></div>' +
-                '<div class="relative"><div class="flex justify-between items-start mb-1"><h3 class="text-lg font-bold text-blue-400 tracking-tight">' + (title || 'STEP') + '</h3><span class="px-2 py-0.5 bg-slate-700/50 rounded text-[10px] font-mono text-slate-300">' + done + '/' + total + '</span></div>' +
-                '<p class="text-xs font-mono text-slate-500 mb-4">' + (state.mode || '-') + '</p>' +
-                '<div class="grid grid-cols-2 gap-4 text-[11px]">' +
-                '<div><span class="text-slate-600 block mb-0.5">Mode:</span><span class="text-slate-300">' + (d.selected_mode || state.mode || '-') + '</span></div>' +
-                '<div><span class="text-slate-600 block mb-0.5">Escalated:</span><span class="text-slate-300">' + (d.escalated ? 'Yes' : 'No') + '</span></div></div></div>';
-        }
-
-        function renderRawData() {
-            const el = document.getElementById('rawContent');
-            if (!el) return;
-            el.textContent = JSON.stringify({ runId: state.runId, status: state.status, mode: state.mode, decision: state.decision, progress: state.progress, todos: state.todos, todos_view: state.todos_view, block: state.block, events: state.events, health: state.health }, null, 2);
-            const psEl = document.getElementById('rawPromptStatsContent');
-            if (psEl) {
-                const statsEvents = (state.events || []).filter(function (e) { return e.type === 'prompt_stats'; });
-                if (!statsEvents.length) {
-                    psEl.innerHTML = 'Prompt Stats 데이터가 없습니다.';
-                    return;
-                }
-                const last = statsEvents[statsEvents.length - 1];
-                const p = last.payload || {};
-                const numCtx = p.num_ctx;
-                const est = p.estimated_tokens;
-                const sys = p.system_chars || 0;
-                const user = p.user_chars || 0;
-                const asst = p.assistant_chars || 0;
-                const total = sys + user + asst;
-                const pct = numCtx != null && numCtx > 0 ? Math.min(100, Math.round((est / numCtx) * 100)) : null;
-                psEl.innerHTML = '<div class="grid grid-cols-1 gap-2 text-xs font-mono">' +
-                    '<div class="flex justify-between py-1 border-b border-white/5"><span class="text-slate-500">Turn</span><span class="text-slate-300">' + (p.turn ?? '-') + '</span></div>' +
-                    '<div class="flex justify-between py-1 border-b border-white/5"><span class="text-slate-500">Estimated tokens</span><span class="text-blue-400">' + (est ?? '-') + '</span></div>' +
-                    '<div class="flex justify-between py-1 border-b border-white/5"><span class="text-slate-500">Context window (num_ctx)</span><span class="text-slate-300">' + (numCtx ?? '-') + '</span></div>' +
-                    (pct != null ? '<div class="flex justify-between py-1 border-b border-white/5"><span class="text-slate-500">Context 사용률</span><span class="text-slate-300">' + pct + '%</span></div>' : '') +
-                    '<div class="flex justify-between py-1 border-b border-white/5"><span class="text-slate-500">System chars</span><span class="text-slate-300">' + sys + '</span></div>' +
-                    '<div class="flex justify-between py-1 border-b border-white/5"><span class="text-slate-500">User chars</span><span class="text-slate-300">' + user + '</span></div>' +
-                    '<div class="flex justify-between py-1 border-b border-white/5"><span class="text-slate-500">Assistant chars</span><span class="text-slate-300">' + asst + '</span></div>' +
-                    '<div class="flex justify-between py-1 border-b border-white/5"><span class="text-slate-500">Total chars</span><span class="text-slate-300">' + total + '</span></div>' +
-                    '</div>';
-            }
-        }
-
-        var TIMELINE_EVENTS = ['run_started', 'run_finished', 'plan_created', 'todo_started', 'todo_done', 'tool_started', 'tool_done'];
-        function renderActivityTimeline() {
-            const container = document.getElementById('activityTimeline');
-            if (!container) return;
-            const events = (state.events || []).filter(function (ev) { return TIMELINE_EVENTS.indexOf(ev.type) >= 0; });
-            var block = state.block && state.block.is_blocked ? state.block : null;
-            if (block && block.reason_code === 'stuck' && state.status !== 'running') block = null;
-            var parts = [];
-            if (block && block.message) {
-                parts.push('<div class="flex items-center gap-2 px-2 py-1.5 rounded border border-amber-500/30 bg-amber-500/10 text-amber-400 text-[10px] font-mono">' +
-                    '<span class="shrink-0">BLOCK</span>' +
-                    '<span class="truncate">' + (block.message || '').replace(/</g, '&lt;') + '</span></div>');
-            }
-            if (!events.length && !block) {
-                parts.push('<div id="activityPlaceholder" class="text-xs text-slate-500 text-center py-6">Run 연결 후 활동 요약이 표시됩니다.</div>');
-            } else {
-                events.slice(-60).forEach(function (ev) {
-                    var p = ev.payload || {};
-                    var timeStr = ev.ts != null ? new Date(ev.ts * 1000).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
-                    var type = (ev.type || '').toUpperCase().replace(/_/g, ' ');
-                    var badge = 'bg-slate-700/50 text-slate-400';
-                    var text = '';
-                    if (ev.type === 'run_started') { badge = 'bg-blue-500/20 text-blue-400'; text = 'Run started'; }
-                    else if (ev.type === 'run_finished') { badge = p.success !== false ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'; text = p.success !== false ? 'Finished' : 'Failed'; }
-                    else if (ev.type === 'plan_created') { badge = 'bg-blue-500/20 text-blue-400'; text = (p.todos && p.todos.length) ? p.todos.length + ' steps' : 'Plan'; }
-                    else if (ev.type === 'todo_started') { badge = 'bg-slate-600/50 text-slate-300'; text = (p.title || p.todo_id || '').toString().slice(0, 24); }
-                    else if (ev.type === 'todo_done') { badge = 'bg-green-500/20 text-green-400'; text = (p.title || p.todo_id || '').toString().slice(0, 24); }
-                    else if (ev.type === 'tool_started') { badge = 'bg-amber-500/20 text-amber-400'; text = (p.tool_name || '').toString().slice(0, 20); }
-                    else if (ev.type === 'tool_done') { badge = p.success !== false ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'; text = (p.tool_name || '').toString().slice(0, 20) + (p.success !== false ? ' OK' : ' ERR'); }
-                    parts.push('<div class="flex items-center gap-2 py-1 px-2 rounded border border-white/5 bg-[#16161f]/50 text-[10px] font-mono">' +
-                        '<span class="text-slate-600 shrink-0 w-14">' + timeStr + '</span>' +
-                        '<span class="shrink-0 px-1.5 py-0.5 rounded ' + badge + '">' + type.split(' ')[0] + '</span>' +
-                        '<span class="text-slate-400 truncate">' + (text || '-').replace(/</g, '&lt;') + '</span></div>');
-                });
-            }
-            container.innerHTML = parts.join('');
-        }
-
-        function renderPlanCard() {
-            const container = document.getElementById('planCardContainer');
-            if (!container) return;
-            const todos = state.todos || [];
-            const userInput = (state.launcherUserInput || '').trim();
-            if (todos.length === 0 || !userInput) {
-                container.classList.add('hidden');
-                container.innerHTML = '';
-                return;
-            }
-            container.classList.remove('hidden');
-            const listHtml = todos.map(function (t) {
-                const title = (t.title || t.todo_id || t.id || '').toString().replace(/</g, '&lt;');
-                return '<li class="flex items-center gap-2 text-sm text-slate-300">○ ' + title + '</li>';
-            }).join('');
-            const runId = state.runId || '';
-            container.innerHTML = '<div class="plan-approval-card rounded-xl border border-blue-500/30 bg-blue-900/10 p-4 shadow-lg">' +
-                '<div class="text-xs font-semibold text-blue-400 mb-2">📋 계획</div>' +
-                '<ul class="space-y-1 list-none pl-0 mb-4">' + listHtml + '</ul>' +
-                '<button type="button" id="planExecuteBtn" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium transition-colors">진행하기</button>' +
-                '</div>';
-            const btn = document.getElementById('planExecuteBtn');
-            if (btn) {
-                btn.onclick = function () {
-                    if (launcherRunning) return;
-                    launcherRunning = true;
-                    updateLauncherButtonState();
-                    btn.disabled = true;
-                    btn.textContent = '실행 중...';
-                    fetch(API + '/runs', { method: 'POST' })
-                        .then(function (r) { return r.json(); })
-                        .then(function (data) {
-                            var newRunId = data.run_id;
-                            if (!newRunId) throw new Error('No run_id');
-                            return fetch(API + '/runs/' + encodeURIComponent(newRunId) + '/start', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    user_input: userInput,
-                                    mode: state.mode || 'fast',
-                                    session_id: runId || null,
-                                    plan_approved: true
-                                }),
-                            }).then(function (res) { if (!res.ok) throw new Error(res.statusText); return newRunId; });
-                        })
-                        .then(function (newRunId) {
-                            if (document.getElementById('runIdInput')) document.getElementById('runIdInput').value = newRunId;
-                            var params = new URLSearchParams(window.location.search);
-                            params.set('run_id', newRunId);
-                            window.history.replaceState({}, '', window.location.pathname + '?' + params.toString());
-                            state.launcherUserInput = userInput;
-                            useRun(newRunId);
-                        })
-                        .catch(function (e) { console.warn('Plan execute failed', e); btn.disabled = false; btn.textContent = '진행하기'; })
-                        .finally(function () { launcherRunning = false; updateLauncherButtonState(); });
-                };
-            }
+            badge.className = 'px-3 py-1 rounded-full text-xs border ' + statusTone(snapshot.status);
+            badge.textContent = snapshot.status || 'idle';
         }
 
         function renderAll() {
-            renderStateChain();
-            renderStatusBar();
-            renderLogs();
-            renderEventsTable();
-            renderMetrics();
-            renderToolCalls();
-            renderStepDetails();
-            renderRawData();
-            renderActivityTimeline();
-            renderPlanCard();
-            updateFooter();
+            const snapshot = state.snapshot;
+            const events = state.events || [];
+            if (!snapshot) return;
+            document.getElementById('emptyState').classList.add('hidden');
+            document.getElementById('consoleView').classList.remove('hidden');
+            renderHeader(snapshot);
+            document.getElementById('errorBox').textContent = findError(events, snapshot);
+            renderStepTrace(events);
+            renderToolUsage(events);
+            renderPromptResponse(events);
+            document.getElementById('rawEvents').textContent = JSON.stringify(events, null, 2);
+            document.getElementById('rawSnapshot').textContent = JSON.stringify(state.raw || snapshot, null, 2);
+            document.getElementById('linkOperator').href = '/operator-console?run_id=' + encodeURIComponent(snapshot.run_id);
         }
 
-        function updateFooter() {
-            const footerStatus = document.getElementById('footerStatus');
-            const footerUptime = document.getElementById('footerUptime');
-            const footerSystem = document.getElementById('footerSystem');
-            if (footerStatus) footerStatus.textContent = state.runId ? 'Connected ● Run: ' + state.runId.slice(0, 20) + '…' : '연결 대기';
-            if (footerUptime) footerUptime.textContent = 'UPTIME: ' + (state.lastUpdate ? new Date(state.lastUpdate * 1000).toLocaleTimeString() : '-');
-            if (footerSystem) footerSystem.textContent = state.status === 'error' ? 'SYSTEM: ERROR' : state.status === 'running' ? 'SYSTEM: PROCESSING' : 'SYSTEM: IDLE';
-        }
-
-        function sendControl(action) {
-            const runId = state.runId;
-            if (!runId) { console.warn('sendControl: no runId'); return Promise.resolve(null); }
-            return fetch(API + '/runs/' + encodeURIComponent(runId) + '/control', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: action }),
-            }).then(function (r) { return r.json(); }).catch(function (e) { console.warn('sendControl failed', e); return null; });
-        }
-
-        function sendMode(mode) {
-            const runId = state.runId;
-            if (!runId) { console.warn('sendMode: no runId'); return Promise.resolve(null); }
-            return fetch(API + '/runs/' + encodeURIComponent(runId) + '/mode', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ mode: mode }),
-            }).then(function (r) { return r.json(); }).catch(function (e) { console.warn('sendMode failed', e); return null; });
-        }
-
-        function sendProposeTool() {
-            const runId = state.runId;
-            if (!runId) { console.warn('sendProposeTool: no runId'); return Promise.resolve(null); }
-            return fetch(API + '/runs/' + encodeURIComponent(runId) + '/propose-tool', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({}),
-            }).then(function (r) { return r.json(); }).catch(function (e) { console.warn('sendProposeTool failed', e); return null; });
-        }
-
-        function handleCommand(cmd) {
-            const c = (cmd || '').trim().toLowerCase();
-            if (c === '/pause') {
-                sendControl('pause').then(function (res) { if (res && res.accepted) { loadRunSnapshot(state.runId); renderAll(); } });
-                return;
-            }
-            if (c === '/retry') {
-                sendControl('retry').then(function (res) { if (res && res.new_run_id) { document.getElementById('runIdInput').value = res.new_run_id; useRun(res.new_run_id); } });
-                return;
-            }
-            if (c === '/force_finish') {
-                sendControl('force_finish').then(function (res) { if (res && res.accepted) { loadRunSnapshot(state.runId); renderAll(); } });
-                return;
-            }
-            if (c === '/force_fast') {
-                sendMode('fast').then(function (res) { if (res) { loadRunSnapshot(state.runId); renderAll(); } });
-                return;
-            }
-            if (c === '/create_tool') {
-                sendProposeTool().then(function (res) { if (res) { loadRunSnapshot(state.runId); renderAll(); } });
-                return;
-            }
-        }
-
-        function openSSE(runId) {
-            if (state.runId !== runId) return;
-            if (state.status === 'finished' || state.status === 'error') return;
-            closeSSE();
-            const token = localStorage.getItem('authToken') || '';
-            const params = new URLSearchParams();
-            if (lastEventId != null) params.set('last_event_id', lastEventId);
-            if (token) params.set('access_token', token);
-            const url = API + '/runs/' + encodeURIComponent(runId) + '/events' + (params.toString() ? ('?' + params.toString()) : '');
-            eventSource = new EventSource(url);
-            eventSource.onmessage = function (e) {
-                try {
-                    const ev = JSON.parse(e.data);
-                    if (ev.type === 'timeout') return;
-                    if (ev.id != null && ev.id <= lastProcessedEventId) return;
-                    if (ev.id != null) lastEventId = ev.id;
-                    state = reduceEvent(ev, state);
-                    state.events = state.events.concat(ev);
-                    if (ev.id != null) lastProcessedEventId = ev.id;
-                    renderAll();
-                } catch (err) { console.warn('SSE parse error', err); }
-            };
-            eventSource.onerror = function () {
-                if (eventSource && eventSource.readyState === EventSource.CLOSED) return;
-                if (reconnectTimeoutId) return;
-                if (!state.runId || state.runId !== runId) return;
-                if (state.status === 'finished' || state.status === 'error') {
-                    closeSSE();
-                    renderAll();
-                    return;
-                }
-                reconnectTimeoutId = setTimeout(function () {
-                    reconnectTimeoutId = null;
-                    if (state.runId !== runId) return;
-                    if (state.status === 'finished' || state.status === 'error') return;
-                    loadRunSnapshot(runId).catch(function () {}).then(function () { openSSE(runId); });
-                }, SSE_RECONNECT_DELAY_MS);
-            };
-        }
-
-        function useRun(runId) {
-            closeSSE();
-            lastEventId = null;
-            lastProcessedEventId = 0;
-            state = {
-                status: 'idle',
-                mode: '',
-                moduleId: 'engine',
-                runKind: 'generic',
-                chainNodes: Object.fromEntries(NODES.map(n => [n, 'pending'])),
-                todos: [],
-                todos_view: [],
-                progress: { done: 0, total: 0 },
-                currentTodo: null,
-                block: null,
-                activity: [],
-                decision: null,
-                health: null,
-                events: [],
-                runId: runId,
-                lastUpdate: null,
-            };
-            state.runId = runId;
-            document.getElementById('noRun').classList.add('hidden');
-            document.getElementById('dashboardView').classList.remove('hidden');
-            updateViewLinks();
-            loadRunSnapshot(runId).then(function (snap) {
-                fetch(API + '/api/dev/runs/' + encodeURIComponent(runId))
-                    .then(function (r) { return r.ok ? r.json() : null; })
-                    .then(function (dev) {
-                        if (dev) {
-                            state.events = dev.events || [];
-                            state.health = dev.health || null;
-                            state.decision = dev.decision || null;
-                            if (state.decision && state.decision.selected_mode) state.mode = state.decision.selected_mode;
-                            state.activity = [];
-                            state.events.forEach(function (ev) { state = reduceEvent(ev, state); });
-                            if (snap) {
-                                state.moduleId = snap.module_id || state.moduleId || 'engine';
-                                state.runKind = snap.run_kind || state.runKind || 'generic';
-                                state.todos = snap.todos || [];
-                                state.todos_view = snap.todos_view || [];
-                                var st = (snap.status || '').toLowerCase();
-                                state.status = st === 'completed' ? 'finished' : st === 'failed' ? 'error' : state.status;
-                                if (st === 'completed' || st === 'failed') {
-                                    state.block = null;
-                                    state.currentTodo = null;
-                                    state.progress = { done: (state.todos_view || []).length || (state.todos || []).length, total: (state.todos_view || []).length || (state.todos || []).length };
-                                } else {
-                                    state.block = snap.block || null;
-                                    state.currentTodo = snap.current_todo_id || null;
-                                    if ((state.todos_view || []).length > 0) {
-                                        var done = state.todos_view.filter(function (v) { return (v.status || '').toLowerCase() === 'completed'; }).length;
-                                        state.progress = { done: done, total: state.todos_view.length };
-                                    }
-                                }
-                            }
-                        }
-                        renderAll();
-                        if (state.status !== 'finished' && state.status !== 'error') openSSE(runId);
-                    })
-                    .catch(function (e) { console.warn('Dev fetch failed', e); renderAll(); if (state.status !== 'finished' && state.status !== 'error') openSSE(runId); });
-            }).catch(function () { renderAll(); });
-        }
-
-        function loadRecentRuns() {
-            fetch(API + '/api/dev/runs?limit=20')
-                .then(r => r.json())
-                .then(data => {
-                    recentRunsCache = data.runs || [];
-                    populateRunFilters(recentRunsCache);
-                    renderRecentRuns();
-                })
-                .catch(() => {});
-        }
-
-        function populateRunFilters(runs) {
-            const moduleSel = document.getElementById('moduleFilter');
-            const kindSel = document.getElementById('kindFilter');
-            if (!moduleSel || !kindSel) return;
-            const currentModule = moduleSel.value;
-            const currentKind = kindSel.value;
-            const modules = Array.from(new Set((runs || []).map(function (r) { return r.module_id || 'engine'; }))).sort();
-            const kinds = Array.from(new Set((runs || []).map(function (r) { return r.run_kind || 'generic'; }))).sort();
-            moduleSel.innerHTML = '<option value="">모든 모듈</option>' + modules.map(function (value) {
-                return '<option value="' + value + '">' + value + '</option>';
-            }).join('');
-            kindSel.innerHTML = '<option value="">모든 유형</option>' + kinds.map(function (value) {
-                return '<option value="' + value + '">' + value + '</option>';
-            }).join('');
-            if (modules.indexOf(currentModule) >= 0) moduleSel.value = currentModule;
-            if (kinds.indexOf(currentKind) >= 0) kindSel.value = currentKind;
-        }
-
-        function renderRecentRuns() {
+        async function loadRecentRuns() {
+            const res = await fetch(API + '/api/dev/runs?limit=25', { headers: authHeaders() });
+            if (!res.ok) return;
+            const data = await res.json();
             const sel = document.getElementById('recentRuns');
-            const moduleFilter = (document.getElementById('moduleFilter') || {}).value || '';
-            const kindFilter = (document.getElementById('kindFilter') || {}).value || '';
-            if (!sel) return;
-            sel.innerHTML = '<option value="">최근 run (20개)</option>';
-            recentRunsCache
-                .filter(function (r) {
-                    const moduleId = r.module_id || 'engine';
-                    const runKind = r.run_kind || 'generic';
-                    return (!moduleFilter || moduleId === moduleFilter) && (!kindFilter || runKind === kindFilter);
-                })
-                .forEach(function (r) {
-                    const opt = document.createElement('option');
-                    opt.value = r.run_id || r.id || '';
-                    opt.textContent = (r.run_id || r.id || '').slice(0, 24) + ' [' + (r.module_id || 'engine') + ' / ' + (r.run_kind || 'generic') + ']' + (r.status ? ' [' + r.status + ']' : '');
-                    sel.appendChild(opt);
-                });
-            if (state.runId) sel.value = state.runId;
+            sel.innerHTML = '<option value="">최근 run 선택</option>';
+            (data.runs || []).forEach(function (run) {
+                const opt = document.createElement('option');
+                opt.value = run.run_id;
+                opt.textContent = run.run_id + ' [' + (run.module_id || 'engine') + ' · ' + (run.status || '-') + ']';
+                sel.appendChild(opt);
+            });
         }
 
-        document.getElementById('btnConnect').addEventListener('click', () => {
+        async function openRun(runId) {
+            const headers = authHeaders();
+            const [snapshotRes, rawRes, eventsRes] = await Promise.all([
+                fetch(API + '/api/dev/runs/' + encodeURIComponent(runId), { headers: headers }),
+                fetch(API + '/api/dev/runs/' + encodeURIComponent(runId) + '/raw', { headers: headers }),
+                fetch(API + '/api/dev/runs/' + encodeURIComponent(runId) + '/events', { headers: headers })
+            ]);
+            if (!snapshotRes.ok) throw new Error('run snapshot load failed');
+            state.runId = runId;
+            state.snapshot = await snapshotRes.json();
+            state.raw = rawRes.ok ? await rawRes.json() : null;
+            state.events = eventsRes.ok ? ((await eventsRes.json()).events || []) : (state.snapshot.events || []);
+            renderAll();
+        }
+
+        document.querySelectorAll('.tab-btn').forEach(function (button) {
+            button.addEventListener('click', function () {
+                document.querySelectorAll('.tab-btn').forEach(function (item) {
+                    item.classList.remove('bg-white/5');
+                });
+                document.querySelectorAll('.tab-panel').forEach(function (panel) {
+                    panel.classList.add('hidden');
+                });
+                button.classList.add('bg-white/5');
+                document.getElementById('tab' + button.dataset.tab.charAt(0).toUpperCase() + button.dataset.tab.slice(1)).classList.remove('hidden');
+            });
+        });
+
+        document.getElementById('btnOpen').addEventListener('click', function () {
             const runId = (document.getElementById('runIdInput').value || '').trim();
-            if (runId) useRun(runId);
-        });
-        document.getElementById('recentRuns').addEventListener('change', function () {
-            const runId = (this.value || '').trim();
             if (!runId) return;
-            document.getElementById('runIdInput').value = runId;
-            useRun(runId);
-        });
-        document.getElementById('moduleFilter').addEventListener('change', renderRecentRuns);
-        document.getElementById('kindFilter').addEventListener('change', renderRecentRuns);
-
-        (function () {
-            var popover = document.getElementById('statusBlockPopover');
-            var badge = document.getElementById('statusBlockBadge');
-            var relatedEl = document.getElementById('statusBlockRelated');
-            if (!popover || !badge || !relatedEl) return;
-            var sinceEl = document.getElementById('statusBlockSince');
-            var actionsEl = document.getElementById('statusBlockActions');
-            badge.addEventListener('click', function (e) {
-                e.stopPropagation();
-                if (popover.classList.contains('hidden')) {
-                    var b = state.block;
-                    var rel = (b && b.related) || {};
-                    var entries = [];
-                    if (rel.todo_id != null) entries.push('todo_id: ' + rel.todo_id);
-                    if (rel.tool_name != null) entries.push('tool_name: ' + rel.tool_name);
-                    if (rel.event_id != null) entries.push('event_id: ' + rel.event_id);
-                    if (rel.event_type != null) entries.push('event_type: ' + rel.event_type);
-                    if (rel.last_event_id != null) entries.push('last_event_id: ' + rel.last_event_id);
-                    relatedEl.innerHTML = entries.length ? entries.map(function (x) { return '<div>' + x.replace(/</g, '&lt;') + '</div>'; }).join('') : '<div class="text-slate-500">-</div>';
-                    if (sinceEl && b && b.since_ts != null) {
-                        var sec = Math.floor(Date.now() / 1000 - b.since_ts);
-                        var dur = sec < 60 ? sec + '초' : Math.floor(sec / 60) + '분 ' + (sec % 60) + '초';
-                        sinceEl.textContent = '차단 지속: ' + dur;
-                        sinceEl.classList.remove('hidden');
-                    } else if (sinceEl) {
-                        sinceEl.textContent = '';
-                        sinceEl.classList.add('hidden');
-                    }
-                    if (actionsEl) {
-                        var reason = (b && b.reason_code) || '';
-                        var html = '';
-                        if (reason === 'tool_error') {
-                            html = '<button type="button" class="status-block-action px-2 py-1 rounded bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 text-[10px]" data-action="retry">Retry Tool</button>';
-                        } else if (reason === 'paused') {
-                            html = '<button type="button" class="status-block-action px-2 py-1 rounded bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 text-[10px]" data-action="resume">Resume</button>';
-                        }
-                        actionsEl.innerHTML = html;
-                        actionsEl.querySelectorAll('.status-block-action').forEach(function (btn) {
-                            btn.addEventListener('click', function (e) {
-                                e.stopPropagation();
-                                var act = this.dataset.action;
-                                if (act === 'retry') handleCommand('/retry');
-                                if (act === 'resume') handleCommand('/pause');
-                                popover.classList.add('hidden');
-                            });
-                        });
-                    }
-                    popover.classList.remove('hidden');
-                } else {
-                    popover.classList.add('hidden');
-                }
-            });
-            document.addEventListener('click', function () { popover.classList.add('hidden'); });
-            popover.addEventListener('click', function (e) { e.stopPropagation(); });
-        })();
-
-        (function () {
-            var toggleBtn = document.getElementById('activityTimelineToggle');
-            var body = document.getElementById('activityTimelineBody');
-            var chevron = document.getElementById('activityTimelineChevron');
-            if (toggleBtn && body) {
-                toggleBtn.addEventListener('click', function () {
-                    body.classList.toggle('hidden');
-                    body.classList.toggle('flex');
-                    if (chevron) chevron.style.transform = body.classList.contains('hidden') ? '' : 'rotate(180deg)';
-                });
-            }
-        })();
-
-        (function () {
-            var STORAGE_KEY = 'mellow_dev_chat_collapsed';
-            var sidebar = document.getElementById('chatSidebar');
-            var toggleBtn = document.getElementById('chatSidebarToggle');
-            var strip = document.getElementById('chatSidebarStrip');
-            if (!sidebar) return;
-            function setCollapsed(collapsed) {
-                sidebar.classList.toggle('chat-sidebar--collapsed', collapsed);
-                sidebar.setAttribute('data-collapsed', collapsed ? 'true' : 'false');
-                if (toggleBtn) { toggleBtn.textContent = collapsed ? '\u8250' : '\u8249'; toggleBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true'); }
-                try { localStorage.setItem(STORAGE_KEY, collapsed ? '1' : '0'); } catch (e) {}
-            }
-            var saved = null;
-            try { saved = localStorage.getItem(STORAGE_KEY); } catch (e) {}
-            var initialCollapsed = saved === null ? true : saved === '1';
-            setCollapsed(initialCollapsed);
-            if (toggleBtn) toggleBtn.addEventListener('click', function (e) { e.stopPropagation(); setCollapsed(!sidebar.classList.contains('chat-sidebar--collapsed')); });
-            if (strip) {
-                strip.addEventListener('click', function (e) { if (sidebar.classList.contains('chat-sidebar--collapsed')) setCollapsed(false); });
-                strip.addEventListener('keydown', function (e) { if ((e.key === 'Enter' || e.key === ' ') && sidebar.classList.contains('chat-sidebar--collapsed')) { e.preventDefault(); setCollapsed(false); } });
-            }
-        })();
-
-        function updateLauncherButtonState() {
-            var btn = document.getElementById('chatSendBtn');
-            var icon = document.getElementById('chatSendBtnIcon');
-            var spinner = document.getElementById('chatSendBtnSpinner');
-            if (!btn) return;
-            btn.disabled = launcherRunning;
-            if (icon) icon.classList.toggle('hidden', launcherRunning);
-            if (spinner) spinner.classList.toggle('hidden', !launcherRunning);
-        }
-        function doLauncherRun() {
-            if (launcherRunning) return;
-            var input = document.getElementById('chatInput');
-            var value = (input && input.value) ? input.value.trim() : '';
-            if (!value) return;
-            launcherRunning = true;
-            state.launcherUserInput = value;
-            updateLauncherButtonState();
-            var sessionId = state.runId ? null : null;
-            fetch(API + '/runs', { method: 'POST' })
-                .then(function (r) { return r.json(); })
-                .then(function (data) {
-                    var runId = data.run_id;
-                    if (!runId) throw new Error('No run_id');
-                    return fetch(API + '/runs/' + encodeURIComponent(runId) + '/start', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ user_input: value, mode: 'fast', session_id: state.runId || null }),
-                    }).then(function (res) { if (!res.ok) throw new Error(res.statusText); return runId; });
-                })
-                .then(function (runId) {
-                    if (document.getElementById('runIdInput')) document.getElementById('runIdInput').value = runId;
-                    if (input) input.value = '';
-                    var params = new URLSearchParams(window.location.search);
-                    params.set('run_id', runId);
-                    window.history.replaceState({}, '', window.location.pathname + '?' + params.toString());
-                    useRun(runId);
-                })
-                .catch(function (e) {
-                    console.warn('Launcher run failed', e);
-                    window.dispatchEvent(new CustomEvent('dev-launcher-run', { detail: { value: value, error: String(e) } }));
-                })
-                .finally(function () {
-                    launcherRunning = false;
-                    updateLauncherButtonState();
-                });
-        }
-        (function () {
-            var input = document.getElementById('chatInput');
-            var btn = document.getElementById('chatSendBtn');
-            if (input) {
-                input.addEventListener('keydown', function (e) {
-                    if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); doLauncherRun(); }
-                });
-            }
-            if (btn) btn.addEventListener('click', function () { doLauncherRun(); });
-        })();
-
-        document.querySelectorAll('.cmd-btn').forEach(function (btn) {
-            btn.addEventListener('click', function () {
-                var cmd = (this.textContent || '').trim();
-                if (cmd) handleCommand(cmd);
-            });
+            openRun(runId).catch(console.warn);
         });
 
-        document.querySelectorAll('.log-tab').forEach(btn => {
-            btn.addEventListener('click', function () {
-                const tab = this.dataset.tab;
-                document.querySelectorAll('.log-tab').forEach(b => { b.classList.remove('text-white', 'border-b-2', 'border-blue-500'); b.classList.add('text-slate-500'); });
-                this.classList.add('text-white', 'border-b-2', 'border-blue-500');
-                this.classList.remove('text-slate-500');
-                document.querySelectorAll('.log-pane').forEach(p => { p.classList.add('hidden'); p.classList.remove('flex'); });
-                const paneId = tab === 'logs' ? 'logsPane' : tab === 'events' ? 'eventsPane' : tab === 'metrics' ? 'metricsPane' : tab === 'toolcalls' ? 'toolcallsPane' : 'rawPane';
-                const pane = document.getElementById(paneId);
-                if (pane) { pane.classList.remove('hidden'); pane.classList.add('flex'); }
-            });
+        document.getElementById('recentRuns').addEventListener('change', function () {
+            if (!this.value) return;
+            document.getElementById('runIdInput').value = this.value;
+            openRun(this.value).catch(console.warn);
         });
 
-        document.querySelectorAll('.raw-sub-tab').forEach(btn => {
-            btn.addEventListener('click', function () {
-                document.querySelectorAll('.raw-sub-tab').forEach(b => { b.classList.remove('text-slate-300', 'border-b', 'border-blue-500'); b.classList.add('text-slate-600'); });
-                this.classList.add('text-slate-300', 'border-b', 'border-blue-500');
-                this.classList.remove('text-slate-600');
-                var sub = (this.dataset.sub || 'chat');
-                var blockId = sub === 'chat' ? 'rawChatBlock' : sub === 'routing' ? 'rawRoutingBlock' : 'rawPromptStatsBlock';
-                document.querySelectorAll('.raw-sub-block').forEach(function (block) {
-                    block.classList.add('hidden');
-                    if (block.id === blockId) block.classList.remove('hidden');
-                });
-            });
-        });
-
-        updateViewLinks();
-        loadRecentRuns();
-        const params = new URLSearchParams(window.location.search);
-        const runIdParam = params.get('run_id');
-        if (runIdParam) {
-            document.getElementById('runIdInput').value = runIdParam;
-            useRun(runIdParam);
+        loadRecentRuns().catch(console.warn);
+        const qsRunId = new URLSearchParams(window.location.search).get('run_id');
+        if (qsRunId) {
+            document.getElementById('runIdInput').value = qsRunId;
+            openRun(qsRunId).catch(console.warn);
         }
     </script>
 </body>

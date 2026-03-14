@@ -8,6 +8,8 @@ import os
 import enum
 from typing import Optional
 
+from mellow_link.infra.env_loader import load_dotenv_early
+
 # [Fix] bcrypt 에러 침묵용 패치
 import bcrypt
 if not hasattr(bcrypt, '__about__'):
@@ -35,6 +37,8 @@ engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+# Ensure JWT secrets in .env are loaded before auth constants are fixed at import time.
+load_dotenv_early()
 _SECRET_RAW = os.getenv("JWT_SECRET_KEY") or os.getenv("MELLOW_JWT_SECRET")
 if not _SECRET_RAW or not str(_SECRET_RAW).strip():
     # 운영 환경에서는 JWT 시크릿 필수 (재시작 시 토큰 무효화 방지)

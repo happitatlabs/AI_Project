@@ -98,6 +98,11 @@ class Settings(BaseSettings):
         ge=1.0,
         description="Ollama request timeout in seconds"
     )
+    research_timeout: float = Field(
+        default=90.0,
+        ge=1.0,
+        description="Dedicated Ollama timeout for research inference requests"
+    )
 
     # Ollama model configuration
     fast_model: str = Field(
@@ -106,12 +111,12 @@ class Settings(BaseSettings):
         validation_alias="MELLOW_LLM_FAST_MODEL" if PYDANTIC_V2 else None
     )
     thinking_model: str = Field(
-        default="qwen2.5:7b",
+        default="qwen3.5:9b",
         description="Main model for deep reasoning",
         validation_alias="MELLOW_LLM_THINKING_MODEL" if PYDANTIC_V2 else None
     )
     research_model: str = Field(
-        default="qwen2.5:7b",
+        default="qwen3.5:9b",
         description="Model for research/web search tasks"
     )
     embedding_model: str = Field(
@@ -255,7 +260,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("ENABLE_AUTONOMOUS_AGENT", "MELLOW_ENABLE_AUTONOMOUS_AGENT") if (PYDANTIC_V2 and AliasChoices) else None
     )
     enable_workspace_scanner: bool = Field(
-        default=True,
+        default=False,
         description="Enable periodic workspace scanning (0 to disable)",
         validation_alias=AliasChoices("ENABLE_WORKSPACE_SCANNER", "MELLOW_ENABLE_WORKSPACE_SCANNER") if (PYDANTIC_V2 and AliasChoices) else None
     )
@@ -622,6 +627,11 @@ class Settings(BaseSettings):
         default=None,
         description="Full path to open-llm-vtuber Electron executable (e.g. for admin login launch). Set via MELLOW_AVATAR_ELECTRON_EXE.",
         validation_alias="MELLOW_AVATAR_ELECTRON_EXE" if PYDANTIC_V2 else None
+    )
+    avatar_auto_launch_enabled: bool = Field(
+        default=True,
+        description="Auto-launch avatar service on admin login (0=disabled)",
+        validation_alias=AliasChoices("AVATAR_AUTO_LAUNCH_ENABLED", "MELLOW_AVATAR_AUTO_LAUNCH_ENABLED") if (PYDANTIC_V2 and AliasChoices) else None
     )
 
     # ==================== Pydantic Configuration ====================

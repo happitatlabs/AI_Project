@@ -34,8 +34,8 @@ EVENT_TYPE_ERROR = "error"
 STUCK_THRESHOLD_SEC = 30
 DISCONNECTED_THRESHOLD_SEC = 60
 
-# 페이로드 크기 제한 (2KB)
-MAX_PAYLOAD_SIZE = 2048
+# 페이로드 크기 제한 (8KB)
+MAX_PAYLOAD_SIZE = 8192
 
 # 공통 민감정보 마스킹 (KEY/SECRET/TOKEN/BEARER/Authorization/OPENAI/ANTHROPIC/GOOGLE)
 from mellow_link.utils.sensitive_redact import redact_sensitive_data as _redact_keys
@@ -155,7 +155,7 @@ def emit_event(
                     run.status = "running"
                 elif event_type == EVENT_TYPE_RUN_FINISHED:
                     run.status = "completed" if payload_final.get("success", True) else "failed"
-                    run.summary = payload_final.get("summary", "")[:1000]  # 요약은 최대 1000자
+                    run.summary = payload_final.get("summary", "")[:4000]  # 사용자 콘솔 표시용 요약은 더 길게 유지
                 elif event_type == EVENT_TYPE_ERROR:
                     run.status = "failed"
                 run.updated_at = datetime.utcnow()
@@ -274,31 +274,179 @@ def get_run_events(
             db.close()
 
 
-# 사용자용 3단계 축약 뷰 그룹 정의 (todo_id -> V1/V2/V3)
-TODOS_VIEW_GROUPS = [
-    {"id": "V1", "title": "준비", "todo_ids": ["T1", "T2"]},
-    {"id": "V2", "title": "처리", "todo_ids": ["T3", "T4"]},
-    {"id": "V3", "title": "완료", "todo_ids": ["T5", "T6", "T7"]},
+USER_STAGE_STATUS_PENDING = "pending"
+USER_STAGE_STATUS_IN_PROGRESS = "in_progress"
+USER_STAGE_STATUS_COMPLETED = "completed"
+USER_STAGE_STATUS_SKIPPED = "skipped"
+USER_STAGE_STATUS_ABORTED = "aborted"
+
+NORMALIZED_STAGE_DEFS = [
+    {"id": "V1", "title": "준비"},
+    {"id": "V2", "title": "처리"},
+    {"id": "V3", "title": "완료"},
 ]
+
+MODULE_TODO_VIEW_REGISTRY = {
+    "engine": [
+        {"id": "V1", "title": "준비", "raw_todo_ids": ["T1", "T2"]},
+        {"id": "V2", "title": "처리", "raw_todo_ids": ["T3", "T4"]},
+        {"id": "V3", "title": "완료", "raw_todo_ids": ["T5", "T6", "T7"]},
+    ],
+    "research_assistant": [
+        {"id": "V1", "title": "준비", "raw_todo_ids": ["R1", "R2"]},
+        {"id": "V2", "title": "처리", "raw_todo_ids": ["R3"]},
+        {"id": "V3", "title": "완료", "raw_todo_ids": ["R4"]},
+    ],
+}
 
 
 def _todo_status_from_events(events: List[Dict[str, Any]]) -> Dict[str, str]:
-    """이벤트 목록에서 todo_id별 최종 상태를 계산 (pending / in_progress / completed)."""
-    status_by_id = {}
+    """이벤트 목록에서 raw todo_id별 최종 상태를 계산."""
+    status_by_id: Dict[str, str] = {}
     for event in events:
         payload = event.get("payload") or {}
         tid = payload.get("todo_id")
         if tid is None:
             continue
         tid = str(tid).strip()
+        if not tid:
+            continue
         if event.get("type") == EVENT_TYPE_TODO_STARTED:
-            status_by_id[tid] = "in_progress"
+            status_by_id[tid] = USER_STAGE_STATUS_IN_PROGRESS
         elif event.get("type") == EVENT_TYPE_TODO_DONE:
-            status_by_id[tid] = "completed"
+            status_by_id[tid] = USER_STAGE_STATUS_COMPLETED
     return status_by_id
 
 
+def _extract_ordered_raw_todo_ids(raw_todos: List[Dict[str, Any]], events: List[Dict[str, Any]]) -> List[str]:
+    ordered_ids: List[str] = []
+    for todo in raw_todos:
+        tid = str(todo.get("todo_id") or todo.get("id") or "").strip()
+        if tid and tid not in ordered_ids:
+            ordered_ids.append(tid)
+    for event in events:
+        payload = event.get("payload") or {}
+        tid = str(payload.get("todo_id") or "").strip()
+        if tid and tid not in ordered_ids:
+            ordered_ids.append(tid)
+    return ordered_ids
+
+
+def _build_final_raw_statuses(
+    raw_todos: List[Dict[str, Any]],
+    events: List[Dict[str, Any]],
+    run_status: Optional[str] = None,
+) -> Dict[str, str]:
+    status_by_id = _todo_status_from_events(events)
+    run_status = (run_status or "").strip().lower()
+    ordered_ids = _extract_ordered_raw_todo_ids(raw_todos, events)
+    if run_status in ("completed", "failed"):
+        close_status = USER_STAGE_STATUS_SKIPPED if run_status == "completed" else USER_STAGE_STATUS_ABORTED
+        for tid in ordered_ids:
+            if status_by_id.get(tid) != USER_STAGE_STATUS_COMPLETED:
+                status_by_id[tid] = close_status
+    return status_by_id
+
+
+def _build_fallback_stage_mapping(raw_todo_ids: List[str]) -> List[Dict[str, Any]]:
+    total = len(raw_todo_ids)
+    if total == 0:
+        return [
+            {"id": "V1", "title": "준비", "raw_todo_ids": []},
+            {"id": "V2", "title": "처리", "raw_todo_ids": []},
+            {"id": "V3", "title": "완료", "raw_todo_ids": []},
+        ]
+    if total == 1:
+        return [
+            {"id": "V1", "title": "준비", "raw_todo_ids": []},
+            {"id": "V2", "title": "처리", "raw_todo_ids": [raw_todo_ids[0]]},
+            {"id": "V3", "title": "완료", "raw_todo_ids": []},
+        ]
+    if total == 2:
+        return [
+            {"id": "V1", "title": "준비", "raw_todo_ids": [raw_todo_ids[0]]},
+            {"id": "V2", "title": "처리", "raw_todo_ids": [raw_todo_ids[1]]},
+            {"id": "V3", "title": "완료", "raw_todo_ids": []},
+        ]
+
+    first_cut = max(1, total // 3)
+    second_cut = max(first_cut + 1, (2 * total) // 3)
+    second_cut = min(second_cut, total - 1)
+    return [
+        {"id": "V1", "title": "준비", "raw_todo_ids": raw_todo_ids[:first_cut]},
+        {"id": "V2", "title": "처리", "raw_todo_ids": raw_todo_ids[first_cut:second_cut]},
+        {"id": "V3", "title": "완료", "raw_todo_ids": raw_todo_ids[second_cut:]},
+    ]
+
+
+def _get_normalized_stage_mapping(module_id: str, raw_todos: List[Dict[str, Any]], events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    module_key = (module_id or "engine").strip() or "engine"
+    mapping = MODULE_TODO_VIEW_REGISTRY.get(module_key)
+    if mapping:
+        return [
+            {"id": stage["id"], "title": stage["title"], "raw_todo_ids": list(stage.get("raw_todo_ids", []))}
+            for stage in mapping
+        ]
+    return _build_fallback_stage_mapping(_extract_ordered_raw_todo_ids(raw_todos, events))
+
+
+def _derive_empty_stage_status(stage_id: str, run_status: str, has_any_work: bool, fallback_todo_count: int) -> str:
+    if fallback_todo_count == 0:
+        if run_status == "completed":
+            return USER_STAGE_STATUS_COMPLETED
+        if run_status == "failed":
+            return USER_STAGE_STATUS_ABORTED if stage_id == "V1" else USER_STAGE_STATUS_PENDING
+        if run_status == "running":
+            return USER_STAGE_STATUS_IN_PROGRESS if stage_id == "V1" else USER_STAGE_STATUS_PENDING
+        return USER_STAGE_STATUS_PENDING
+    if fallback_todo_count == 1:
+        if stage_id == "V1":
+            return USER_STAGE_STATUS_COMPLETED if has_any_work or run_status in ("completed", "failed") else USER_STAGE_STATUS_PENDING
+        if stage_id == "V3":
+            if run_status == "completed":
+                return USER_STAGE_STATUS_COMPLETED
+            if run_status == "failed":
+                return USER_STAGE_STATUS_ABORTED
+            return USER_STAGE_STATUS_PENDING
+    if fallback_todo_count == 2 and stage_id == "V3":
+        if run_status == "completed":
+            return USER_STAGE_STATUS_COMPLETED
+        if run_status == "failed":
+            return USER_STAGE_STATUS_ABORTED
+        return USER_STAGE_STATUS_PENDING
+    if run_status == "completed":
+        return USER_STAGE_STATUS_COMPLETED
+    return USER_STAGE_STATUS_PENDING
+
+
+def _derive_normalized_stage_status(raw_statuses: List[str], run_status: str) -> str:
+    if any(status == USER_STAGE_STATUS_ABORTED for status in raw_statuses):
+        return USER_STAGE_STATUS_ABORTED
+    if raw_statuses and all(status == USER_STAGE_STATUS_COMPLETED for status in raw_statuses):
+        return USER_STAGE_STATUS_COMPLETED
+    if any(status == USER_STAGE_STATUS_IN_PROGRESS for status in raw_statuses):
+        return USER_STAGE_STATUS_IN_PROGRESS
+    if raw_statuses and all(status == USER_STAGE_STATUS_SKIPPED for status in raw_statuses) and run_status == "completed":
+        return USER_STAGE_STATUS_SKIPPED
+    return USER_STAGE_STATUS_PENDING
+
+
+def _compute_normalized_progress_percent(stages: List[Dict[str, Any]], run_status: str) -> int:
+    weights = {
+        USER_STAGE_STATUS_COMPLETED: 1.0,
+        USER_STAGE_STATUS_IN_PROGRESS: 0.5,
+        USER_STAGE_STATUS_PENDING: 0.0,
+        USER_STAGE_STATUS_ABORTED: 0.0,
+        USER_STAGE_STATUS_SKIPPED: 1.0 if run_status == "completed" else 0.0,
+    }
+    if not stages:
+        return 0
+    average_weight = sum(weights.get((stage.get("status") or USER_STAGE_STATUS_PENDING), 0.0) for stage in stages) / len(stages)
+    return round(average_weight * 100)
+
+
 def build_todos_view(
+    module_id: str,
     raw_todos: List[Dict[str, Any]],
     current_todo_id: Optional[str],
     events: List[Dict[str, Any]],
@@ -310,51 +458,29 @@ def build_todos_view(
     run_status가 completed/failed이면 미완(in_progress, pending) todo를 skipped(성공) 또는 aborted(실패)로 마감.
     실제 완료된 건 completed, run_finished로만 마감된 건 skipped로 구분해 로그/통계 오해 방지.
     """
-    status_by_id = _todo_status_from_events(events)
     run_status = (run_status or "").strip().lower()
-    if run_status in ("completed", "failed"):
-        close_status = "skipped" if run_status == "completed" else "aborted"
-        all_tids = set(status_by_id.keys())
-        for t in raw_todos:
-            tid = str(t.get("todo_id") or t.get("id") or "").strip()
-            if tid:
-                all_tids.add(tid)
-        for tid in all_tids:
-            if status_by_id.get(tid) != "completed":
-                status_by_id[tid] = close_status
     current = str(current_todo_id).strip() if current_todo_id else None
+    raw_status_by_id = _build_final_raw_statuses(raw_todos, events, run_status=run_status)
+    mapping = _get_normalized_stage_mapping(module_id, raw_todos, events)
+    fallback_todo_count = len(_extract_ordered_raw_todo_ids(raw_todos, events)) if (module_id or "engine") not in MODULE_TODO_VIEW_REGISTRY else -1
+    has_any_work = bool(events)
     view = []
 
-    for group in TODOS_VIEW_GROUPS:
-        group_ids = set(group["todo_ids"])
-        statuses = []
-        for t in raw_todos:
-            tid = str(t.get("todo_id") or t.get("id") or "").strip()
-            if tid in group_ids:
-                statuses.append(status_by_id.get(tid, "pending"))
-
-        current_in_group = current in group_ids if current else False
-        any_in_progress = any(s == "in_progress" for s in statuses)
-        any_aborted = any(s == "aborted" for s in statuses)
-        any_skipped = any(s == "skipped" for s in statuses)
-        all_done = statuses and all(s in ("completed", "aborted", "skipped") for s in statuses)
-
-        if all_done:
-            if any_aborted and not any(s == "completed" for s in statuses):
-                group_status = "aborted"
-            elif any_skipped and not any(s == "completed" for s in statuses):
-                group_status = "skipped"
-            else:
-                group_status = "completed"
-        elif current_in_group or any_in_progress:
-            group_status = "in_progress"
+    for stage in mapping:
+        raw_ids = [str(tid).strip() for tid in stage.get("raw_todo_ids", []) if str(tid).strip()]
+        if raw_ids:
+            raw_statuses = [raw_status_by_id.get(tid, USER_STAGE_STATUS_PENDING) for tid in raw_ids]
+            if current and current in raw_ids and USER_STAGE_STATUS_IN_PROGRESS not in raw_statuses and USER_STAGE_STATUS_COMPLETED not in raw_statuses:
+                raw_statuses.append(USER_STAGE_STATUS_IN_PROGRESS)
+            group_status = _derive_normalized_stage_status(raw_statuses, run_status)
         else:
-            group_status = "pending"
+            group_status = _derive_empty_stage_status(stage["id"], run_status, has_any_work, fallback_todo_count)
 
         view.append({
-            "id": group["id"],
-            "title": group["title"],
+            "id": stage["id"],
+            "title": stage["title"],
             "status": group_status,
+            "raw_todo_ids": raw_ids,
         })
 
     return view
@@ -554,7 +680,14 @@ def get_run_snapshot(run_id: str, db: Optional[Session] = None, paused: Optional
         ]
 
         # 사용자용 3단계 축약 뷰 (조회 시점 계산, DB 미저장)
-        todos_view = build_todos_view(todos, current_todo_id, events, run_status=run.status)
+        todos_view = build_todos_view(
+            getattr(run, "module_id", "engine") or "engine",
+            todos,
+            current_todo_id,
+            events,
+            run_status=run.status,
+        )
+        progress_percent = _compute_normalized_progress_percent(todos_view, run_st)
         
         # 카운터 계산
         tool_calls_count = sum(1 for e in events if e["type"] == EVENT_TYPE_TOOL_STARTED)
@@ -583,6 +716,7 @@ def get_run_snapshot(run_id: str, db: Optional[Session] = None, paused: Optional
             "summary": run.summary,
             "todos": todos,
             "todos_view": todos_view,
+            "progress_percent": progress_percent,
             "current_todo_id": current_todo_id,
             "counters": {
                 "tool_calls": tool_calls_count,

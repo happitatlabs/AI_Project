@@ -20,6 +20,25 @@
             </nav>
         </header>
 
+        <section class="rounded-3xl border border-white/10 bg-slate-900/50 p-6 mb-6">
+            <div class="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                    <h2 class="text-xl font-medium">로그인</h2>
+                    <p id="authStatus" class="text-sm text-slate-400 mt-1">로그인 상태를 확인하는 중입니다.</p>
+                </div>
+                <div class="flex gap-2 text-sm">
+                    <a href="/index.html" class="px-4 py-2 rounded-full border border-white/10 hover:bg-white/5">기존 로그인 화면</a>
+                    <button id="logoutBtn" class="hidden px-4 py-2 rounded-full border border-white/10 hover:bg-white/5">Logout</button>
+                </div>
+            </div>
+            <div id="loginPanel" class="grid md:grid-cols-[1fr_1fr_auto] gap-3 mt-4">
+                <input id="loginUsername" type="text" placeholder="Username" class="rounded-xl bg-slate-950/70 border border-white/10 px-4 py-3 text-sm" />
+                <input id="loginPassword" type="password" placeholder="Password" class="rounded-xl bg-slate-950/70 border border-white/10 px-4 py-3 text-sm" />
+                <button id="loginBtn" class="px-4 py-3 rounded-xl bg-cyan-400 text-slate-950 font-medium hover:bg-cyan-300">Login</button>
+            </div>
+            <div id="authError" class="hidden mt-3 text-sm text-rose-300"></div>
+        </section>
+
         <section class="rounded-3xl border border-white/10 bg-slate-900/50 p-6">
             <div class="flex items-center justify-between gap-4 mb-6">
                 <div>
@@ -34,6 +53,92 @@
     </div>
 
     <script>
+        function getStoredToken() {
+            return localStorage.getItem('authToken') || localStorage.getItem('auth_token') || '';
+        }
+        function setStoredToken(token) {
+            if (token) {
+                localStorage.setItem('authToken', token);
+                localStorage.setItem('auth_token', token);
+            } else {
+                localStorage.removeItem('authToken');
+                localStorage.removeItem('auth_token');
+            }
+        }
+        function setAuthState(message, isError) {
+            const status = document.getElementById('authStatus');
+            const error = document.getElementById('authError');
+            if (status) {
+                status.className = 'text-sm mt-1 ' + (isError ? 'text-rose-300' : 'text-slate-400');
+                status.textContent = message;
+            }
+            if (error) {
+                if (isError) {
+                    error.classList.remove('hidden');
+                    error.textContent = message;
+                } else {
+                    error.classList.add('hidden');
+                    error.textContent = '';
+                }
+            }
+        }
+        async function refreshAuthState() {
+            const token = getStoredToken();
+            const panel = document.getElementById('loginPanel');
+            const logoutBtn = document.getElementById('logoutBtn');
+            if (!token) {
+                if (panel) panel.classList.remove('hidden');
+                if (logoutBtn) logoutBtn.classList.add('hidden');
+                setAuthState('로그인되어 있지 않습니다. 실행 목록과 모듈 run 생성은 로그인이 필요합니다.', false);
+                return;
+            }
+            try {
+                const res = await fetch('/auth/me', {
+                    headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' }
+                });
+                if (!res.ok) {
+                    setStoredToken('');
+                    if (panel) panel.classList.remove('hidden');
+                    if (logoutBtn) logoutBtn.classList.add('hidden');
+                    setAuthState('로그인 세션이 유효하지 않습니다. 다시 로그인하세요.', true);
+                    return;
+                }
+                const user = await res.json();
+                if (panel) panel.classList.add('hidden');
+                if (logoutBtn) logoutBtn.classList.remove('hidden');
+                setAuthState('로그인됨: ' + (user.username || 'user') + ' (' + (user.role || 'user') + ')', false);
+            } catch (e) {
+                setAuthState('인증 상태를 확인하지 못했습니다.', true);
+            }
+        }
+        async function login() {
+            const username = (document.getElementById('loginUsername').value || '').trim();
+            const password = document.getElementById('loginPassword').value || '';
+            if (!username || !password) {
+                setAuthState('사용자명과 비밀번호를 입력하세요.', true);
+                return;
+            }
+            const form = new URLSearchParams();
+            form.set('username', username);
+            form.set('password', password);
+            try {
+                const res = await fetch('/auth/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: form.toString()
+                });
+                const payload = await res.json().catch(function () { return {}; });
+                if (!res.ok) {
+                    setAuthState(payload.detail || '로그인 실패', true);
+                    return;
+                }
+                setStoredToken(payload.access_token || '');
+                document.getElementById('loginPassword').value = '';
+                await refreshAuthState();
+            } catch (e) {
+                setAuthState('로그인 요청 실패', true);
+            }
+        }
         async function loadModules() {
             const res = await fetch('/api/modules', { headers: { 'Accept': 'application/json' } });
             const data = await res.json();
@@ -54,6 +159,15 @@
         loadModules().catch(function () {
             document.getElementById('moduleGrid').innerHTML = '<div class="rounded-2xl border border-rose-500/20 bg-rose-500/10 p-5 text-rose-200">모듈 목록을 불러오지 못했습니다.</div>';
         });
+        document.getElementById('loginBtn').addEventListener('click', login);
+        document.getElementById('loginPassword').addEventListener('keydown', function (event) {
+            if (event.key === 'Enter') login();
+        });
+        document.getElementById('logoutBtn').addEventListener('click', function () {
+            setStoredToken('');
+            refreshAuthState();
+        });
+        refreshAuthState();
     </script>
 </body>
 </html>
