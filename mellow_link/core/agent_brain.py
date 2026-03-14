@@ -274,6 +274,53 @@ class AgentBrain:
             diagnosis_interval=50,
         )
 
+    def _should_escalate_fast_tool_call(self, tool_name: str) -> bool:
+        """
+        Decide whether a FAST-mode tool call should escalate to THINKING.
+
+        Lightweight inspection tools should stay on FAST to avoid promoting simple
+        file discovery into the heavier 9B path.
+        """
+        lightweight_tools = {
+            "list_directory",
+            "read_file",
+            "read_docs_file",
+            "list_docs",
+            "find_files",
+            "glob_search",
+            "search_files",
+            "get_file_info",
+            "get_cwd",
+            "get_time",
+            "get_system_snapshot",
+            "list_processes",
+            "security_status",
+            "list_tools",
+            "inspect_system_status",
+            "search_memory",
+            "get_user_feedback",
+            "get_my_work_history",
+        }
+        heavy_reasoning_tools = {
+            "run_command",
+            "generate_report",
+            "propose_new_tool",
+            "analyze_text",
+            "web_search",
+            "create_image",
+            "animate_image",
+            "write_file",
+            "move_file",
+            "delete_file",
+            "cleanup_file",
+            "create_directory",
+        }
+        if tool_name in lightweight_tools:
+            return False
+        if tool_name in heavy_reasoning_tools:
+            return True
+        return False
+
     # ──────────────────────────────────────────
     # 메인 루프
     # ──────────────────────────────────────────
@@ -1222,9 +1269,10 @@ class AgentBrain:
                 # 파싱 성공: 재시도 카운터 리셋
                 retry_count = 0
 
-                # PATCH B: FAST 모드에서 tool_call 감지 시 THINKING 모드로 에스컬레이션
+                # PATCH B: FAST 모드에서는 복합 추론이 필요한 무거운 tool_call만 THINKING으로 승격
                 if effective_mode == "fast" and action is not None and action.tool != "finish":
-                    if not fast_escalated:
+                    should_escalate_fast = self._should_escalate_fast_tool_call(action.tool)
+                    if should_escalate_fast and not fast_escalated:
                         # 첫 번째 tool_call 감지: THINKING 모드로 에스컬레이션
                         fast_escalated = True
                         effective_mode = "thinking"
@@ -1238,7 +1286,7 @@ class AgentBrain:
                         except Exception as e:
                             logger.debug(f"[AgentBrain] Metrics collector push failed: {e}")
                         
-                        logger.info(f"[FAST] tool_call detected ({action.tool}) -> escalating to THINKING (1/1)")
+                        logger.info(f"[FAST] heavy tool_call detected ({action.tool}) -> escalating to THINKING (1/1)")
                         
                         # 프롬프트 재구성 (THINKING 모드용)
                         # 에스컬레이션 시에는 확장 모드 감지 (원본 user_input 사용)
@@ -1276,7 +1324,7 @@ class AgentBrain:
                         
                         # 이 턴의 tool_call은 실행하지 않고 continue (다음 턴에서 THINKING 모드로 재시도)
                         continue
-                    else:
+                    elif should_escalate_fast:
                         # 이미 에스컬레이션된 경우: tool 실행 차단하고 안전한 메시지로 종료
                         try:
                             from mellow_link.core.metrics_collector import get_metrics_collector
@@ -1287,6 +1335,8 @@ class AgentBrain:
                             logger.debug(f"[AgentBrain] Metrics collector push failed: {e}")
                         
                         logger.warning(f"[FAST] tool_call ({action.tool}) blocked after escalation - ending safely")
+                    else:
+                        logger.info(f"[FAST] lightweight tool_call detected ({action.tool}) -> staying in FAST")
                         
                         # 안전한 종료 메시지
                         safe_message = (
@@ -1875,8 +1925,8 @@ class AgentBrain:
             
             if not bench_profile:
                 try:
-                    asyncio.create_task(
-                        self._experience_helper.record_experience_ledger(run_state, start_time, steps, user_input)
+                    self._experience_helper.schedule_record_experience_ledger(
+                        run_state, start_time, steps, user_input
                     )
                 except Exception as _e:
                     logger.debug("[AgentBrain] Ledger record schedule failed: %s", _e)
@@ -1969,9 +2019,9 @@ class AgentBrain:
         
         # 환경변수에서 설정 읽기
         default_max = int(os.getenv("THINKING_MAX_TOKENS_DEFAULT", "900"))
-        expanded_max_v1 = int(os.getenv("THINKING_MAX_TOKENS_EXPANDED", "1800"))
-        expanded_max_v2 = int(os.getenv("THINKING_MAX_TOKENS_EXPANDED_V2", "2500"))
-        expanded_max_v3 = int(os.getenv("THINKING_MAX_TOKENS_EXPANDED_V3", "3500"))
+        expanded_max_v1 = int(os.getenv("THINKING_MAX_TOKENS_EXPANDED", "1200"))
+        expanded_max_v2 = int(os.getenv("THINKING_MAX_TOKENS_EXPANDED_V2", "1800"))
+        expanded_max_v3 = int(os.getenv("THINKING_MAX_TOKENS_EXPANDED_V3", "2400"))
         
         # 확장 레벨에 따라 다른 값 사용
         if expansion_level == 3:

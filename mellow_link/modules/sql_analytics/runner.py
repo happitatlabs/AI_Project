@@ -32,7 +32,7 @@ def start_sql_analytics_run(run_id: str, session_id: str | None, question: str, 
                 emit_event(run_id, EVENT_TYPE_TODO_DONE, todo)
             emit_event(run_id, EVENT_TYPE_TODO_STARTED, todos[-1])
             result = service.analyze(question=question, input_type=input_type)
-            summary = result.get("ai_interpretation") or result.get("decision") or "SQL analytics run completed"
+            summary = service.format_user_summary(result=result, question=question)
             emit_event(run_id, EVENT_TYPE_TODO_DONE, todos[-1])
             emit_event(
                 run_id,

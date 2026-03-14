@@ -23,7 +23,7 @@ window.State = (function () {
   });
 
   var data = {
-    AUTH_TOKEN: localStorage.getItem('auth_token') || null,
+    AUTH_TOKEN: localStorage.getItem('auth_token') || localStorage.getItem('authToken') || null,
     CURRENT_USER: null,
     IS_GUEST_MODE: false,
     isAdmin: false,
@@ -72,8 +72,13 @@ window.State = (function () {
   function getAuthToken() { return data.AUTH_TOKEN; }
   function setAuthToken(v) {
     data.AUTH_TOKEN = v;
-    if (v != null) localStorage.setItem('auth_token', v);
-    else localStorage.removeItem('auth_token');
+    if (v != null) {
+      localStorage.setItem('auth_token', v);
+      localStorage.setItem('authToken', v);
+    } else {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('authToken');
+    }
   }
   function getCurrentUser() { return data.CURRENT_USER; }
   function setCurrentUser(v) { data.CURRENT_USER = v; }

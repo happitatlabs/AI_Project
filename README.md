@@ -168,9 +168,19 @@ Phase 1 기준으로 사용자 흐름은 아래처럼 정리되어 있습니다.
 환경에 따라 다르지만 기본 진입점은 보통 아래 순서입니다.
 
 1. Ollama 실행
-2. 프로젝트 환경 준비
-3. `launcher.py` 또는 `mellow_link` 서버 실행
-4. 브라우저에서 `/ui` 접속
+2. `mellow_link/.env`에 고정 JWT 시크릿 확인
+3. 프로젝트 환경 준비
+4. `launcher.py` 또는 `python -m mellow_link.main` 실행
+5. 브라우저에서 `/ui` 접속
+
+예시:
+
+```env
+JWT_SECRET_KEY=32자_이상_랜덤_문자열
+```
+
+로그인 유지가 중요한 이유는 JWT 시크릿이 서버 시작 시점에 고정되어야 하기 때문입니다.
+현재는 [database.py](/D:/AI_Project/mellow_link/infra/database.py)가 import 시점에 `.env`를 먼저 읽도록 정리되어 있습니다.
 
 ## 주의
 
