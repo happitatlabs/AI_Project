@@ -132,9 +132,13 @@ def _summarize_run_row(run: AgentRun, db: Session) -> Dict[str, Any]:
     snapshot = get_run_snapshot(run.run_id, db=db, paused=RUN_CONTROL_STATE.get(run.run_id, {}).get("paused")) or {}
     block = snapshot.get("block") or {}
     duration_ms = _calc_duration_ms(run, events)
+    module_id = getattr(run, "module_id", "engine") or "engine"
+    run_kind = getattr(run, "run_kind", "generic") or "generic"
     return {
         "run_id": run.run_id,
         "session_id": run.session_id,
+        "module_id": module_id,
+        "run_kind": run_kind,
         "status": run.status,
         "created_at": run.created_at.isoformat() if run.created_at else None,
         "updated_at": run.updated_at.isoformat() if run.updated_at else None,
@@ -236,6 +240,8 @@ def _extract_start_context(events: list) -> Dict[str, Any]:
 @router.post("/runs")
 async def create_run_endpoint(
     session_id: Optional[str] = Query(None),
+    module_id: str = Query("engine"),
+    run_kind: str = Query("generic"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
@@ -244,9 +250,9 @@ async def create_run_endpoint(
     """
     effective_session_id = _resolve_run_session_id(db, user, session_id)
     try:
-        run_id = create_run(session_id=effective_session_id, db=db)
+        run_id = create_run(session_id=effective_session_id, db=db, module_id=module_id, run_kind=run_kind)
         logger.info(f"[Runs] Created run: {run_id} by user_id={user.id}")
-        return {"run_id": run_id, "status": "pending", "session_id": effective_session_id}
+        return {"run_id": run_id, "status": "pending", "session_id": effective_session_id, "module_id": module_id, "run_kind": run_kind}
     except Exception as e:
         logger.error(f"[Runs] Failed to create run: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

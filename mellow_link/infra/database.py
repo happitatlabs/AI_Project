@@ -219,6 +219,8 @@ class AgentRun(Base):
     id = Column(Integer, primary_key=True, index=True)
     run_id = Column(String(100), unique=True, nullable=False, index=True)
     session_id = Column(String(100), nullable=True, index=True)
+    module_id = Column(String(100), nullable=False, default="engine")
+    run_kind = Column(String(100), nullable=False, default="generic")
     status = Column(String(50), nullable=False, default="pending")  # pending, running, completed, failed
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
@@ -251,6 +253,8 @@ def init_db():
         "ALTER TABLE folder_documents ADD COLUMN file_size INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE folder_documents ADD COLUMN status VARCHAR(50) NOT NULL DEFAULT 'processing'",
         "ALTER TABLE chat_messages ADD COLUMN evolution_payload TEXT",
+        "ALTER TABLE agent_runs ADD COLUMN module_id VARCHAR(100) NOT NULL DEFAULT 'engine'",
+        "ALTER TABLE agent_runs ADD COLUMN run_kind VARCHAR(100) NOT NULL DEFAULT 'generic'",
     ]:
         try:
             with engine.connect() as conn:
@@ -263,6 +267,7 @@ def init_db():
     try:
         with engine.connect() as conn:
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_run_events_run_ts ON agent_run_events(run_id, ts)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_agent_runs_module_kind ON agent_runs(module_id, run_kind)"))
             conn.commit()
     except Exception:
         pass  # index already exists

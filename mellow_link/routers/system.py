@@ -20,6 +20,7 @@ from mellow_link.infra import (
     get_db, User, UserRole, AgentFolder, ChatSession,
     ensure_user_has_folders,
 )
+from mellow_link.modules import get_module_registry
 from mellow_link.services import get_vtuber_relay, get_rag_service
 from mellow_link.utils import get_avatar_status, DEFAULT_AVATAR_WS_PORT
 
@@ -100,6 +101,24 @@ async def health_check():
         "timestamp": datetime.now().isoformat(),
         "orchestrator": orchestrator_health,
         "services": services_health
+    }
+
+
+@router.get("/api/modules", tags=["System"])
+async def list_modules():
+    registry = get_module_registry()
+    return {
+        "modules": [
+            {
+                "module_id": m.manifest.module_id,
+                "name": m.manifest.name,
+                "description": m.manifest.description,
+                "run_kind": m.manifest.run_kind,
+                "start_path": m.manifest.start_path,
+                "icon": m.manifest.icon,
+            }
+            for m in registry.list_modules()
+        ]
     }
 
 
