@@ -35,7 +35,24 @@ engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "aventurine-v3-secret")
+_SECRET_RAW = os.getenv("JWT_SECRET_KEY") or os.getenv("MELLOW_JWT_SECRET")
+if not _SECRET_RAW or not str(_SECRET_RAW).strip():
+    # 운영 환경에서는 JWT 시크릿 필수 (재시작 시 토큰 무효화 방지)
+    if os.getenv("MELLOW_ENV") == "production" or os.getenv("MELLOW_REQUIRE_JWT_SECRET", "").lower() in ("1", "true", "yes"):
+        raise RuntimeError(
+            "JWT_SECRET_KEY 또는 MELLOW_JWT_SECRET을 설정하세요. "
+            "운영 환경에서는 .env에 반드시 설정해야 합니다."
+        )
+    import secrets
+    import warnings
+    SECRET_KEY = secrets.token_urlsafe(32)
+    warnings.warn(
+        "JWT_SECRET_KEY/MELLOW_JWT_SECRET not set; using random key (tokens invalidate on restart).",
+        UserWarning,
+        stacklevel=2,
+    )
+else:
+    SECRET_KEY = _SECRET_RAW.strip()
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7
 
@@ -112,6 +129,7 @@ class ChatMessage(Base):
     role = Column(String(50), nullable=False)
     content = Column(Text, nullable=False)
     state_info = Column(String(255), nullable=True)
+    evolution_payload = Column(Text, nullable=True)  # full evolution_report JSON when content is derived patch_report
     rag_used = Column(Boolean, default=False, nullable=False)
     timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
     auto_selected = Column(Boolean, default=False, nullable=False)
@@ -124,7 +142,9 @@ class FolderDocument(Base):
     id = Column(Integer, primary_key=True, index=True)
     folder_id = Column(Integer, ForeignKey("agent_folders.id"), nullable=False, index=True)
     filename = Column(String(500), nullable=False)
-    file_path = Column(String(1000), nullable=False)
+    file_path = Column(String(1000), nullable=True, default="")
+    file_size = Column(Integer, default=0, nullable=False)
+    status = Column(String(50), default="processing", nullable=False)
     uploaded_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     folder = relationship("AgentFolder", back_populates="documents")
 
@@ -193,12 +213,59 @@ class DocumentChunk(Base):
     document = relationship("FolderDocument")
 
 
+class AgentRun(Base):
+    """Agent execution run tracking."""
+    __tablename__ = "agent_runs"
+    id = Column(Integer, primary_key=True, index=True)
+    run_id = Column(String(100), unique=True, nullable=False, index=True)
+    session_id = Column(String(100), nullable=True, index=True)
+    status = Column(String(50), nullable=False, default="pending")  # pending, running, completed, failed
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    summary = Column(Text, nullable=True)
+    
+    events = relationship("AgentRunEvent", back_populates="run", cascade="all, delete-orphan", order_by="AgentRunEvent.ts")
+
+
+class AgentRunEvent(Base):
+    """Agent run events for progress tracking."""
+    __tablename__ = "agent_run_events"
+    id = Column(Integer, primary_key=True, index=True)
+    run_id = Column(String(100), ForeignKey("agent_runs.run_id", ondelete="CASCADE"), nullable=False, index=True)
+    ts = Column(Float, nullable=False, index=True)  # Unix timestamp
+    type = Column(String(50), nullable=False, index=True)  # run_started, plan_created, todo_started, etc.
+    payload_json = Column(Text, nullable=False)  # JSON serialized payload
+    
+    run = relationship("AgentRun", back_populates="events")
+
+
 # =========================
 # Helper Functions
 # =========================
 
 def init_db():
     Base.metadata.create_all(bind=engine)
+    # Migration: FolderDocument file_size, status (기존 DB 호환)
+    from sqlalchemy import text
+    for col_sql in [
+        "ALTER TABLE folder_documents ADD COLUMN file_size INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE folder_documents ADD COLUMN status VARCHAR(50) NOT NULL DEFAULT 'processing'",
+        "ALTER TABLE chat_messages ADD COLUMN evolution_payload TEXT",
+    ]:
+        try:
+            with engine.connect() as conn:
+                conn.execute(text(col_sql))
+                conn.commit()
+        except Exception:
+            pass  # column already exists or non-SQLite
+    
+    # Create indexes for agent_run_events
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_run_events_run_ts ON agent_run_events(run_id, ts)"))
+            conn.commit()
+    except Exception:
+        pass  # index already exists
 
 def get_db():
     db = SessionLocal()
@@ -211,11 +278,11 @@ def get_db():
 def create_default_folders_for_user(db: Session, user_id: int, role: str = UserRole.USER.value):
     """회원가입 시 기본 폴더 생성"""
     default_folders = [
-        {"name": "일반 대화", "icon": "💬", "system_prompt": "친절한 AI.", "use_rag": False, "rag_collection_name": None},
+        {"name": "일반 대화", "icon": "💬", "system_prompt": "친절한 AI.", "use_rag": True, "rag_collection_name": None},
     ]
     # Admin일 경우 추가 폴더 (선택사항)
     if role == UserRole.ADMIN.value:
-        default_folders.insert(0, {"name": "비서", "icon": "🎀", "system_prompt": "비서 모드", "use_rag": False, "rag_collection_name": None})
+        default_folders.insert(0, {"name": "비서", "icon": "🎀", "system_prompt": "비서 모드", "use_rag": True, "rag_collection_name": None})
 
     created = []
     for folder_data in default_folders:
@@ -260,33 +327,28 @@ def get_or_create_default_session(db: Session, user_id: int, folder_id: int) -> 
 # Auth & Guest Functions
 # =========================
 
-def verify_password(plain_password, hashed_password):
-    """
-    [Survival Mode] 해시 검증 실패 시, 평문 비교를 시도하여 로그인 성공시킴.
-    """
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verify password against hash. No plaintext fallback (security)."""
     try:
         if pwd_context.verify(plain_password, hashed_password):
             return True
-    except Exception as e:
-        # passlib이 "hash could not be identified" 에러를 뱉으면 여기로 옴
-        # 평문끼리 비교해서 맞으면 통과 (좀비 모드 비밀번호 지원)
-        if str(plain_password) == str(hashed_password):
-            return True
-            
-    # 에러는 안 났지만 verify가 False인 경우에도 평문 체크 한 번 더
-    if str(plain_password) == str(hashed_password):
-        return True
-        
+    except Exception:
+        pass
+    # Fallback: passlib와 bcrypt 라이브러리 호환 이슈 시 bcrypt 직접 검증
+    if hashed_password.startswith(("$2a$", "$2b$", "$2y$")):
+        try:
+            import bcrypt
+            pw_bytes = plain_password.encode("utf-8")
+            h_bytes = hashed_password.encode("utf-8") if isinstance(hashed_password, str) else hashed_password
+            return bool(bcrypt.checkpw(pw_bytes, h_bytes))
+        except Exception:
+            pass
     return False
 
-def get_password_hash(password):
-    """[Survival Mode] Hashing failed? Truncate and retry."""
-    try:
-        return pwd_context.hash(password)
-    except Exception as e:
-        print(f"!!! [Survival] Hashing failed: {e}. Saving plain text.")
-        # 그냥 평문 반환 (verify_password가 처리해줌)
-        return password
+
+def get_password_hash(password: str) -> str:
+    """Hash password. No plaintext fallback (security)."""
+    return pwd_context.hash(password)
 
 def create_access_token(data: dict, expires_delta: timedelta = None, role: str = UserRole.USER.value):
     to_encode = data.copy()
@@ -307,6 +369,8 @@ def get_current_user_optional(authorization: Optional[str] = Header(None), db: S
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     credentials_exception = HTTPException(status_code=401, detail="Not authenticated")
+    if not token or not token.strip():
+        raise credentials_exception
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")

@@ -9,6 +9,7 @@ from loguru import logger
 from ..agent.output_types import DisplayText, Actions
 from ..live2d_model import Live2dModel
 from ..tts.tts_interface import TTSInterface
+from ..utils.sensitive_filter import mask_sensitive_text
 from ..utils.stream_audio import prepare_audio_payload
 from .types import WebSocketSend
 
@@ -47,6 +48,14 @@ class TTSTaskManager:
             tts_engine: TTS engine instance
             websocket_send: WebSocket send function
         """
+        # ── Sensitive text masking (speak pipeline safety) ──
+        # If a secret/claim URL is detected, speak a safe placeholder instead.
+        safe_tts_text = mask_sensitive_text(tts_text)
+        if safe_tts_text != tts_text:
+            # Keep UI display consistent with what we actually speak.
+            display_text.text = safe_tts_text
+        tts_text = safe_tts_text
+
         if len(re.sub(r'[\s.,!?，。！？\'"』」）】\s]+', "", tts_text)) == 0:
             logger.debug("Empty TTS text, sending silent display payload")
             # Get current sequence number for silent payload
@@ -165,7 +174,8 @@ class TTSTaskManager:
 
     async def _generate_audio(self, tts_engine: TTSInterface, text: str) -> str:
         """Generate audio file from text"""
-        logger.debug(f"🏃Generating audio for '''{text}'''...")
+        # `text` should already be masked at call-site, but keep logs safe anyway.
+        logger.debug(f"🏃Generating audio for '''{mask_sensitive_text(text)}'''...")
         return await tts_engine.async_generate_audio(
             text=text,
             file_name_no_ext=f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}",

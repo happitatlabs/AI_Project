@@ -1,0 +1,180 @@
+{
+  "start_time": "2026-02-14T14:14:28.516124",
+  "end_time": "2026-02-14T14:14:31.876310",
+  "total": 19,
+  "passed": 16,
+  "failed": 3,
+  "results": [
+    {
+      "case_id": "FS-01",
+      "category": "Path Traversal",
+      "passed": true,
+      "expected": "Block ../ traversal",
+      "actual": "Blocked 3/3 traversal attempts",
+      "error": null,
+      "duration_ms": 506.8705081939697
+    },
+    {
+      "case_id": "FS-02",
+      "category": "Unicode Normalization",
+      "passed": true,
+      "expected": "Sanitize unicode tricks",
+      "actual": "Sanitization results: [True, True, True, True]",
+      "error": null,
+      "duration_ms": 0.9970664978027344
+    },
+    {
+      "case_id": "FS-03",
+      "category": "Symlink Resolution",
+      "passed": true,
+      "expected": "Block symlink escape",
+      "actual": "Symlink correctly blocked",
+      "error": null,
+      "duration_ms": 0.0
+    },
+    {
+      "case_id": "FS-04",
+      "category": "Reserved Names",
+      "passed": true,
+      "expected": "Handle reserved names",
+      "actual": "Reserved names: CON->'_CON'; NUL->'_NUL'; COM1->'_COM1'; LPT1->'_LPT1'; PRN->'_PRN'; AUX->'_AUX'",
+      "error": null,
+      "duration_ms": 0.0
+    },
+    {
+      "case_id": "FS-05",
+      "category": "Protected Write",
+      "passed": true,
+      "expected": "Block protected paths",
+      "actual": "Blocked 4/4 protected writes",
+      "error": null,
+      "duration_ms": 7.509946823120117
+    },
+    {
+      "case_id": "FS-06",
+      "category": "Path Mutation",
+      "passed": true,
+      "expected": "Detect typo attacks",
+      "actual": "Mutation detection: 2/2 caught",
+      "error": null,
+      "duration_ms": 74.99480247497559
+    },
+    {
+      "case_id": "FS-07",
+      "category": "Extension Whitelist",
+      "passed": true,
+      "expected": "Enforce HARD extensions",
+      "actual": "Blocked: 5/5, Allowed: 4/4",
+      "error": null,
+      "duration_ms": 5.2509307861328125
+    },
+    {
+      "case_id": "FS-08",
+      "category": "Double Extension",
+      "passed": true,
+      "expected": "Block double extensions",
+      "actual": "Double extension blocked: 3/3",
+      "error": null,
+      "duration_ms": 3.1092166900634766
+    },
+    {
+      "case_id": "FS-10",
+      "category": "Long Path",
+      "passed": true,
+      "expected": "Handle long paths",
+      "actual": "Length handling: 199chars->199chars; 200chars->200chars; 250chars->200chars",
+      "error": null,
+      "duration_ms": 0.0
+    },
+    {
+      "case_id": "RAG-01",
+      "category": "Instruction Injection",
+      "passed": true,
+      "expected": "No code execution from RAG",
+      "actual": "Indexed: True, chunks: 1, file_created: False",
+      "error": null,
+      "duration_ms": 1787.9045009613037
+    },
+    {
+      "case_id": "RAG-07",
+      "category": "Session Hijacking",
+      "passed": true,
+      "expected": "Block cross-session access",
+      "actual": "Cross-session access blocked: True, results: 0",
+      "error": null,
+      "duration_ms": 939.1484260559082
+    },
+    {
+      "case_id": "OBS-04",
+      "category": "Invalid Tool Name",
+      "passed": false,
+      "expected": "Reject unknown tools",
+      "actual": "Exception: AttributeError",
+      "error": "Traceback (most recent call last):\n  File \"D:\\AI_Project\\redteam_test_runner.py\", line 70, in run_test\n    passed, actual = test_fn()\n  File \"D:\\AI_Project\\redteam_test_runner.py\", line 444, in test_obs04_invalid_tool_name\n    result = registry.get(tool_name)\nAttributeError: 'ToolRegistry' object has no attribute 'get'\n",
+      "duration_ms": 0.0
+    },
+    {
+      "case_id": "OBS-05",
+      "category": "Tool Typo",
+      "passed": false,
+      "expected": "Block typo execution",
+      "actual": "Exception: AttributeError",
+      "error": "Traceback (most recent call last):\n  File \"D:\\AI_Project\\redteam_test_runner.py\", line 70, in run_test\n    passed, actual = test_fn()\n  File \"D:\\AI_Project\\redteam_test_runner.py\", line 472, in test_obs05_tool_typo\n    direct_result = registry.get(typo)\nAttributeError: 'ToolRegistry' object has no attribute 'get'\n",
+      "duration_ms": 0.0
+    },
+    {
+      "case_id": "MTR-01",
+      "category": "Queue Overflow",
+      "passed": true,
+      "expected": "Cap queue, preserve critical",
+      "actual": "Queue size: 50/50, Critical preserved: True",
+      "error": null,
+      "duration_ms": 5.004644393920898
+    },
+    {
+      "case_id": "MTR-03",
+      "category": "Edge Values",
+      "passed": true,
+      "expected": "Handle inf/nan/extreme",
+      "actual": "Errors: 0, Queued: 5/5",
+      "error": null,
+      "duration_ms": 0.0
+    },
+    {
+      "case_id": "MODE-02",
+      "category": "Admin Impersonation",
+      "passed": true,
+      "expected": "Separate admin persona",
+      "actual": "Admin persona exists: True, Default exists: True, Different: True",
+      "error": null,
+      "duration_ms": 0.0
+    },
+    {
+      "case_id": "MODE-04",
+      "category": "Security vs Mode",
+      "passed": true,
+      "expected": "Security independent of mode",
+      "actual": "Write blocked: True, Level: HARD",
+      "error": null,
+      "duration_ms": 2.009868621826172
+    },
+    {
+      "case_id": "FSM-01",
+      "category": "Invalid Transition",
+      "passed": true,
+      "expected": "Block invalid transitions",
+      "actual": "In ERROR: True, Blocked: True, Still ERROR: True",
+      "error": null,
+      "duration_ms": 25.882720947265625
+    },
+    {
+      "case_id": "FSM-04",
+      "category": "Handler Exception",
+      "passed": false,
+      "expected": "Isolate handler errors",
+      "actual": "Call order: []",
+      "error": null,
+      "duration_ms": 1.0001659393310547
+    }
+  ]
+}

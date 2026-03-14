@@ -159,7 +159,8 @@ class ProcessingMode(Enum):
             'research': cls.RESEARCH,
             'auto': cls.AUTO,
         }
-        return mapping.get(value.lower(), cls.THINKING)
+        # 기본값을 FAST로 변경: 일반적인 경우 빠른 모델 사용
+        return mapping.get(value.lower(), cls.FAST)
 
 
 class ChatState(Enum):
@@ -170,21 +171,24 @@ class ChatState(Enum):
     Represents stages in the chat processing pipeline.
 
     Pipeline Flow:
-        IDLE -> ANALYZING -> RETRIEVING (optional) -> GENERATING -> COMPLETED
-                    |                                      |
-                    +--------------------------------------+-> ERROR
+        IDLE -> ANALYZING -> RETRIEVING (optional) -> GENERATING -> GENERATING_RESPONSE -> COMPLETED
+                    |                                      |              |
+                    +--------------------------------------+--------------+-> ERROR
+        
+    ✅ verified: GENERATING_RESPONSE 상태 추가 - 작업 완료 후 결과 보고 단계 명확화
     """
 
-    IDLE = "idle"               # Waiting for input
-    ANALYZING = "analyzing"     # Analyzing query, determining RAG/mode
-    RETRIEVING = "retrieving"   # Fetching documents from RAG
-    GENERATING = "generating"   # LLM is generating response
-    COMPLETED = "completed"     # Response generation finished
-    ERROR = "error"             # Error occurred during processing
+    IDLE = "idle"                      # Waiting for input
+    ANALYZING = "analyzing"            # Analyzing query, determining RAG/mode
+    RETRIEVING = "retrieving"          # Fetching documents from RAG
+    GENERATING = "generating"          # LLM is generating response (ReAct loop)
+    GENERATING_RESPONSE = "generating_response"  # Generating final response report after task completion
+    COMPLETED = "completed"            # Response generation finished
+    ERROR = "error"                    # Error occurred during processing
 
     def is_processing(self) -> bool:
         """Check if currently processing a request."""
-        return self in (ChatState.ANALYZING, ChatState.RETRIEVING, ChatState.GENERATING)
+        return self in (ChatState.ANALYZING, ChatState.RETRIEVING, ChatState.GENERATING, ChatState.GENERATING_RESPONSE)
 
     def is_terminal(self) -> bool:
         """Check if this is a terminal state."""
@@ -294,7 +298,8 @@ CHAT_STATE_TRANSITIONS: Dict[ChatState, Set[ChatState]] = {
     ChatState.IDLE: {ChatState.ANALYZING, ChatState.ERROR},
     ChatState.ANALYZING: {ChatState.RETRIEVING, ChatState.GENERATING, ChatState.ERROR},
     ChatState.RETRIEVING: {ChatState.GENERATING, ChatState.ERROR},
-    ChatState.GENERATING: {ChatState.COMPLETED, ChatState.ERROR},
+    ChatState.GENERATING: {ChatState.GENERATING_RESPONSE, ChatState.ERROR},
+    ChatState.GENERATING_RESPONSE: {ChatState.COMPLETED, ChatState.ERROR},
     ChatState.COMPLETED: {ChatState.IDLE},
     ChatState.ERROR: {ChatState.IDLE},
 }

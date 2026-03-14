@@ -1,3 +1,63 @@
+# =========================
+# Python / caches
+# =========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# =========================
+# Virtual environments
+# =========================
+.venv/
+venv/
+ENV/
+env/
+
+# =========================
+# Logs / runtime artifacts
+# =========================
+*.log
+logs/
+Open-LLM-VTuber/logs/
+Open-LLM-VTuber/chat_history/
+
+# =========================
+# Local config backups
+# =========================
+Open-LLM-VTuber/conf.yaml.backup
+
+# =========================
+# Local data / DB files
+# =========================
+*.db
+*.sqlite
+*.sqlite3
+
+# =========================
+# Secrets (never commit)
+# =========================
+.env
+**/.env
+mellow_link/keys/
+mellow_link/moltbook_api_key*.txt
+mellow_link/**/moltbook_api_key*.json
+mellow_link/**/MOLTBOOK_API_KEY*.json
+
+# =========================
+# OS / editor
+# =========================
+.DS_Store
+Thumbs.db
+nul
+con
+prn
+aux
+com1
+lpt1
 # ========================================================
 # 🛡️ Mellow + Vtuber 통합 보안 방패 (.gitignore)
 # ========================================================
@@ -111,3 +171,7 @@ private/
 # --------------------------------------------------------
 check_rag_alive.py
 lab.py
+
+# Mellow-Link generated artifacts
+mellow_link/outputs/
+mellow_link/logs/

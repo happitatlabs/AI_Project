@@ -19,6 +19,7 @@ env/
 *.sqlite3
 /logs
 /data
+/keys
 
 # 4. OS 시스템 파일
 .DS_Store
@@ -27,3 +28,9 @@ Thumbs.db
 # 5. IDE 설정 (Cursor/VSCode 개인 설정)
 .vscode/
 .idea/
+
+# 6. 자율 에이전트 임시 스크립트
+workspace/.temp/
+
+# 7. 보고서 도구: 민감 원문 저장 (vault)
+vault/

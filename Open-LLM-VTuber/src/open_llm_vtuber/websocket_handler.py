@@ -27,6 +27,7 @@ from .conversations.conversation_handler import (
     handle_group_interrupt,
     handle_individual_interrupt,
 )
+from .utils.sensitive_filter import mask_sensitive_text
 
 
 class MessageType(Enum):
@@ -549,7 +550,10 @@ class WebSocketHandler:
         # Log speak messages for debugging
         if msg_type == "speak":
             text = data.get("text", "")
-            logger.info(f"[WebSocket] Received speak message from {client_uid}: {text[:100]}...")
+            safe_text = mask_sensitive_text(text)
+            # Downstream(브라우저/TT S)로도 마스킹된 텍스트가 전달되도록 페이로드를 덮어쓴다.
+            data["text"] = safe_text
+            logger.info(f"[WebSocket] Received speak message from {client_uid}: {safe_text[:100]}...")
 
             # [CRITICAL] For speak messages, broadcast to ALL connected browser clients
             # mellow_link sends speak but browser is on different client_uid

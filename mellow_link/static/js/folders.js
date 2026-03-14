@@ -3,14 +3,14 @@
 // =========================
 
 async function loadFolders() {
-    if(!AUTH_TOKEN) return;
-    const res=await fetch(`${API_BASE}/folders`,{headers:{'Authorization':`Bearer ${AUTH_TOKEN}`}});
-    if(res.ok) { FOLDERS=await res.json(); renderFolders(); }
+    if(!State.getAuthToken()) return;
+    const res=await fetch(`${State.getApiBase()}/folders`,{headers:{'Authorization':`Bearer ${State.getAuthToken()}`}});
+    if(res.ok) { State.setFolders(await res.json()); renderFolders(); }
 }
 
 function renderFolders() {
     const list=document.getElementById('foldersList'); list.innerHTML='';
-    FOLDERS.forEach(f=>{
+    State.getFolders().forEach(f=>{
         const div=document.createElement('div'); div.className='bg-dark-hover rounded-lg overflow-hidden';
         div.innerHTML=`<div class="flex items-center justify-between p-3 hover:bg-dark-border"><div class="flex items-center gap-2 flex-1 cursor-pointer" onclick="toggleFolderAccordion(${f.id})"><span class="text-xl">${f.icon}</span><div><div class="font-medium text-sm">${escapeHtml(f.name)}</div><div class="text-xs text-gray-500">${f.session_count} sessions</div></div></div><div class="flex items-center gap-1"><button onclick="event.stopPropagation(); showFolderSettings(${f.id})" class="p-2 text-gray-400 hover:text-purple-400"><i class="fas fa-cog text-sm"></i></button><button onclick="event.stopPropagation(); toggleFolderAccordion(${f.id})" class="p-2"><span id="folderIcon${f.id}">▼</span></button></div></div><div id="folderSessions${f.id}" class="accordion-content"><div class="p-2 space-y-1" id="sessionsList${f.id}"><button onclick="selectFolder(${f.id})" class="w-full text-left px-3 py-2 bg-purple-600 hover:bg-purple-700 rounded text-sm">+ New Chat in ${escapeHtml(f.name)}</button></div></div>`;
         list.appendChild(div); loadFolderSessions(f.id);
@@ -18,7 +18,7 @@ function renderFolders() {
 }
 
 async function loadFolderSessions(fid) {
-    const res=await fetch(`${API_BASE}/folders/${fid}/sessions`,{headers:{'Authorization':`Bearer ${AUTH_TOKEN}`}});
+    const res=await fetch(`${State.getApiBase()}/folders/${fid}/sessions`,{headers:{'Authorization':`Bearer ${State.getAuthToken()}`}});
     if(res.ok) {
         const s=await res.json(); const c=document.getElementById(`sessionsList${fid}`);
         s.forEach(ss=>{
@@ -36,30 +36,36 @@ function selectFolder(id) {
     history.pushState(null, '', window.location.pathname);
     console.log(`🔗 [URL] Cleared session_id (new chat in folder ${id})`);
 
-    CURRENT_FOLDER_ID=id;
-    CURRENT_SESSION_ID=null;
-    TEMP_SESSION_ID=null;
-    CURRENT_FOLDER=FOLDERS.find(x=>x.id===id);
-    document.getElementById('chatMessages').innerHTML='<div class="text-center text-gray-500 py-8"><p class="text-xl">New Chat in '+escapeHtml(CURRENT_FOLDER.name)+'</p></div>';
-    document.getElementById('sessionInfo').textContent=`Folder: ${CURRENT_FOLDER.name}`;
-    document.getElementById('ragStatus').classList.remove('hidden');
+    State.setCurrentFolderId(id);
+    State.setCurrentSessionId(null);
+    State.setTempSessionId(null);
+    var folder = State.getFolders().find(x=>x.id===id);
+    State.setCurrentFolder(folder);
+    document.getElementById('chatMessages').innerHTML='<div class="text-center text-gray-500 py-8"><p class="text-xl">New Chat in '+escapeHtml(folder.name)+'</p></div>';
+    document.getElementById('sessionInfo').textContent=`Folder: ${folder.name}`;
+    const ragStatusInfo = document.getElementById('ragStatus');
+    if (ragStatusInfo) {
+        if (folder.use_rag) {
+            ragStatusInfo.classList.remove('hidden');
+        } else {
+            ragStatusInfo.classList.add('hidden');
+        }
+    }
 }
 
  
 function newChat() {
-    // ✅ [SESSION PERSISTENCE] URL 파라미터 제거 (새 채팅)
     history.pushState(null, '', window.location.pathname);
     console.log(`🔗 [URL] Cleared session_id (new chat)`);
-
-    CURRENT_SESSION_ID=null;
-    CURRENT_FOLDER_ID=null;
+    State.setCurrentSessionId(null);
+    State.setCurrentFolderId(null);
     document.getElementById('chatMessages').innerHTML='<div class="text-center text-gray-500 py-8">New Chat</div>';
     document.getElementById('sessionInfo').textContent='';
 }
 
 async function loadUncategorizedSessions() {
-    if(!AUTH_TOKEN) return;
-    const res=await fetch(`${API_BASE}/chat/sessions/uncategorized`,{headers:{'Authorization':`Bearer ${AUTH_TOKEN}`}});
+    if(!State.getAuthToken()) return;
+    const res=await fetch(`${State.getApiBase()}/chat/sessions/uncategorized`,{headers:{'Authorization':`Bearer ${State.getAuthToken()}`}});
     if(res.ok) {
         const s=await res.json(); const c=document.getElementById('uncategorizedList'); c.innerHTML='';
         if(s.length===0) c.innerHTML='<div class="text-xs text-gray-500 p-2">No sessions</div>';
@@ -81,12 +87,12 @@ async function createFolder() {
     const n=document.getElementById('folderName').value; const p=document.getElementById('folderSystemPrompt').value;
     const r=document.getElementById('folderUseRAG').checked; const c=document.getElementById('folderIsCreative').checked;
     const i=document.getElementById('selectedIcon').value;
-    await fetch(`${API_BASE}/folders`,{method:'POST',headers:{'Authorization':`Bearer ${AUTH_TOKEN}`,'Content-Type':'application/json'},body:JSON.stringify({name:n,system_prompt:p,use_rag:r,icon:i,is_creative:c})});
+    await fetch(`${State.getApiBase()}/folders`,{method:'POST',headers:{'Authorization':`Bearer ${State.getAuthToken()}`,'Content-Type':'application/json'},body:JSON.stringify({name:n,system_prompt:p,use_rag:r,icon:i,is_creative:c})});
     closeModal('createFolderModal'); loadFolders();
 }
 
 function showCreateFolderModal() { 
-    if(IS_GUEST_MODE) return alert('Login required'); 
+    if(State.getIsGuestMode()) return alert('Login required'); 
     document.getElementById('createFolderModal').style.display='flex'; 
 }
 
@@ -97,7 +103,7 @@ function toggleFolderAccordion(id) {
 
 async function deleteSession(sid, fid=null, btnElement=null) {
     if(confirm('Delete session?')) {
-        const res = await fetch(`${API_BASE}/chat/sessions/${sid}`,{method:'DELETE',headers:{'Authorization':`Bearer ${AUTH_TOKEN}`}});
+        const res = await fetch(`${State.getApiBase()}/chat/sessions/${sid}`,{method:'DELETE',headers:{'Authorization':`Bearer ${State.getAuthToken()}`}});
 
         if(res.ok) {
             // ✅ [FIX-3] Immediately remove DOM element (no afterimage)
@@ -124,7 +130,7 @@ async function deleteSession(sid, fid=null, btnElement=null) {
 
             // Update folder session count if applicable
             if(fid) {
-                const folder = FOLDERS.find(f => f.id === fid);
+                const folder = State.getFolders().find(f => f.id === fid);
                 if(folder && folder.session_count > 0) {
                     folder.session_count--;
                     // Update the count display in folder header
@@ -137,7 +143,7 @@ async function deleteSession(sid, fid=null, btnElement=null) {
             }
 
             // ✅ [SESSION PERSISTENCE] 현재 세션 삭제 시 URL 파라미터도 제거
-            if(CURRENT_SESSION_ID===sid) {
+            if(State.getCurrentSessionId()===sid) {
                 newChat();  // 이미 URL 파라미터 제거 포함됨
             }
         } else {
@@ -150,34 +156,36 @@ async function deleteSession(sid, fid=null, btnElement=null) {
 // Simplified versions of other folder functions
 // Folder Settings & Docs (원본 유지)
 async function showFolderSettings(fid) {
-    CURRENT_FOLDER_SETTINGS_ID=fid; const f=FOLDERS.find(x=>x.id===fid); if(!f) return;
+    State.setCurrentFolderSettingsId(fid); const f=State.getFolders().find(x=>x.id===fid); if(!f) return;
     document.getElementById('folderSettingsIcon').textContent=f.icon; document.getElementById('editFolderName').value=f.name;
     document.getElementById('editFolderPrompt').value=f.system_prompt; document.getElementById('editFolderIsCreative').checked=f.is_creative;
     loadFolderDocuments(fid); document.getElementById('folderSettingsModal').style.display='flex';
 }
 async function loadFolderDocuments(fid) {
     const c=document.getElementById('folderDocumentsList'); c.innerHTML='Loading...';
-    const res=await fetch(`${API_BASE}/folders/${fid}/documents`,{headers:{'Authorization':`Bearer ${AUTH_TOKEN}`}});
+    const res=await fetch(`${State.getApiBase()}/folders/${fid}/documents`,{headers:{'Authorization':`Bearer ${State.getAuthToken()}`}});
     if(res.ok) {
         const docs=await res.json(); c.innerHTML=docs.length?docs.map(d=>`<div class="flex justify-between p-2 bg-dark-hover mb-1 rounded"><span>${escapeHtml(d.filename)}</span><button onclick="deleteFolderDocument(${fid},${d.id})" class="text-red-400"><i class="fas fa-trash"></i></button></div>`).join(''):'No docs';
     }
 }
 async function uploadToCurrentFolder(input) {
-    const f=input.files[0]; if(!f || !CURRENT_FOLDER_SETTINGS_ID) return;
+    const f=input.files[0]; var fid=State.getCurrentFolderSettingsId(); if(!f || !fid) return;
     const fd=new FormData(); fd.append('file',f);
-    await fetch(`${API_BASE}/folders/${CURRENT_FOLDER_SETTINGS_ID}/upload`,{method:'POST',headers:{'Authorization':`Bearer ${AUTH_TOKEN}`},body:fd});
-    loadFolderDocuments(CURRENT_FOLDER_SETTINGS_ID);
+    await fetch(`${State.getApiBase()}/folders/${fid}/upload`,{method:'POST',headers:{'Authorization':`Bearer ${State.getAuthToken()}`},body:fd});
+    loadFolderDocuments(fid);
 }
 async function deleteFolderDocument(fid, did) {
-    if(confirm('Delete?')) { await fetch(`${API_BASE}/folders/${fid}/documents/${did}`,{method:'DELETE',headers:{'Authorization':`Bearer ${AUTH_TOKEN}`}}); loadFolderDocuments(fid); }
+    if(confirm('Delete?')) { await fetch(`${State.getApiBase()}/folders/${fid}/documents/${did}`,{method:'DELETE',headers:{'Authorization':`Bearer ${State.getAuthToken()}`}}); loadFolderDocuments(fid); }
 }
 async function saveFolderSettings() {
     const n=document.getElementById('editFolderName').value; const p=document.getElementById('editFolderPrompt').value; const c=document.getElementById('editFolderIsCreative').checked;
-    await fetch(`${API_BASE}/folders/${CURRENT_FOLDER_SETTINGS_ID}`,{method:'PATCH',headers:{'Authorization':`Bearer ${AUTH_TOKEN}`,'Content-Type':'application/json'},body:JSON.stringify({name:n,system_prompt:p,is_creative:c})});
+    var fid=State.getCurrentFolderSettingsId();
+    await fetch(`${State.getApiBase()}/folders/${fid}`,{method:'PATCH',headers:{'Authorization':`Bearer ${State.getAuthToken()}`,'Content-Type':'application/json'},body:JSON.stringify({name:n,system_prompt:p,is_creative:c})});
     closeModal('folderSettingsModal'); loadFolders();
 }
 async function confirmDeleteFolder() {
-    if(confirm('Delete folder?')) { await fetch(`${API_BASE}/folders/${CURRENT_FOLDER_SETTINGS_ID}`,{method:'DELETE',headers:{'Authorization':`Bearer ${AUTH_TOKEN}`}}); closeModal('folderSettingsModal'); loadFolders(); }
+    var fid=State.getCurrentFolderSettingsId();
+    if(confirm('Delete folder?')) { await fetch(`${State.getApiBase()}/folders/${fid}`,{method:'DELETE',headers:{'Authorization':`Bearer ${State.getAuthToken()}`}}); closeModal('folderSettingsModal'); loadFolders(); }
 }
 
 function selectEmoji(el,v) { document.querySelectorAll('.emoji-btn').forEach(b=>b.classList.remove('selected')); el.classList.add('selected'); document.getElementById('selectedIcon').value=v; }

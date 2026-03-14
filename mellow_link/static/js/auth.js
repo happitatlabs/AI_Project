@@ -21,7 +21,7 @@ async function checkAccessGate() {
 
     // Token exists - verify it's still valid
     try {
-        const res = await fetch(`${API_BASE}/auth/me`, {
+        const res = await fetch(`${State.getApiBase()}/auth/me`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
 
@@ -32,7 +32,7 @@ async function checkAccessGate() {
         } else {
             // Token invalid/expired - show access gate
             localStorage.removeItem('auth_token');
-            AUTH_TOKEN = null;
+            State.setAuthToken(null);
             showGuestAccessModal();
             return false;
         }
@@ -144,13 +144,16 @@ function showLoginFromGuestModal() {
  */
 async function checkAuth() {
   try {
-      const res = await fetch(`${API_BASE}/auth/me`, {headers:{'Authorization':`Bearer ${AUTH_TOKEN}`}});
+      const res = await fetch(`${State.getApiBase()}/auth/me`, {headers:{'Authorization':`Bearer ${State.getAuthToken()}`}});
       if(res.ok) {
-          CURRENT_USER = await res.json();
-          IS_GUEST_MODE = false;
+          const user = await res.json();
+          State.setCurrentUser(user);
+          State.setIsGuestMode(false);
+          const adminVal = !!(user && (user.is_admin === true || user.role === 'admin'));
+          State.setIsAdmin(adminVal);
           document.getElementById('authButtons').style.display='none';
           document.getElementById('userInfo').style.display='flex';
-          document.getElementById('username').textContent=CURRENT_USER.username;
+          document.getElementById('username').textContent=user.username;
           document.getElementById('guestBadge').style.display='none';
           document.getElementById('foldersSection').style.display='block';
           document.getElementById('uncategorizedSection').style.display='block';
@@ -180,9 +183,9 @@ function showAuthWarning(msg) {
 }
 
 function switchToGuestUI() {
-  // "토큰 삭제" 같은 폭력 금지. UI만 게스트로.
-  IS_GUEST_MODE = true;
-  CURRENT_USER = null;
+  State.setIsGuestMode(true);
+  State.setCurrentUser(null);
+  State.setIsAdmin(false);
 
   document.getElementById('authButtons').style.display = 'flex';
   document.getElementById('userInfo').style.display = 'none';
@@ -194,8 +197,7 @@ function switchToGuestUI() {
 function softAuthExpireToGuest(msg) {
   // ✅ 자동 로그아웃 체감 방지 포인트:
   // - localStorage auth_token은 지우지 않는다 (사용자 의사 없이 삭제 금지)
-  // - 런타임 AUTH_TOKEN은 null로 만들어서 이후 API 폭탄(401 연쇄)만 막는다
-  AUTH_TOKEN = null;
+  State.setAuthToken(null);
 
   switchToGuestUI();
   showAuthWarning(msg || '세션이 만료되어 게스트로 전환했어. 다시 로그인하면 돼.');
@@ -240,8 +242,7 @@ function closeModal(modalId) {
     }
 
     // 🎲 로그인/회원가입 창을 닫았는데 인증되지 않았다면 → 게스트 액세스 모달로 복귀
-    // AUTH_TOKEN 체크 (state.isAuthenticated는 존재하지 않음)
-    const isAuthenticated = !!AUTH_TOKEN || !!localStorage.getItem('auth_token');
+    const isAuthenticated = !!State.getAuthToken() || !!localStorage.getItem('auth_token');
 
     if ((modalId === 'loginModal' || modalId === 'registerModal') && !isAuthenticated) {
         console.log('[Auth] Modal closed without authentication, showing guest access gate');
@@ -281,15 +282,14 @@ async function login() {
         fd.append('username', u);
         fd.append('password', p);
 
-        const res = await fetch(`${API_BASE}/auth/token`, {
+        const res = await fetch(`${State.getApiBase()}/auth/token`, {
             method: 'POST',
             body: fd
         });
 
         if (res.ok) {
             const d = await res.json();
-            AUTH_TOKEN = d.access_token;
-            localStorage.setItem('auth_token', AUTH_TOKEN);
+            State.setAuthToken(d.access_token);
             closeModal('loginModal');
             hideGuestAccessModal(); // Hide guest modal if open
             // Reload to ensure clean state
@@ -354,7 +354,7 @@ async function register() {
     if (btn) btn.disabled = true;
 
     try {
-        const res = await fetch(`${API_BASE}/auth/register`, {
+        const res = await fetch(`${State.getApiBase()}/auth/register`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username: u, password: p })
@@ -362,8 +362,7 @@ async function register() {
 
         if (res.ok) {
             const d = await res.json();
-            AUTH_TOKEN = d.access_token;
-            localStorage.setItem('auth_token', AUTH_TOKEN);
+            State.setAuthToken(d.access_token);
             closeModal('registerModal');
             hideGuestAccessModal(); // Hide guest modal if open
             // Reload to ensure clean state
@@ -392,19 +391,21 @@ async function register() {
 }
 
 /**
+ * 어드민 전용 기능 접근 시도 시 경고 표시
+ */
+function showAdminOnlyWarning() {
+  showNotification("본 기능은 하우스 관리자(Admin) 전용 구역입니다.", "warning", 5000);
+}
+
+/**
  * 로그아웃
  */
 function logout() {
     console.log('👋 [Logout] Cashing out and leaving...');
-
-    // 1. 보안 토큰 파기 (가장 중요)
-    AUTH_TOKEN = null;
-    localStorage.removeItem('auth_token');
-
-    // 2. 세션 변수 초기화 (혹시 모를 잔여 데이터 제거)
-    CURRENT_SESSION_ID = null;
-    CURRENT_FOLDER_ID = null;
-
+    State.setAuthToken(null);
+    State.setCurrentSessionId(null);
+    State.setCurrentFolderId(null);
+    State.setIsAdmin(false);
     // 3. 💎 [핵심] 입구로 강제 이동 (Redirect)
     // ✅ 경로 통일: /ui (FastAPI 엔드포인트와 일치)
     // window.location.replace를 사용하여 뒤로가기로 복귀 방지

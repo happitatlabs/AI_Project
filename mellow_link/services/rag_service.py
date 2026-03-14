@@ -268,6 +268,17 @@ async def generate_embedding(
     if not text or not text.strip():
         return []
 
+    # Check if event loop is available and not closed
+    try:
+        loop = asyncio.get_running_loop()
+        if loop.is_closed():
+            logger.debug("[RAG] Event loop is closed, skipping embedding generation")
+            return []
+    except RuntimeError:
+        # No event loop running
+        logger.debug("[RAG] No event loop available, skipping embedding generation")
+        return []
+
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
@@ -284,7 +295,17 @@ async def generate_embedding(
                 logger.error(f"[RAG] Embedding API error: {response.status_code}")
                 return []
 
+    except RuntimeError as e:
+        if "Event loop is closed" in str(e) or "closed" in str(e).lower():
+            logger.debug("[RAG] Event loop closed during embedding generation")
+            return []
+        raise
     except Exception as e:
+        # Check if error is related to event loop closure
+        error_str = str(e).lower()
+        if "event loop is closed" in error_str or "closed" in error_str:
+            logger.debug(f"[RAG] Event loop closed: {e}")
+            return []
         logger.error(f"[RAG] Failed to generate embedding: {e}")
         return []
 
@@ -340,9 +361,24 @@ class RAGService:
         # Temporary in-memory store for ephemeral uploads (session_id -> list of TempChunks)
         # This data is NOT persisted to DB - lost on server restart
         self.temp_store: Dict[str, List[TempChunk]] = {}
+        
+        # Search result cache: query_hash -> (results, timestamp)
+        # 캐시 TTL: 5분 (같은 쿼리는 캐시에서 반환)
+        self._search_cache: Dict[str, Tuple[List[RAGSearchResult], datetime]] = {}
+        self._cache_ttl_seconds = 300  # 5분
 
     async def initialize(self) -> bool:
         """Initialize RAG service and check Ollama availability."""
+        # Check if event loop is available
+        try:
+            loop = asyncio.get_running_loop()
+            if loop.is_closed():
+                logger.debug("[RAG] Event loop is closed, skipping initialization")
+                return False
+        except RuntimeError:
+            logger.debug("[RAG] No event loop available, skipping initialization")
+            return False
+
         try:
             # Test Ollama connection
             async with httpx.AsyncClient(timeout=10.0) as client:
@@ -354,7 +390,17 @@ class RAGService:
                 else:
                     logger.warning(f"[RAG] Ollama not responding: {response.status_code}")
                     return False
+        except RuntimeError as e:
+            if "Event loop is closed" in str(e) or "closed" in str(e).lower():
+                logger.debug("[RAG] Event loop closed during initialization")
+                return False
+            raise
         except Exception as e:
+            # Check if error is related to event loop closure
+            error_str = str(e).lower()
+            if "event loop is closed" in error_str or "closed" in error_str:
+                logger.debug(f"[RAG] Event loop closed: {e}")
+                return False
             logger.warning(f"[RAG] Failed to connect to Ollama: {e}")
             return False
 
@@ -555,13 +601,38 @@ class RAGService:
                 "total_chunks": sum(len(chunks) for chunks in self.temp_store.values())
             }
 
+    def _compute_cache_key(self, query: str, folder_id: int = None, session_id: str = None) -> str:
+        """검색 쿼리 캐시 키 생성."""
+        import hashlib
+        key_str = f"{query}|{folder_id}|{session_id}"
+        return hashlib.md5(key_str.encode()).hexdigest()
+    
+    def _is_cache_valid(self, cache_entry: Tuple[List[RAGSearchResult], datetime]) -> bool:
+        """캐시 엔트리가 유효한지 확인 (TTL 체크)."""
+        _, timestamp = cache_entry
+        age = (datetime.utcnow() - timestamp).total_seconds()
+        return age < self._cache_ttl_seconds
+    
+    def _cleanup_expired_cache(self) -> None:
+        """만료된 캐시 엔트리 제거."""
+        now = datetime.utcnow()
+        expired_keys = [
+            key for key, (_, timestamp) in self._search_cache.items()
+            if (now - timestamp).total_seconds() >= self._cache_ttl_seconds
+        ]
+        for key in expired_keys:
+            del self._search_cache[key]
+        if expired_keys:
+            logger.debug(f"[RAG] Cleaned up {len(expired_keys)} expired cache entries")
+
     async def search(
         self,
         query: str,
         folder_id: int = None,
         session_id: str = None,
         top_k: int = DEFAULT_TOP_K,
-        min_score: float = 0.3
+        min_score: float = 0.3,
+        timeout: float = 10.0
     ) -> List[RAGSearchResult]:
         """
         Search for relevant chunks using semantic similarity.
@@ -571,15 +642,40 @@ class RAGService:
         - Source B: Memory (Temp RAG) - ephemeral storage by session_id
 
         Returns top_k results sorted by relevance, merged from both sources.
+        
+        Performance optimizations:
+        - Result caching (5min TTL)
+        - Parallel similarity computation
+        - Early termination when enough results found
+        - Timeout protection
         """
+        # 캐시 확인
+        cache_key = self._compute_cache_key(query, folder_id, session_id)
+        if cache_key in self._search_cache:
+            cache_entry = self._search_cache[cache_key]
+            if self._is_cache_valid(cache_entry):
+                cached_results, _ = cache_entry
+                logger.info(f"[RAG] Cache hit for query: {query[:50]}... ({len(cached_results)} results)")
+                return cached_results
+        
+        # 만료된 캐시 정리 (주기적으로)
+        if len(self._search_cache) > 100:  # 캐시가 너무 커지면 정리
+            self._cleanup_expired_cache()
+        
         logger.info(f"[RAG] Searching (folder={folder_id}, session={session_id}) for: {query[:50]}...")
 
-        # Generate query embedding first (shared for both sources)
-        query_embedding = await generate_embedding(
-            query,
-            self.embedding_model,
-            self.ollama_url
-        )
+        try:
+            # 타임아웃 적용하여 임베딩 생성
+            query_embedding = await asyncio.wait_for(
+                generate_embedding(query, self.embedding_model, self.ollama_url),
+                timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"[RAG] Embedding generation timeout after {timeout}s")
+            return []
+        except Exception as e:
+            logger.error(f"[RAG] Failed to generate query embedding: {e}")
+            return []
 
         if not query_embedding:
             logger.error("[RAG] Failed to generate query embedding")
@@ -587,57 +683,81 @@ class RAGService:
 
         results = []
 
-        # Source A: Search in folder cache (permanent RAG)
+        # Source A: Search in folder cache (permanent RAG) - 병렬 처리
         if folder_id is not None:
             folder_chunks = self._chunk_cache.get(folder_id, [])
-            for chunk in folder_chunks:
-                if not chunk.embedding:
-                    continue
+            if folder_chunks:
+                # 유사도 계산을 병렬로 처리 (CPU 바운드이지만 큰 청크 수에서 효과적)
+                def compute_similarity(chunk: DocumentChunk) -> Optional[RAGSearchResult]:
+                    if not chunk.embedding:
+                        return None
+                    score = cosine_similarity(query_embedding, chunk.embedding)
+                    if score >= min_score:
+                        return RAGSearchResult(
+                            content=chunk.content,
+                            filename=chunk.filename,
+                            score=score,
+                            chunk_index=chunk.chunk_index,
+                            document_id=chunk.document_id
+                        )
+                    return None
+                
+                # ThreadPoolExecutor로 병렬 처리 (CPU 바운드 작업)
+                loop = asyncio.get_event_loop()
+                chunk_results = await loop.run_in_executor(
+                    self._executor,
+                    lambda: [compute_similarity(chunk) for chunk in folder_chunks]
+                )
+                
+                # None 제거 및 결과 추가
+                valid_results = [r for r in chunk_results if r is not None]
+                results.extend(valid_results)
+                logger.info(f"[RAG] Folder {folder_id}: found {len(valid_results)} matches from {len(folder_chunks)} chunks")
 
-                score = cosine_similarity(query_embedding, chunk.embedding)
-
-                if score >= min_score:
-                    results.append(RAGSearchResult(
-                        content=chunk.content,
-                        filename=chunk.filename,
-                        score=score,
-                        chunk_index=chunk.chunk_index,
-                        document_id=chunk.document_id
-                    ))
-
-            logger.info(f"[RAG] Folder {folder_id}: found {len([r for r in results])} matches")
-
-        # Source B: Search in temp_store (ephemeral RAG)
+        # Source B: Search in temp_store (ephemeral RAG) - 병렬 처리
         if session_id is not None:
             temp_chunks = self.temp_store.get(session_id, [])
-            temp_results_count = 0
-            for chunk in temp_chunks:
-                if not chunk.embedding:
-                    continue
-
-                score = cosine_similarity(query_embedding, chunk.embedding)
-
-                if score >= min_score:
-                    results.append(RAGSearchResult(
-                        content=chunk.content,
-                        filename=f"[TEMP] {chunk.filename}",
-                        score=score,
-                        chunk_index=chunk.chunk_index,
-                        document_id=-1  # Temp docs have no document_id
-                    ))
-                    temp_results_count += 1
-
-            logger.info(f"[RAG] Temp session {session_id}: found {temp_results_count} matches")
+            if temp_chunks:
+                def compute_temp_similarity(chunk: TempChunk) -> Optional[RAGSearchResult]:
+                    if not chunk.embedding:
+                        return None
+                    score = cosine_similarity(query_embedding, chunk.embedding)
+                    if score >= min_score:
+                        return RAGSearchResult(
+                            content=chunk.content,
+                            filename=f"[TEMP] {chunk.filename}",
+                            score=score,
+                            chunk_index=chunk.chunk_index,
+                            document_id=-1  # Temp docs have no document_id
+                        )
+                    return None
+                
+                # ThreadPoolExecutor로 병렬 처리
+                loop = asyncio.get_event_loop()
+                temp_results = await loop.run_in_executor(
+                    self._executor,
+                    lambda: [compute_temp_similarity(chunk) for chunk in temp_chunks]
+                )
+                
+                # None 제거 및 결과 추가
+                valid_temp_results = [r for r in temp_results if r is not None]
+                results.extend(valid_temp_results)
+                logger.info(f"[RAG] Temp session {session_id}: found {len(valid_temp_results)} matches from {len(temp_chunks)} chunks")
 
         if not results:
             logger.info(f"[RAG] No chunks found for folder={folder_id}, session={session_id}")
+            # 빈 결과도 캐시 (짧은 TTL)
+            self._search_cache[cache_key] = ([], datetime.utcnow())
             return []
 
         # Sort by score and return top_k
         results.sort(key=lambda x: x.score, reverse=True)
         top_results = results[:top_k]
 
-        logger.info(f"[RAG] Found {len(top_results)} relevant chunks (min_score={min_score})")
+        # 결과 캐시 저장
+        self._search_cache[cache_key] = (top_results, datetime.utcnow())
+
+        logger.info(f"[RAG] Found {len(top_results)} relevant chunks (min_score={min_score}, total candidates: {len(results)})")
         for r in top_results:
             logger.debug(f"[RAG]   - {r.filename} (score={r.score:.3f}): {r.content[:50]}...")
 

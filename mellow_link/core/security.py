@@ -23,10 +23,10 @@ logger = logging.getLogger(__name__)
 # Configuration
 # =============================================================================
 
-# Default admin credentials (can be overridden via environment variables)
-# IMPORTANT: Fallback to a safe short password if env var is too long or missing
+# Admin credentials: 환경 변수로만 설정. 기본 비밀번호 없음 (핫픽: 미설정 시 부트스트랩 실패)
 DEFAULT_ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
-DEFAULT_ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "mellow1234")  # Safe default under 72 bytes
+# ADMIN_PASSWORD 미설정 시 초기 관리자 생성하지 않음 (보안 권장)
+DEFAULT_ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
 
 
 # =============================================================================
@@ -246,7 +246,17 @@ def bootstrap_admin_account() -> bool:
                 logger.info(f"[Security] Admin account already exists: '{admin.username}' (ID: {admin.id})")
             return True
 
-        # No admin exists - create default admin
+        # No admin exists - ADMIN_PASSWORD 미설정 시 기동 실패 (핫픽: 기본 비밀번호 제거)
+        if not DEFAULT_ADMIN_PASSWORD:
+            logger.error(
+                "[Security] ADMIN_PASSWORD가 설정되지 않았습니다. "
+                "초기 관리자 계정을 만들려면 .env 또는 환경 변수에 ADMIN_PASSWORD를 설정한 뒤 서버를 재시작하세요."
+            )
+            raise RuntimeError(
+                "ADMIN_PASSWORD 미설정. 관리자 계정이 없고 기본 비밀번호를 사용하지 않습니다. "
+                "환경 변수 ADMIN_PASSWORD를 설정 후 재시작하세요."
+            )
+
         logger.info("[Security] No admin account found. Creating default admin...")
         logger.info(f"[Security]   Username: {DEFAULT_ADMIN_USERNAME}")
 

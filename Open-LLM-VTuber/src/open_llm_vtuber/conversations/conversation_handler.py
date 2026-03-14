@@ -14,6 +14,7 @@ from .single_conversation import process_single_conversation, process_speak_dire
 from .conversation_utils import EMOJI_LIST
 from .types import GroupConversationState
 from prompts import prompt_loader
+from ..utils.sensitive_filter import mask_sensitive_text
 
 
 async def handle_conversation_trigger(
@@ -34,7 +35,7 @@ async def handle_conversation_trigger(
 
     # [CRITICAL] Handle 'speak' type - Bypass LLM, go straight to TTS
     if msg_type == "speak":
-        text = data.get("text", "")
+        text = mask_sensitive_text(data.get("text", ""))
         if not text or not text.strip():
             logger.warning(f"[SpeakDirect] Empty text received from {client_uid}")
             return

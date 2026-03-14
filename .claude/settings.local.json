@@ -8,7 +8,27 @@
       "Bash(dir:*)",
       "Bash(python -m py_compile:*)",
       "Bash(python:*)",
-      "Bash(tree:*)"
+      "Bash(tree:*)",
+      "mcp__ide__getDiagnostics",
+      "WebSearch",
+      "WebFetch(domain:ollama.com)",
+      "WebFetch(domain:docs.ollama.com)",
+      "Bash(curl:*)",
+      "Bash(nvidia-smi:*)",
+      "Bash(where:*)",
+      "Bash(ollama:*)",
+      "Bash(set OLLAMA_DEBUG=1)",
+      "Bash(findstr:*)",
+      "Bash(powershell -Command \"\\(Get-Content D:/AI_Project/mellow_link/main.py | Measure-Object -Line\\).Lines\")",
+      "Bash(timeout 10 python:*)",
+      "Bash(wc:*)",
+      "Bash(mkdir:*)",
+      "Bash(pytest:*)",
+      "Bash(git -C \"D:\\\\AI_Project\\\\mellow_link\" log --oneline -5)",
+      "Bash(git -C:*)",
+      "Bash(powershell -Command \"Invoke-RestMethod -Uri ''http://localhost:8000/runs/run_20260221_185651_3c6bca18/start'' -Method POST -ContentType ''application/json'' -Body ''{\"\"user_input\"\": \"\"현재 디렉토리 파일 목록 보여줘\"\", \"\"mode\"\": \"\"thinking\"\"}''\")",
+      "Bash(powershell:*)",
+      "Bash(grep:*)"
     ]
   }
 }
