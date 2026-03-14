@@ -1,9 +1,9 @@
 # AI_Project
 
-로컬 LLM 기반 실행형 AI 어시스턴트 플랫폼입니다.  
-핵심 서비스는 `Mellow-Link`이고, 필요하면 `Open-LLM-VTuber`와 연결해 음성 출력과 아바타까지 붙일 수 있습니다.
+Mellow-Link는 공통 실행 엔진 위에 유스케이스 모듈을 얹는 로컬 실행형 AI 플랫폼입니다.  
+사용자는 `/ui`에서 모듈을 선택해 실행을 시작하고, 모든 작업은 `run_id` 기반으로 추적됩니다.
 
-현재 기준으로 이 프로그램은 "채팅 앱"이라기보다 아래 흐름을 가진 실행형 제품에 가깝습니다.
+현재 기준으로 이 프로그램은 "채팅 앱"이라기보다 `엔진 + 모듈` 구조를 가진 실행형 제품에 가깝습니다.
 
 - `/ui`: 작업 시작
 - `/runs`: 내 실행 목록
@@ -29,9 +29,9 @@
 
 ## 핵심 구성
 
-### 1. Mellow-Link
+### 1. 공통 엔진
 
-메인 오케스트레이터입니다.
+공통 실행 엔진은 run 생성, 상태 추적, 권한, 이벤트, 공통 콘솔을 담당합니다.
 
 - FastAPI 기반 백엔드
 - 인증, 세션, run 관리
@@ -39,13 +39,30 @@
 - run 이벤트 기록과 SSE 스트리밍
 - 사용자/운영자/개발자 화면 제공
 
-주요 위치:
+엔진 디렉터리:
 
 - [mellow_link/main.py](/D:/AI_Project/mellow_link/main.py)
+- [mellow_link/core](/D:/AI_Project/mellow_link/core)
+- [mellow_link/services](/D:/AI_Project/mellow_link/services)
 - [mellow_link/routers](/D:/AI_Project/mellow_link/routers)
 - [mellow_link/static](/D:/AI_Project/mellow_link/static)
+- [mellow_link/infra](/D:/AI_Project/mellow_link/infra)
 
-### 2. Open-LLM-VTuber
+### 2. 실행 모듈
+
+실행 모듈은 "작업 시작 UI + 입력 스키마 + 실행 로직"만 다르게 가지고, run 추적과 콘솔은 공통 엔진을 그대로 공유합니다.
+
+- [mellow_link/modules/sql_analytics](/D:/AI_Project/mellow_link/modules/sql_analytics)
+- [mellow_link/modules/research_assistant](/D:/AI_Project/mellow_link/modules/research_assistant)
+- [mellow_link/modules/ai_workflow_console](/D:/AI_Project/mellow_link/modules/ai_workflow_console)
+
+대표 역할:
+
+- `sql_analytics`: 자연어 질문을 SQL 분석 run으로 변환
+- `research_assistant`: 문서 업로드와 RAG 분석 run 생성
+- `ai_workflow_console`: 생성 작업 run 관리와 결과 추적
+
+### 3. Open-LLM-VTuber
 
 선택적으로 붙는 음성/아바타 서비스입니다.
 
@@ -58,7 +75,7 @@
 
 - [Open-LLM-VTuber](/D:/AI_Project/Open-LLM-VTuber)
 
-### 3. Launcher
+### 4. Launcher
 
 프로그램 시작점입니다.
 
@@ -89,8 +106,9 @@ Phase 1 기준으로 사용자 흐름은 아래처럼 정리되어 있습니다.
 
 ### `/ui`
 
-작업 시작 전용 화면입니다.
+모듈 선택과 작업 시작 전용 화면입니다.
 
+- 실행 모듈 선택
 - prompt 입력
 - 파일 업로드
 - run 생성
@@ -166,3 +184,4 @@ Phase 1 기준으로 사용자 흐름은 아래처럼 정리되어 있습니다.
 - [AI_PROJECT_STRUCTURE_AND_SPEC.md](/D:/AI_Project/AI_PROJECT_STRUCTURE_AND_SPEC.md)
 - [SYSTEM_ARCHITECTURE_GUIDEBOOK.md](/D:/AI_Project/SYSTEM_ARCHITECTURE_GUIDEBOOK.md)
 - [TROUBLESHOOTING.md](/D:/AI_Project/TROUBLESHOOTING.md)
+- [SQL_ANALYTICS_DEMO.md](/D:/AI_Project/SQL_ANALYTICS_DEMO.md)

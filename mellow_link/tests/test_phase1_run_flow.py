@@ -68,14 +68,13 @@ def _emit_finished(run_id: str, success: bool = True, summary: str = "done"):
     emit_event(run_id, EVENT_TYPE_RUN_FINISHED, {"success": success, "summary": summary})
 
 
-def test_ui_contains_safe_create_start_redirect_flow(client):
+def test_ui_exposes_module_hub(client):
     res = client.get("/ui")
     assert res.status_code == 200
     text = res.text
-    assert "const runId = created.run_id;" in text
-    assert "if (!runId) throw new Error('run_id를 받지 못했습니다.');" in text
-    assert "window.location.href = '/user-console?run_id=' + encodeURIComponent(runId);" in text
-    assert "startError" in text
+    assert "Executable AI Platform" in text
+    assert "/api/modules" in text
+    assert "Modules" in text
 
 
 def test_runs_creation_assigns_default_session_and_list_shows_new_run(client):

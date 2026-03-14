@@ -868,7 +868,7 @@ async def chat_ask(
                     # Run ID 생성 (Progress UI용)
                     from mellow_link.infra.run_events import create_run, emit_event
                     from mellow_link.routers.runs import RUN_CONTROL_STATE
-                    run_id = create_run(session_id=effective_session_id, db=db)
+                    run_id = create_run(session_id=effective_session_id, db=db, module_id="engine", run_kind="chat")
                     RUN_CONTROL_STATE[run_id] = {"paused": False, "abort_requested": False, "running": True}
                     logger.info(f"[ChatAsk] Created run_id: {run_id} for session {effective_session_id}")
                     

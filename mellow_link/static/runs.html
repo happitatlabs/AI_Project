@@ -22,7 +22,7 @@
         </header>
 
         <section class="rounded-3xl border border-white/10 bg-slate-900/60 p-5">
-            <div class="grid md:grid-cols-[1fr_auto_auto] gap-3 mb-5">
+            <div class="grid md:grid-cols-[1fr_auto_auto_auto_auto] gap-3 mb-5">
                 <input id="searchInput" type="text" placeholder="run_id 검색" class="rounded-xl bg-slate-950/70 border border-white/10 px-4 py-3 text-sm focus:outline-none focus:border-cyan-400/40">
                 <select id="statusFilter" class="rounded-xl bg-slate-950/70 border border-white/10 px-4 py-3 text-sm">
                     <option value="">모든 상태</option>
@@ -30,6 +30,12 @@
                     <option value="running">running</option>
                     <option value="completed">completed</option>
                     <option value="failed">failed</option>
+                </select>
+                <select id="moduleFilter" class="rounded-xl bg-slate-950/70 border border-white/10 px-4 py-3 text-sm">
+                    <option value="">모든 모듈</option>
+                </select>
+                <select id="kindFilter" class="rounded-xl bg-slate-950/70 border border-white/10 px-4 py-3 text-sm">
+                    <option value="">모든 실행 유형</option>
                 </select>
                 <button id="refreshBtn" class="rounded-xl bg-cyan-400 px-4 py-3 text-sm font-medium text-slate-950 hover:bg-cyan-300">새로고침</button>
             </div>
@@ -53,10 +59,14 @@
         function render() {
             const q = (document.getElementById('searchInput').value || '').toLowerCase();
             const status = document.getElementById('statusFilter').value;
+            const moduleId = document.getElementById('moduleFilter').value;
+            const runKind = document.getElementById('kindFilter').value;
             const filtered = runs.filter(function (run) {
                 const hitQ = !q || (run.run_id || '').toLowerCase().includes(q);
                 const hitStatus = !status || run.status === status;
-                return hitQ && hitStatus;
+                const hitModule = !moduleId || (run.module_id || '') === moduleId;
+                const hitKind = !runKind || (run.run_kind || '') === runKind;
+                return hitQ && hitStatus && hitModule && hitKind;
             });
             document.getElementById('runsMeta').textContent = filtered.length + '개 run';
             const container = document.getElementById('runsTable');
@@ -72,6 +82,8 @@
                     '<div><div class="font-mono text-sm text-cyan-300">' + run.run_id + '</div><div class="text-xs text-slate-500 mt-1">' + createdAt + '</div></div>' +
                     '<div class="flex flex-wrap gap-2 text-xs">' +
                     '<span class="px-2 py-1 rounded-full border border-white/10">' + (run.status || '-') + '</span>' +
+                    '<span class="px-2 py-1 rounded-full border border-white/10">' + (run.module_id || 'engine') + '</span>' +
+                    '<span class="px-2 py-1 rounded-full border border-white/10">' + (run.run_kind || 'generic') + '</span>' +
                     '<span class="px-2 py-1 rounded-full border border-white/10">mode ' + (run.selected_mode || '-') + '</span>' +
                     '<span class="px-2 py-1 rounded-full border border-white/10">' + duration + '</span>' +
                     '</div></div>' +
@@ -88,11 +100,19 @@
             }
             const data = await res.json();
             runs = data.runs || [];
+            const moduleFilter = document.getElementById('moduleFilter');
+            const kindFilter = document.getElementById('kindFilter');
+            const modules = Array.from(new Set(runs.map(function (r) { return r.module_id || 'engine'; }))).sort();
+            const kinds = Array.from(new Set(runs.map(function (r) { return r.run_kind || 'generic'; }))).sort();
+            moduleFilter.innerHTML = '<option value="">모든 모듈</option>' + modules.map(function (m) { return '<option value="' + m + '">' + m + '</option>'; }).join('');
+            kindFilter.innerHTML = '<option value="">모든 실행 유형</option>' + kinds.map(function (k) { return '<option value="' + k + '">' + k + '</option>'; }).join('');
             render();
         }
 
         document.getElementById('searchInput').addEventListener('input', render);
         document.getElementById('statusFilter').addEventListener('change', render);
+        document.getElementById('moduleFilter').addEventListener('change', render);
+        document.getElementById('kindFilter').addEventListener('change', render);
         document.getElementById('refreshBtn').addEventListener('click', function () { loadRuns().catch(console.warn); });
         loadRuns().catch(function () {
             document.getElementById('runsMeta').textContent = '불러오기 실패';

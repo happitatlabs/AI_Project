@@ -174,7 +174,13 @@ def emit_event(
         return False
 
 
-def create_run(session_id: Optional[str] = None, db: Optional[Session] = None) -> str:
+def create_run(
+    session_id: Optional[str] = None,
+    db: Optional[Session] = None,
+    *,
+    module_id: str = "engine",
+    run_kind: str = "generic",
+) -> str:
     """
     새로운 실행을 생성하고 run_id를 반환.
     
@@ -197,6 +203,8 @@ def create_run(session_id: Optional[str] = None, db: Optional[Session] = None) -
         run = AgentRun(
             run_id=run_id,
             session_id=session_id,
+            module_id=(module_id or "engine").strip() or "engine",
+            run_kind=(run_kind or "generic").strip() or "generic",
             status="pending"
         )
         db.add(run)
@@ -567,6 +575,8 @@ def get_run_snapshot(run_id: str, db: Optional[Session] = None, paused: Optional
         return {
             "run_id": run.run_id,
             "session_id": run.session_id,
+            "module_id": getattr(run, "module_id", "engine") or "engine",
+            "run_kind": getattr(run, "run_kind", "generic") or "generic",
             "status": run.status,
             "created_at": run.created_at.isoformat() if run.created_at else None,
             "updated_at": run.updated_at.isoformat() if run.updated_at else None,
