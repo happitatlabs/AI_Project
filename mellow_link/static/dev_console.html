@@ -68,6 +68,12 @@
         <select id="recentRuns" class="bg-[#16161f] border border-white/10 rounded-lg px-3 py-2 text-sm w-52 focus:ring-1 focus:ring-blue-500 text-slate-300">
             <option value="">최근 run (20개)</option>
         </select>
+        <select id="moduleFilter" class="bg-[#16161f] border border-white/10 rounded-lg px-3 py-2 text-sm w-40 focus:ring-1 focus:ring-blue-500 text-slate-300">
+            <option value="">모든 모듈</option>
+        </select>
+        <select id="kindFilter" class="bg-[#16161f] border border-white/10 rounded-lg px-3 py-2 text-sm w-40 focus:ring-1 focus:ring-blue-500 text-slate-300">
+            <option value="">모든 유형</option>
+        </select>
         <input type="text" id="runIdInput" placeholder="run_id 입력 또는 URL에 ?run_id=..." class="bg-[#16161f] border border-white/10 rounded-lg px-3 py-2 text-sm w-64 focus:ring-1 focus:ring-blue-500 text-slate-300 placeholder-slate-500" />
         <button id="btnConnect" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium text-white">Connect</button>
     </div>
@@ -92,6 +98,11 @@
             </div>
             <div class="px-3 py-1.5 bg-[#16161f] rounded-lg border border-white/5">
                 Mode: <span id="statusMode" class="text-blue-400">-</span>
+            </div>
+            <div class="flex items-center gap-2 px-3 py-1.5 bg-[#16161f] rounded-lg border border-white/5 text-slate-400">
+                <span>Module:</span>
+                <span id="statusModuleId" class="inline-flex items-center rounded-full bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-300 border border-sky-500/20">-</span>
+                <span id="statusRunKind" class="inline-flex items-center rounded-full bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium text-violet-300 border border-violet-500/20">-</span>
             </div>
             <div id="statusBlockWrap" class="relative hidden">
                 <button type="button" id="statusBlockBadge" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium cursor-pointer hover:opacity-90 transition-opacity" title="">
@@ -293,6 +304,8 @@
         let state = {
             status: 'idle',
             mode: '',
+            moduleId: 'engine',
+            runKind: 'generic',
             chainNodes: Object.fromEntries(NODES.map(n => [n, 'pending'])),
             todos: [],
             todos_view: [],
@@ -307,6 +320,7 @@
             lastUpdate: null,
             launcherUserInput: '',
         };
+        let recentRunsCache = [];
         let eventSource = null;
         let lastEventId = null;
         let lastProcessedEventId = 0;
@@ -458,6 +472,8 @@
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (snap) {
                     if (!snap) return null;
+                    state.moduleId = snap.module_id || state.moduleId || 'engine';
+                    state.runKind = snap.run_kind || state.runKind || 'generic';
                     state.todos = snap.todos || [];
                     state.todos_view = snap.todos_view || [];
                     var st = (snap.status || '').toLowerCase();
@@ -511,6 +527,8 @@
             const stepEl = document.getElementById('statusStep');
             const totalEl = document.getElementById('statusTotal');
             const modeEl = document.getElementById('statusMode');
+            const moduleEl = document.getElementById('statusModuleId');
+            const kindEl = document.getElementById('statusRunKind');
             const badge = document.getElementById('statusBadge');
             if (runIdEl) runIdEl.textContent = state.runId || '-';
             if (labelEl) {
@@ -536,6 +554,8 @@
             if (stepEl) stepEl.textContent = String(done);
             if (totalEl) totalEl.textContent = String(total);
             if (modeEl) modeEl.textContent = state.mode || '-';
+            if (moduleEl) moduleEl.textContent = state.moduleId || 'engine';
+            if (kindEl) kindEl.textContent = state.runKind || 'generic';
             const evHc = document.getElementById('statusEvHc');
             if (evHc) {
                 const on = (state.decision && state.decision.escalated) || (state.health && state.health.score != null);
@@ -962,6 +982,8 @@
             state = {
                 status: 'idle',
                 mode: '',
+                moduleId: 'engine',
+                runKind: 'generic',
                 chainNodes: Object.fromEntries(NODES.map(n => [n, 'pending'])),
                 todos: [],
                 todos_view: [],
@@ -991,6 +1013,8 @@
                             state.activity = [];
                             state.events.forEach(function (ev) { state = reduceEvent(ev, state); });
                             if (snap) {
+                                state.moduleId = snap.module_id || state.moduleId || 'engine';
+                                state.runKind = snap.run_kind || state.runKind || 'generic';
                                 state.todos = snap.todos || [];
                                 state.todos_view = snap.todos_view || [];
                                 var st = (snap.status || '').toLowerCase();
@@ -1020,17 +1044,50 @@
             fetch(API + '/api/dev/runs?limit=20')
                 .then(r => r.json())
                 .then(data => {
-                    const sel = document.getElementById('recentRuns');
-                    if (!sel) return;
-                    sel.innerHTML = '<option value="">최근 run (20개)</option>';
-                    (data.runs || []).forEach(r => {
-                        const opt = document.createElement('option');
-                        opt.value = r.run_id || r.id || '';
-                        opt.textContent = (r.run_id || r.id || '').slice(0, 40) + (r.status ? ' [' + r.status + ']' : '');
-                        sel.appendChild(opt);
-                    });
+                    recentRunsCache = data.runs || [];
+                    populateRunFilters(recentRunsCache);
+                    renderRecentRuns();
                 })
                 .catch(() => {});
+        }
+
+        function populateRunFilters(runs) {
+            const moduleSel = document.getElementById('moduleFilter');
+            const kindSel = document.getElementById('kindFilter');
+            if (!moduleSel || !kindSel) return;
+            const currentModule = moduleSel.value;
+            const currentKind = kindSel.value;
+            const modules = Array.from(new Set((runs || []).map(function (r) { return r.module_id || 'engine'; }))).sort();
+            const kinds = Array.from(new Set((runs || []).map(function (r) { return r.run_kind || 'generic'; }))).sort();
+            moduleSel.innerHTML = '<option value="">모든 모듈</option>' + modules.map(function (value) {
+                return '<option value="' + value + '">' + value + '</option>';
+            }).join('');
+            kindSel.innerHTML = '<option value="">모든 유형</option>' + kinds.map(function (value) {
+                return '<option value="' + value + '">' + value + '</option>';
+            }).join('');
+            if (modules.indexOf(currentModule) >= 0) moduleSel.value = currentModule;
+            if (kinds.indexOf(currentKind) >= 0) kindSel.value = currentKind;
+        }
+
+        function renderRecentRuns() {
+            const sel = document.getElementById('recentRuns');
+            const moduleFilter = (document.getElementById('moduleFilter') || {}).value || '';
+            const kindFilter = (document.getElementById('kindFilter') || {}).value || '';
+            if (!sel) return;
+            sel.innerHTML = '<option value="">최근 run (20개)</option>';
+            recentRunsCache
+                .filter(function (r) {
+                    const moduleId = r.module_id || 'engine';
+                    const runKind = r.run_kind || 'generic';
+                    return (!moduleFilter || moduleId === moduleFilter) && (!kindFilter || runKind === kindFilter);
+                })
+                .forEach(function (r) {
+                    const opt = document.createElement('option');
+                    opt.value = r.run_id || r.id || '';
+                    opt.textContent = (r.run_id || r.id || '').slice(0, 24) + ' [' + (r.module_id || 'engine') + ' / ' + (r.run_kind || 'generic') + ']' + (r.status ? ' [' + r.status + ']' : '');
+                    sel.appendChild(opt);
+                });
+            if (state.runId) sel.value = state.runId;
         }
 
         document.getElementById('btnConnect').addEventListener('click', () => {
@@ -1043,6 +1100,8 @@
             document.getElementById('runIdInput').value = runId;
             useRun(runId);
         });
+        document.getElementById('moduleFilter').addEventListener('change', renderRecentRuns);
+        document.getElementById('kindFilter').addEventListener('change', renderRecentRuns);
 
         (function () {
             var popover = document.getElementById('statusBlockPopover');

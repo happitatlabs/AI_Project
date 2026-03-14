@@ -132,7 +132,7 @@
             document.getElementById('consoleView').classList.remove('hidden');
 
             document.getElementById('runIdLabel').textContent = snap.run_id || '-';
-            document.getElementById('runMeta').textContent = (snap.created_at ? new Date(snap.created_at).toLocaleString() : '-') + ' · ' + (snap.status || '-');
+            document.getElementById('runMeta').textContent = (snap.created_at ? new Date(snap.created_at).toLocaleString() : '-') + ' · ' + (snap.module_id || 'engine') + ' · ' + (snap.run_kind || 'generic') + ' · ' + (snap.status || '-');
             const badge = document.getElementById('statusBadge');
             badge.className = 'px-3 py-1 rounded-full text-xs border ' + statusTone(snap.status);
             badge.textContent = snap.status || 'idle';

@@ -72,6 +72,7 @@ from mellow_link.utils import (
 )
 
 from mellow_link.dependencies import get_admin_user_for_flow_view, resolve_console_viewer
+from mellow_link.modules import get_module_registry
 
 
 # =============================================================================
@@ -644,6 +645,8 @@ if FASTAPI_AVAILABLE:
     app.include_router(monitor_router)
     app.include_router(runs_router)
     app.include_router(runtime_router)
+    for module in get_module_registry().list_modules():
+        app.include_router(module.router)
 
     def _static_html_path(name: str) -> Path:
         """Use same static dir as mounted at startup (project_root or __file__)."""

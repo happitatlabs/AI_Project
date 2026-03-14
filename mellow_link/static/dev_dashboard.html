@@ -41,8 +41,16 @@
     <div class="flex flex-1 min-h-0 px-4 pb-12 gap-4 overflow-hidden">
         <!-- Run List Panel (left, ~320px) -->
         <aside class="w-80 shrink-0 flex flex-col bg-[#11111a] rounded-2xl border border-white/5 overflow-hidden">
-            <div class="p-3 border-b border-white/5 bg-[#16161f]/30">
+            <div class="p-3 border-b border-white/5 bg-[#16161f]/30 space-y-2">
                 <input type="text" id="runFilter" placeholder="🔍 Run ID 필터" class="w-full bg-[#0a0a0f] border border-white/5 rounded-lg px-3 py-2 text-sm text-slate-300 placeholder-slate-500 focus:ring-1 focus:ring-blue-500" />
+                <div class="grid grid-cols-2 gap-2">
+                    <select id="moduleFilter" class="w-full bg-[#0a0a0f] border border-white/5 rounded-lg px-3 py-2 text-xs text-slate-300">
+                        <option value="">모든 모듈</option>
+                    </select>
+                    <select id="kindFilter" class="w-full bg-[#0a0a0f] border border-white/5 rounded-lg px-3 py-2 text-xs text-slate-300">
+                        <option value="">모든 실행 유형</option>
+                    </select>
+                </div>
             </div>
             <div id="runList" class="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
                 <div id="runListPlaceholder" class="text-xs text-slate-500 text-center py-6">Run 목록 로딩 중...</div>
@@ -138,7 +146,14 @@
         function renderRunList() {
             const container = document.getElementById('runList');
             const filter = (document.getElementById('runFilter') || {}).value || '';
-            const filtered = filter ? runList.filter(r => (r.run_id || r.id || '').toLowerCase().includes(filter.toLowerCase())) : runList;
+            const moduleId = (document.getElementById('moduleFilter') || {}).value || '';
+            const runKind = (document.getElementById('kindFilter') || {}).value || '';
+            const filtered = runList.filter(function (r) {
+                const hitId = !filter || (r.run_id || r.id || '').toLowerCase().includes(filter.toLowerCase());
+                const hitModule = !moduleId || (r.module_id || 'engine') === moduleId;
+                const hitKind = !runKind || (r.run_kind || 'generic') === runKind;
+                return hitId && hitModule && hitKind;
+            });
             if (!container) return;
             if (!runList.length) {
                 container.innerHTML = '<div id="runListPlaceholder" class="text-xs text-slate-500 text-center py-6">Run이 없습니다. 새 run을 실행해보세요.</div>';
@@ -147,13 +162,16 @@
             container.innerHTML = filtered.map(r => {
                 const rid = r.run_id || r.id || '';
                 const mode = r.selected_mode || r.mode || '-';
+                const module = r.module_id || 'engine';
+                const kind = r.run_kind || 'generic';
                 const ms = r.processing_time ?? r.infer_ms ?? r.duration_ms ?? '-';
                 const tools = r.tool_count ?? (r.tool_calls && r.tool_calls.length) ?? '-';
                 const timeStr = r.created_at ? new Date(r.created_at).toLocaleTimeString() : '';
                 const selected = rid === selectedRunId ? ' selected' : '';
                 return '<div class="run-card' + selected + ' px-3 py-2 rounded-lg border border-white/5 bg-[#16161f]/50" data-run-id="' + rid.replace(/"/g, '&quot;') + '">' +
                     '<div class="flex justify-between items-start"><span class="font-mono text-xs text-blue-400 truncate flex-1">' + rid.slice(0, 24) + (rid.length > 24 ? '…' : '') + '</span>' + statusBadge(r.status) + '</div>' +
-                    '<div class="text-[10px] text-slate-500 mt-1">mode: ' + mode + '</div>' +
+                    '<div class="text-[10px] text-slate-500 mt-1">' + module + ' · ' + kind + '</div>' +
+                    '<div class="text-[10px] text-slate-500">mode: ' + mode + '</div>' +
                     '<div class="text-[10px] text-slate-500">' + (typeof ms === 'number' ? ms + 'ms' : ms) + (typeof tools === 'number' ? ' · tools: ' + tools : '') + '</div>' +
                     (timeStr ? '<div class="text-[10px] text-slate-600 mt-0.5">' + timeStr + '</div>' : '') +
                     '</div>';
@@ -184,6 +202,10 @@
                 .then(dev => {
                     detailState = dev;
                     detailEvents = (dev && dev.events) ? dev.events : [];
+                    if (dev) {
+                        const meta = [dev.module_id || 'engine', dev.run_kind || 'generic'].join(' · ');
+                        document.getElementById('detailRunId').textContent = (runId.slice(0, 24) + (runId.length > 24 ? '…' : '')) + ' · ' + meta;
+                    }
                     renderTimeline();
                     renderEventsTable();
                     renderRawData();
@@ -272,6 +294,10 @@
                 .then(r => r.json())
                 .then(data => {
                     runList = data.runs || [];
+                    const modules = Array.from(new Set(runList.map(function (r) { return r.module_id || 'engine'; }))).sort();
+                    const kinds = Array.from(new Set(runList.map(function (r) { return r.run_kind || 'generic'; }))).sort();
+                    document.getElementById('moduleFilter').innerHTML = '<option value="">모든 모듈</option>' + modules.map(function (m) { return '<option value="' + m + '">' + m + '</option>'; }).join('');
+                    document.getElementById('kindFilter').innerHTML = '<option value="">모든 실행 유형</option>' + kinds.map(function (k) { return '<option value="' + k + '">' + k + '</option>'; }).join('');
                     renderRunList();
                     document.getElementById('footerRuns').textContent = 'Runs: ' + runList.length;
                     var times = runList.map(function (r) { return r.processing_time ?? r.infer_ms ?? r.duration_ms; }).filter(function (n) { return typeof n === 'number' && n > 0; });
@@ -304,6 +330,9 @@
         });
 
         document.getElementById('btnRefresh').addEventListener('click', loadRuns);
+        document.getElementById('runFilter').addEventListener('input', renderRunList);
+        document.getElementById('moduleFilter').addEventListener('change', renderRunList);
+        document.getElementById('kindFilter').addEventListener('change', renderRunList);
         updateViewLinks();
         loadRuns();
     </script>
