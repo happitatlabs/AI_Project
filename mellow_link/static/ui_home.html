@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mellow-Link Home</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .card { background: rgba(17, 24, 39, 0.72); border: 1px solid rgba(255,255,255,0.08); backdrop-filter: blur(16px); }
+    </style>
+</head>
+<body class="min-h-screen bg-[radial-gradient(circle_at_top,_#172554,_#020617_55%)] text-slate-100">
+    <div class="max-w-6xl mx-auto px-6 py-8">
+        <header class="flex flex-wrap items-center justify-between gap-4 mb-8">
+            <div>
+                <p class="text-xs uppercase tracking-[0.25em] text-sky-300/80">Mellow-Link</p>
+                <h1 class="text-4xl font-semibold mt-2">Product Home</h1>
+                <p class="text-slate-400 mt-2">입력, 업로드, 실행 시작만 담당합니다. 진행과 운영은 별도 콘솔에서 봅니다.</p>
+            </div>
+            <nav class="flex flex-wrap gap-2 text-sm">
+                <a href="/runs" class="px-4 py-2 rounded-full border border-white/10 hover:bg-white/5">Runs</a>
+            </nav>
+        </header>
+
+        <main class="grid lg:grid-cols-[1.4fr_0.8fr] gap-6">
+            <section class="card rounded-3xl p-6">
+                <div class="flex items-center justify-between gap-4 mb-5">
+                    <div>
+                        <h2 class="text-xl font-medium">새 실행 시작</h2>
+                        <p class="text-sm text-slate-400 mt-1">run 생성 후 자동으로 사용자 실행 뷰로 이동합니다.</p>
+                    </div>
+                    <span id="homeStatus" class="text-xs px-3 py-1 rounded-full bg-sky-500/10 border border-sky-400/20 text-sky-300">Idle</span>
+                </div>
+
+                <label class="block text-sm text-slate-300 mb-2" for="promptInput">Prompt</label>
+                <textarea id="promptInput" rows="8" class="w-full rounded-2xl bg-slate-950/60 border border-white/10 px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-400/40" placeholder="무엇을 실행할지 적어주세요."></textarea>
+
+                <div class="grid md:grid-cols-[1fr_auto] gap-4 mt-4 items-end">
+                    <div>
+                        <label class="block text-sm text-slate-300 mb-2" for="fileInput">파일 업로드</label>
+                        <input id="fileInput" type="file" multiple class="block w-full rounded-xl bg-slate-950/60 border border-white/10 px-3 py-2 text-sm text-slate-300 file:mr-3 file:rounded-lg file:border-0 file:bg-sky-500/20 file:px-3 file:py-2 file:text-sky-200">
+                        <p id="fileSummary" class="text-xs text-slate-500 mt-2">업로드한 파일은 현재 홈 화면에서 선택만 지원합니다.</p>
+                    </div>
+                    <div class="flex gap-3">
+                        <select id="modeSelect" class="rounded-xl bg-slate-950/60 border border-white/10 px-3 py-3 text-sm">
+                            <option value="auto">auto</option>
+                            <option value="fast">fast</option>
+                            <option value="thinking">thinking</option>
+                            <option value="research">research</option>
+                        </select>
+                        <button id="startRunBtn" class="px-5 py-3 rounded-xl bg-sky-500 text-slate-950 font-medium hover:bg-sky-400 disabled:opacity-50 disabled:cursor-not-allowed">Run Start</button>
+                    </div>
+                </div>
+                <div id="startError" class="hidden mt-4 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200"></div>
+            </section>
+
+            <aside class="space-y-6">
+                <section class="card rounded-3xl p-6">
+                    <h2 class="text-lg font-medium">화면 경계</h2>
+                    <ul class="mt-4 space-y-3 text-sm text-slate-300">
+                        <li><span class="text-sky-300">/ui</span> 입력, 업로드, 실행 시작</li>
+                        <li><span class="text-sky-300">/runs</span> 최근 실행 목록</li>
+                        <li><span class="text-sky-300">/user-console</span> 진행과 결과 확인</li>
+                        <li><span class="text-slate-400">운영/개발 화면</span>은 사용자 흐름에서 분리됨</li>
+                    </ul>
+                </section>
+
+                <section class="card rounded-3xl p-6">
+                    <div class="flex items-center justify-between">
+                        <h2 class="text-lg font-medium">최근 실행</h2>
+                        <a href="/runs" class="text-sm text-sky-300 hover:text-sky-200">전체 보기</a>
+                    </div>
+                    <div id="recentRuns" class="mt-4 space-y-3 text-sm text-slate-300">
+                        <div class="text-slate-500">로딩 중...</div>
+                    </div>
+                </section>
+            </aside>
+        </main>
+    </div>
+
+    <script>
+        const API = window.location.origin;
+
+        function authHeaders(extra) {
+            const token = localStorage.getItem('authToken');
+            const headers = Object.assign({}, extra || {});
+            if (token) headers['Authorization'] = 'Bearer ' + token;
+            return headers;
+        }
+
+        async function loadRecentRuns() {
+            const res = await fetch(API + '/runs?limit=6', { headers: authHeaders({ 'Accept': 'application/json' }) });
+            if (!res.ok) throw new Error('Failed to load runs');
+            const data = await res.json();
+            const container = document.getElementById('recentRuns');
+            const runs = data.runs || [];
+            if (!runs.length) {
+                container.innerHTML = '<div class="text-slate-500">아직 실행 기록이 없습니다.</div>';
+                return;
+            }
+            container.innerHTML = runs.map(function (run) {
+                return '<a class="block rounded-2xl border border-white/8 bg-slate-950/40 px-4 py-3 hover:bg-white/5" href="/user-console?run_id=' + encodeURIComponent(run.run_id) + '">' +
+                    '<div class="flex items-center justify-between gap-3">' +
+                    '<span class="font-mono text-xs text-sky-300">' + run.run_id + '</span>' +
+                    '<span class="text-xs text-slate-400">' + (run.status || '-') + '</span>' +
+                    '</div>' +
+                    '<div class="text-xs text-slate-500 mt-2">' + ((run.summary || '').slice(0, 96) || '요약 없음') + '</div>' +
+                    '</a>';
+            }).join('');
+        }
+
+        document.getElementById('fileInput').addEventListener('change', function () {
+            const files = Array.from(this.files || []);
+            document.getElementById('fileSummary').textContent = files.length ? (files.length + '개 파일 선택됨') : '업로드한 파일은 현재 홈 화면에서 선택만 지원합니다.';
+        });
+
+        document.getElementById('startRunBtn').addEventListener('click', async function () {
+            const prompt = (document.getElementById('promptInput').value || '').trim();
+            if (!prompt) return;
+            const mode = document.getElementById('modeSelect').value || 'auto';
+            const status = document.getElementById('homeStatus');
+            const errorBox = document.getElementById('startError');
+            this.disabled = true;
+            errorBox.classList.add('hidden');
+            errorBox.textContent = '';
+            status.textContent = 'Creating';
+            try {
+                const createRes = await fetch(API + '/runs', { method: 'POST', headers: authHeaders({ 'Accept': 'application/json' }) });
+                if (!createRes.ok) {
+                    const msg = createRes.status === 401 ? '로그인이 필요합니다.' : 'run 생성에 실패했습니다.';
+                    throw new Error(msg);
+                }
+                const created = await createRes.json();
+                const runId = created.run_id;
+                if (!runId) throw new Error('run_id를 받지 못했습니다.');
+                status.textContent = 'Starting';
+                const startRes = await fetch(API + '/runs/' + encodeURIComponent(runId) + '/start', {
+                    method: 'POST',
+                    headers: authHeaders({ 'Content-Type': 'application/json', 'Accept': 'application/json' }),
+                    body: JSON.stringify({
+                        user_input: prompt,
+                        mode: mode,
+                        session_id: created.session_id || null
+                    })
+                });
+                if (!startRes.ok) {
+                    const msg = startRes.status === 401 ? '로그인이 필요합니다.' : 'run 시작에 실패했습니다.';
+                    throw new Error(msg);
+                }
+                window.location.href = '/user-console?run_id=' + encodeURIComponent(runId);
+            } catch (err) {
+                console.warn(err);
+                status.textContent = 'Error';
+                errorBox.textContent = err && err.message ? err.message : '실행을 시작하지 못했습니다.';
+                errorBox.classList.remove('hidden');
+                this.disabled = false;
+            }
+        });
+
+        loadRecentRuns().catch(function () {
+            document.getElementById('recentRuns').innerHTML = '<div class="text-rose-300">최근 실행을 불러오지 못했습니다.</div>';
+        });
+    </script>
+</body>
+</html>

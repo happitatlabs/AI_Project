@@ -49,6 +49,106 @@
         console.log('[Mellow-Patch] VAD bypass and Canvas fix loaded');
       })();
     </script>
+    <script>
+      // [Mellow-Patch] Subtitle Auto-Clear & Fade-out (10초)
+      // VTuber 자막이 10초 후 자연스럽게 사라지도록 처리
+      (function() {
+        const CLEAR_DELAY = 10000; // 10초
+        const FADE_DURATION = 1500; // 1.5초 fade-out
+        let clearTimer = null;
+        let subtitleContainer = null;
+
+        // Chakra UI는 인라인 스타일을 쓰므로, 자막 컨테이너를 텍스트 내용으로 식별
+        function findSubtitleContainer() {
+          if (subtitleContainer && document.contains(subtitleContainer)) {
+            return subtitleContainer;
+          }
+          // Subtitle 컴포넌트는 단일 Box > Text 구조.
+          // React root 아래에서 position:absolute + bottom 스타일을 가진 요소 중
+          // 텍스트를 포함하는 것을 찾는다.
+          const root = document.getElementById('root');
+          if (!root) return null;
+
+          const candidates = root.querySelectorAll('p, span');
+          for (const el of candidates) {
+            // 자막 텍스트의 부모 Box가 subtitle container
+            const parent = el.parentElement;
+            if (!parent) continue;
+            const style = window.getComputedStyle(parent);
+            // subtitle container는 보통 position:absolute, bottom 근처
+            if (style.position === 'absolute' &&
+                (style.bottom !== 'auto' || style.top !== 'auto') &&
+                el.textContent && el.textContent.length > 0) {
+              subtitleContainer = parent;
+              // 트랜지션 미리 설정
+              parent.style.transition = `opacity ${FADE_DURATION}ms ease-out`;
+              return parent;
+            }
+          }
+          return null;
+        }
+
+        function resetFadeTimer() {
+          const container = findSubtitleContainer();
+          if (!container) return;
+
+          // 즉시 보이기 (새 메시지 도착)
+          container.style.opacity = '1';
+          container.style.transition = `opacity ${FADE_DURATION}ms ease-out`;
+
+          // 기존 타이머 취소
+          if (clearTimer) {
+            clearTimeout(clearTimer);
+            clearTimer = null;
+          }
+
+          // 10초 후 fade-out 시작
+          clearTimer = setTimeout(function() {
+            if (container && document.contains(container)) {
+              container.style.opacity = '0';
+            }
+            clearTimer = null;
+          }, CLEAR_DELAY);
+        }
+
+        // MutationObserver: React가 자막 텍스트를 업데이트할 때 감지
+        const observer = new MutationObserver(function(mutations) {
+          for (const mutation of mutations) {
+            // 텍스트 내용 변경 또는 자식 노드 추가/제거
+            if (mutation.type === 'characterData' ||
+                mutation.type === 'childList') {
+              // 빈 텍스트(클리어 프레임)가 아닌 경우에만 타이머 리셋
+              const target = mutation.target;
+              const text = (target.textContent || '').trim();
+              if (text.length > 0) {
+                resetFadeTimer();
+              }
+            }
+          }
+        });
+
+        // DOM 준비 후 감시 시작
+        function startObserving() {
+          const root = document.getElementById('root');
+          if (root) {
+            observer.observe(root, {
+              characterData: true,
+              childList: true,
+              subtree: true,
+            });
+            console.log('[Mellow-Patch] Subtitle auto-clear observer started');
+          } else {
+            setTimeout(startObserving, 500);
+          }
+        }
+
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', startObserving);
+        } else {
+          startObserving();
+        }
+      })();
+    </script>
     <script type="module" crossorigin src="./assets/main-nu7uwxNJ.js"></script>
     <link rel="stylesheet" crossorigin href="./assets/main-QEkl09-0.css">
   </head>

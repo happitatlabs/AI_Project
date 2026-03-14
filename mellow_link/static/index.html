@@ -67,6 +67,14 @@
     gap: 8px;
   }
 
+  /* ===== In-chat TaskBlock (User View) ===== */
+  .task-block-container {
+    overflow: hidden;
+  }
+  .task-block-container .task-block-progress {
+    min-width: 0;
+  }
+
   /* ===== Image Generation Styles ===== */
   .generated-image-container {
     max-width: 512px;
@@ -118,6 +126,63 @@
   details.prompt-details[open] summary::after {
     content: '-';
   }
+
+  /* ===== 자율 작업 보고서 모달 - 모바일 레이아웃 ===== */
+  #autonomousReportModal .autonomous-report-card {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    word-break: break-word;
+  }
+  #autonomousReportModal .autonomous-report-card table,
+  #autonomousReportModal .autonomous-report-card pre {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .autonomous-approve-btn,
+  .autonomous-reject-btn {
+    min-height: 44px;
+    min-width: 80px;
+    padding: 10px 16px;
+    font-size: 0.875rem;
+    touch-action: manipulation;
+  }
+  /* ===== Flow Brief (사이드바 슬림 카드) ===== */
+  .flow-brief-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    border: 1px solid #2d3748;
+    background: #1a1a2e;
+    font-size: 10px;
+    min-height: 0;
+  }
+  .flow-brief-card.flow-critical { background: rgba(220, 38, 38, 0.15); }
+  .flow-brief-card .flow-brief-icon { flex-shrink: 0; }
+  .flow-brief-card .flow-brief-body { flex: 1; min-width: 0; }
+  .flow-brief-card .flow-brief-title { color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
+  .flow-brief-card .flow-brief-time { color: #6b7280; font-size: 9px; }
+  .flow-brief-detail-btn { flex-shrink: 0; padding: 2px 6px; font-size: 9px; background: #3b82f6; color: white; border: none; border-radius: 3px; cursor: pointer; }
+  .flow-brief-detail-btn:hover { background: #2563eb; }
+
+  @media (max-width: 640px) {
+    #autonomousReportModal .bg-dark-card {
+      margin: 0.5rem;
+      padding: 1rem;
+      max-height: calc(100vh - 1rem);
+    }
+    #autonomousReportModal h2 { font-size: 1.125rem; }
+    #autonomousReportModal #autonomousReportContent { font-size: 0.8125rem; }
+    .autonomous-approve-btn,
+    .autonomous-reject-btn {
+      min-height: 48px;
+      min-width: 100px;
+      padding: 12px 18px;
+      font-size: 0.9375rem;
+    }
+  }
     </style>
 </head>
 
@@ -164,6 +229,17 @@
         <div class="flex-1 flex overflow-hidden">
             <main class="flex-1 flex flex-col relative">
                 <div id="editWarningBar" style="display:none;"></div>
+                <!-- Progress panel: plan_created / todos (shown when run_meta or done with run_id) -->
+                <div id="progressPanel" class="hidden border-b border-dark-border bg-dark-card px-4 py-3 shadow-inner">
+                    <details id="progressDetails" class="group" open>
+                        <summary class="cursor-pointer list-none flex items-center gap-2 text-sm font-medium text-gray-200 hover:text-white py-1">
+                            <i class="fas fa-tasks text-purple-400"></i>
+                            <span id="progressSummary">할 일 목록</span>
+                        </summary>
+                        <ul id="progressTodos" class="mt-2 space-y-1.5 text-sm text-gray-400 max-h-52 overflow-y-auto pl-5 list-none"></ul>
+                        <div id="progressLog" class="mt-2 text-xs text-gray-500 max-h-28 overflow-y-auto pl-5 space-y-0.5"></div>
+                    </details>
+                </div>
                 <div id="chatMessages" class="flex-1 chat-scroll px-6 py-4 space-y-4">
                     <div class="text-center text-gray-500 py-8">
                         <p class="text-xl">Welcome to Aventurine v3</p>
@@ -241,6 +317,34 @@
                                         <div class="text-xs text-gray-500">VTuber companion</div>
                                     </div>
                                 </button>
+                            </div>
+                            <!-- Evolution Cycle (자가발전) -->
+                            <div class="pt-1">
+                                <button onclick="launchEvolutionCycle()" id="evolutionCycleBtn" class="w-full px-2 py-2 bg-amber-900/30 hover:bg-amber-900/50 rounded text-xs text-amber-400 transition flex items-center justify-center gap-2" title="삼권분립 자가발전 요청">
+                                    <i class="fas fa-landmark"></i> 자가발전 요청
+                                </button>
+                            </div>
+                            <!-- 자율 작업 보고서 -->
+                            <div class="pt-1">
+                                <button onclick="showAutonomousReportModal()" class="w-full px-2 py-2 bg-indigo-900/30 hover:bg-indigo-900/50 rounded text-xs text-indigo-300 transition flex items-center justify-center gap-2" title="자율 작업 요약 보고서">
+                                    <i class="fas fa-robot"></i> 자율 작업 보고서
+                                </button>
+                            </div>
+                            <!-- 틱 즉시 실행 (테스트용) -->
+                            <div class="pt-1">
+                                <button onclick="runAutonomousTickNow()" class="w-full px-2 py-2 bg-emerald-900/30 hover:bg-emerald-900/50 rounded text-xs text-emerald-300 transition flex items-center justify-center gap-2" title="자율 틱 1회 즉시 실행">
+                                    <i class="fas fa-play-circle"></i> 틱 즉시 실행
+                                </button>
+                            </div>
+                            <!-- 시스템 플로우 관전 (요약만 사이드바, 상세는 별도 창) -->
+                            <div class="pt-1">
+                                <button id="btn-monitor-flow" class="w-full px-2 py-2 bg-cyan-900/30 hover:bg-cyan-900/50 rounded text-xs text-cyan-300 transition flex items-center justify-center gap-2" title="Experience Ledger, Evolution Logs, Behavior Insights 요약">
+                                    <i class="fas fa-stream"></i> 🔍 시스템 플로우 관전
+                                </button>
+                            </div>
+                            <div id="flow-display-area" class="flow-brief-area mt-2 rounded border border-[#2d3748] overflow-hidden" style="display: none;">
+                                <div class="flow-brief-title px-2 py-1.5 text-[10px] font-semibold text-cyan-300 bg-[#1a1a2e]">최근 30분 요약</div>
+                                <div id="flow-list" class="flow-list max-h-48 overflow-y-auto p-1.5 space-y-1 bg-[#0f0f23]/80"></div>
                             </div>
                             <!-- Quick Actions -->
                             <div class="flex gap-2 pt-1">
@@ -367,6 +471,22 @@
                 <button onclick="closeModal('reportModal')" class="px-4 py-3 bg-dark-hover hover:bg-dark-border rounded-lg transition">
                     Cancel
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 자율 작업 보고서 모달 (Admin 전용) -->
+    <div id="autonomousReportModal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 overflow-y-auto" style="display:none;">
+        <div class="bg-dark-card rounded-xl p-8 max-w-2xl w-full mx-4 my-8 border border-indigo-500/30 max-h-[90vh] overflow-y-auto overflow-x-hidden">
+            <h2 class="text-xl font-bold mb-4 flex items-center gap-2">
+                <i class="fas fa-robot text-indigo-400"></i>
+                <span>자율 작업 요약 보고서</span>
+            </h2>
+            <div id="autonomousReportContent" class="space-y-4 text-sm text-gray-300">
+                <p class="text-gray-500">로딩 중...</p>
+            </div>
+            <div class="mt-6">
+                <button onclick="closeModal('autonomousReportModal')" class="px-4 py-2 bg-dark-hover hover:bg-dark-border rounded-lg transition">닫기</button>
             </div>
         </div>
     </div>

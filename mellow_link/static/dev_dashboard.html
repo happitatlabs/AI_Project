@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width:device-width, initial-scale=1">
+    <title>Dev Dashboard | Mellow-Link</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = { theme: { extend: {} }, darkMode: 'class' };
+    </script>
+    <style>
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 10px; }
+        .run-card { cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+        .run-card:hover { background: rgba(59, 130, 246, 0.08); border-color: rgba(59, 130, 246, 0.2); }
+        .run-card.selected { background: rgba(59, 130, 246, 0.12); border-left: 3px solid #3b82f6; }
+    </style>
+</head>
+<body class="min-h-screen bg-[#0a0a0f] text-slate-300 font-sans flex flex-col overflow-y-auto">
+    <!-- Header -->
+    <header class="flex items-center justify-between mb-4 bg-[#16161f]/50 p-3 rounded-xl border border-white/5 backdrop-blur-md shrink-0 mx-4 mt-4">
+        <div class="flex items-center gap-6">
+            <h1 class="text-xl font-bold bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">
+                Mellow-Link Dev Dashboard
+            </h1>
+            <div class="flex bg-[#0f0f15] rounded-lg p-1 border border-white/5">
+                <button type="button" class="px-4 py-1 rounded-md bg-blue-600 text-white text-sm font-medium shadow-lg shadow-blue-900/20">Dashboard</button>
+                <a id="linkConsole" href="/dev-console" class="px-4 py-1 rounded-md hover:bg-white/5 text-sm transition-colors text-slate-500">Dev</a>
+                <a id="linkOperator" href="/operator-console" class="px-4 py-1 rounded-md hover:bg-white/5 text-sm transition-colors text-slate-500">Operator</a>
+                <a id="linkUser" href="/user-console" class="px-4 py-1 rounded-md hover:bg-white/5 text-sm transition-colors text-slate-500">User</a>
+            </div>
+        </div>
+        <div class="flex items-center gap-2">
+            <button id="btnRefresh" class="p-2 hover:bg-white/5 rounded-lg transition-colors border border-white/5" title="새로고침">🔄</button>
+            <button id="btnSettings" class="p-2 hover:bg-white/5 rounded-lg transition-colors border border-white/5" title="설정">⚙️</button>
+        </div>
+    </header>
+
+    <!-- Main: Run List (left) + Detail (right) -->
+    <div class="flex flex-1 min-h-0 px-4 pb-12 gap-4 overflow-hidden">
+        <!-- Run List Panel (left, ~320px) -->
+        <aside class="w-80 shrink-0 flex flex-col bg-[#11111a] rounded-2xl border border-white/5 overflow-hidden">
+            <div class="p-3 border-b border-white/5 bg-[#16161f]/30">
+                <input type="text" id="runFilter" placeholder="🔍 Run ID 필터" class="w-full bg-[#0a0a0f] border border-white/5 rounded-lg px-3 py-2 text-sm text-slate-300 placeholder-slate-500 focus:ring-1 focus:ring-blue-500" />
+            </div>
+            <div id="runList" class="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
+                <div id="runListPlaceholder" class="text-xs text-slate-500 text-center py-6">Run 목록 로딩 중...</div>
+            </div>
+        </aside>
+
+        <!-- Detail Panel (right) -->
+        <main class="flex-1 flex flex-col min-w-0 min-h-0 bg-[#11111a] rounded-2xl border border-white/5 overflow-hidden">
+            <div class="px-4 pt-3 border-b border-white/5 flex items-center justify-between shrink-0 bg-[#16161f]/30">
+                <div class="flex gap-6">
+                    <button type="button" class="detail-tab pb-3 text-xs font-medium transition-all relative text-white border-b-2 border-blue-500" data-tab="timeline">Timeline</button>
+                    <button type="button" class="detail-tab pb-3 text-xs font-medium transition-all text-slate-500 hover:text-slate-300" data-tab="events">Events</button>
+                    <button type="button" class="detail-tab pb-3 text-xs font-medium transition-all text-slate-500 hover:text-slate-300" data-tab="raw">Raw Data</button>
+                    <button type="button" class="detail-tab pb-3 text-xs font-medium transition-all text-slate-500 hover:text-slate-300" data-tab="performance">Performance</button>
+                </div>
+                <div class="text-xs text-slate-500 font-mono">
+                    <span id="detailRunId">Run 선택</span>
+                    <span id="detailTotalMs" class="ml-2 text-slate-400"></span>
+                </div>
+            </div>
+
+            <div id="detailPlaceholder" class="flex-1 flex items-center justify-center text-slate-500 text-sm p-8">
+                왼쪽 Run 목록에서 run을 선택하거나, <a id="openConsoleLink" href="/dev-console" class="text-blue-400 hover:underline">Dev Console</a>에서 상세 State-Centric 뷰를 확인하세요.
+            </div>
+
+            <div id="detailContent" class="hidden flex-1 flex flex-col min-h-0 overflow-hidden">
+                <div id="timelinePane" class="detail-pane flex-1 p-4 overflow-y-auto custom-scrollbar font-mono text-xs">
+                    <div id="timelineContent"></div>
+                </div>
+                <div id="eventsPane" class="detail-pane hidden flex-1 p-4 overflow-y-auto custom-scrollbar">
+                    <table class="w-full text-left text-[11px]">
+                        <thead><tr class="text-slate-500 border-b border-white/5"><th class="pb-2 pr-4">TIME</th><th class="pb-2 pr-4">EVENT</th><th class="pb-2 pr-4">DETAIL</th><th class="pb-2">DELTA</th></tr></thead>
+                        <tbody id="eventsBody"></tbody>
+                    </table>
+                </div>
+                <div id="rawPane" class="detail-pane hidden flex-1 p-4 overflow-y-auto custom-scrollbar">
+                    <pre id="rawContent" class="text-[11px] text-slate-400 whitespace-pre-wrap"></pre>
+                </div>
+                <div id="performancePane" class="detail-pane hidden flex-1 p-4 overflow-y-auto custom-scrollbar">
+                    <div id="performanceContent" class="text-sm text-slate-400 space-y-4"></div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Footer -->
+    <footer class="fixed bottom-0 left-0 right-0 h-10 bg-[#0d0d14]/80 backdrop-blur-xl border-t border-white/5 flex items-center px-4 gap-6 text-[11px] font-medium text-slate-500 z-50">
+        <span id="footerStatus" class="text-slate-500">Run 목록 대기</span>
+        <span id="footerRuns">Runs: 0</span>
+        <span id="footerAvg">Avg: -</span>
+        <div class="ml-auto flex items-center gap-4 text-[10px] font-mono text-slate-600">
+            <span id="footerUpdate">Last: -</span>
+        </div>
+    </footer>
+
+    <script>
+        const API = window.location.origin;
+        const __nativeFetch = window.fetch.bind(window);
+        window.fetch = function (input, init) {
+            init = init || {};
+            const headers = new Headers(init.headers || {});
+            const token = localStorage.getItem('authToken');
+            if (token && !headers.has('Authorization')) headers.set('Authorization', 'Bearer ' + token);
+            init.headers = headers;
+            return __nativeFetch(input, init);
+        };
+        let runList = [];
+        let selectedRunId = null;
+        let detailState = null;
+        let detailEvents = [];
+
+        function updateViewLinks() {
+            const runId = selectedRunId || new URLSearchParams(window.location.search).get('run_id') || '';
+            const q = runId ? '?run_id=' + encodeURIComponent(runId) : '';
+            const con = document.getElementById('linkConsole');
+            const op = document.getElementById('linkOperator');
+            const us = document.getElementById('linkUser');
+            const openCon = document.getElementById('openConsoleLink');
+            if (con) con.href = '/dev-console' + q;
+            if (op) op.href = '/operator-console' + q;
+            if (us) us.href = '/user-console' + q;
+            if (openCon) openCon.href = '/dev-console' + q;
+        }
+
+        function statusBadge(status) {
+            const s = (status || '').toLowerCase();
+            if (s === 'completed' || s === 'success' || s === 'finished') return '<span class="text-green-400">🟢</span>';
+            if (s === 'failed' || s === 'error') return '<span class="text-red-400">🔴</span>';
+            if (s === 'escalated' || s === 'running') return '<span class="text-amber-400">🟡</span>';
+            return '<span class="text-slate-500">⚪</span>';
+        }
+
+        function renderRunList() {
+            const container = document.getElementById('runList');
+            const filter = (document.getElementById('runFilter') || {}).value || '';
+            const filtered = filter ? runList.filter(r => (r.run_id || r.id || '').toLowerCase().includes(filter.toLowerCase())) : runList;
+            if (!container) return;
+            if (!runList.length) {
+                container.innerHTML = '<div id="runListPlaceholder" class="text-xs text-slate-500 text-center py-6">Run이 없습니다. 새 run을 실행해보세요.</div>';
+                return;
+            }
+            container.innerHTML = filtered.map(r => {
+                const rid = r.run_id || r.id || '';
+                const mode = r.selected_mode || r.mode || '-';
+                const ms = r.processing_time ?? r.infer_ms ?? r.duration_ms ?? '-';
+                const tools = r.tool_count ?? (r.tool_calls && r.tool_calls.length) ?? '-';
+                const timeStr = r.created_at ? new Date(r.created_at).toLocaleTimeString() : '';
+                const selected = rid === selectedRunId ? ' selected' : '';
+                return '<div class="run-card' + selected + ' px-3 py-2 rounded-lg border border-white/5 bg-[#16161f]/50" data-run-id="' + rid.replace(/"/g, '&quot;') + '">' +
+                    '<div class="flex justify-between items-start"><span class="font-mono text-xs text-blue-400 truncate flex-1">' + rid.slice(0, 24) + (rid.length > 24 ? '…' : '') + '</span>' + statusBadge(r.status) + '</div>' +
+                    '<div class="text-[10px] text-slate-500 mt-1">mode: ' + mode + '</div>' +
+                    '<div class="text-[10px] text-slate-500">' + (typeof ms === 'number' ? ms + 'ms' : ms) + (typeof tools === 'number' ? ' · tools: ' + tools : '') + '</div>' +
+                    (timeStr ? '<div class="text-[10px] text-slate-600 mt-0.5">' + timeStr + '</div>' : '') +
+                    '</div>';
+            }).join('');
+            container.querySelectorAll('.run-card').forEach(el => {
+                el.addEventListener('click', () => selectRun(el.dataset.runId));
+            });
+        }
+
+        function selectRun(runId) {
+            selectedRunId = runId;
+            if (runId) {
+                history.replaceState(null, '', window.location.pathname + '?run_id=' + encodeURIComponent(runId));
+                loadRunDetail(runId);
+            }
+            updateViewLinks();
+            renderRunList();
+        }
+
+        function loadRunDetail(runId) {
+            document.getElementById('detailPlaceholder').classList.add('hidden');
+            document.getElementById('detailContent').classList.remove('hidden');
+            document.getElementById('detailRunId').textContent = runId.slice(0, 32) + (runId.length > 32 ? '…' : '');
+            document.getElementById('detailTotalMs').textContent = '';
+
+            fetch(API + '/api/dev/runs/' + encodeURIComponent(runId))
+                .then(r => r.ok ? r.json() : null)
+                .then(dev => {
+                    detailState = dev;
+                    detailEvents = (dev && dev.events) ? dev.events : [];
+                    renderTimeline();
+                    renderEventsTable();
+                    renderRawData();
+                    renderPerformance();
+                    const totalMs = dev && (dev.processing_time ?? dev.total_ms);
+                    if (totalMs != null) document.getElementById('detailTotalMs').textContent = 'Total: ' + totalMs + 'ms';
+                })
+                .catch(() => {
+                    detailState = null;
+                    detailEvents = [];
+                    renderTimeline();
+                    renderEventsTable();
+                    renderRawData();
+                    renderPerformance();
+                });
+        }
+
+        function renderTimeline() {
+            const el = document.getElementById('timelineContent');
+            if (!el) return;
+            const events = detailEvents || [];
+            if (!events.length) {
+                el.innerHTML = '<div class="text-slate-500">이벤트 없음</div>';
+                return;
+            }
+            let prevTs = events[0] && events[0].ts;
+            const lines = events.map((ev, i) => {
+                const p = ev.payload || {};
+                const ts = ev.ts != null ? ev.ts : prevTs;
+                const delta = prevTs != null && ts != null ? Math.round((ts - prevTs) * 1000) + 'ms' : '';
+                if (i > 0) prevTs = ts;
+                const timeStr = ts != null ? new Date(ts * 1000).toLocaleTimeString() : '-';
+                let label = (ev.type || '').replace(/_/g, ' ');
+                if (ev.type === 'tool_started' || ev.type === 'tool_done') label += ' ' + (p.tool_name || '');
+                if (ev.type === 'mode_decision') label += ' → ' + (p.selected_mode || '') + (p.escalated ? ' (escalated)' : '');
+                return '<div class="flex gap-4 py-1.5 border-b border-white/5"><span class="text-slate-600 shrink-0 w-20">' + timeStr + '</span><span class="text-blue-400 shrink-0">' + (ev.type || '').toUpperCase() + '</span><span class="text-slate-300">' + label + '</span><span class="text-slate-500 ml-auto">' + delta + '</span></div>';
+            });
+            el.innerHTML = lines.join('');
+        }
+
+        function renderEventsTable() {
+            const tbody = document.getElementById('eventsBody');
+            if (!tbody) return;
+            const events = detailEvents || [];
+            let prevTs = null;
+            tbody.innerHTML = events.map(ev => {
+                const p = ev.payload || {};
+                const ts = ev.ts;
+                const timeStr = ts != null ? new Date(ts * 1000).toLocaleTimeString() : '-';
+                const delta = prevTs != null && ts != null ? '+' + Math.round((ts - prevTs) * 1000) + 'ms' : '';
+                if (ts != null) prevTs = ts;
+                const detail = p ? JSON.stringify(p).slice(0, 100) : '';
+                return '<tr class="border-b border-white/5"><td class="py-1 pr-4 text-slate-600">' + timeStr + '</td><td class="py-1 pr-4 text-slate-300">' + (ev.type || '') + '</td><td class="py-1 pr-4 text-slate-400">' + detail + '</td><td class="py-1 text-slate-500">' + delta + '</td></tr>';
+            }).join('');
+        }
+
+        function renderRawData() {
+            const el = document.getElementById('rawContent');
+            if (!el) return;
+            el.textContent = detailState ? JSON.stringify({ run_id: selectedRunId, status: detailState.status, decision: detailState.decision, todos: detailState.todos, events: detailEvents, health: detailState.health }, null, 2) : 'Run을 선택하세요.';
+        }
+
+        function renderPerformance() {
+            const el = document.getElementById('performanceContent');
+            if (!el) return;
+            if (!detailState) {
+                el.innerHTML = '<p>Run을 선택하세요.</p>';
+                return;
+            }
+            const ms = detailState.processing_time ?? detailState.total_ms ?? 0;
+            const toolCount = (detailState.events || []).filter(e => e.type === 'tool_done' || e.type === 'tool_started').length / 2;
+            var times = runList.map(function (r) { return r.processing_time ?? r.infer_ms ?? r.duration_ms; }).filter(function (n) { return typeof n === 'number' && n > 0; });
+            var sorted = times.slice().sort(function (a, b) { return a - b; });
+            var mean = sorted.length ? Math.round(sorted.reduce(function (a, b) { return a + b; }, 0) / sorted.length) : null;
+            var p50 = sorted.length ? sorted[Math.floor(sorted.length * 0.5)] : null;
+            var p95 = sorted.length ? sorted[Math.min(Math.floor(sorted.length * 0.95), sorted.length - 1)] : null;
+            var compHtml = mean != null ? '<p class="text-2xl font-mono text-white">p50 <span class="text-blue-400">' + p50 + '</span> · p95 <span class="text-amber-400">' + p95 + '</span> · mean <span class="text-slate-300">' + mean + '</span> <span class="text-slate-500 text-sm">ms</span></p>' : '<p class="text-slate-400 text-sm">Run 목록에서 처리 시간 데이터가 없습니다.</p>';
+            el.innerHTML = '<div class="grid grid-cols-2 gap-4">' +
+                '<div class="bg-[#16161f] rounded-xl p-4 border border-white/5"><h3 class="text-slate-500 text-xs uppercase mb-2">This Run</h3><p class="text-2xl font-mono text-white">' + ms + ' <span class="text-slate-500 text-sm">ms</span></p><p class="text-xs text-slate-500 mt-1">Tools: ' + Math.round(toolCount) + '</p></div>' +
+                '<div class="bg-[#16161f] rounded-xl p-4 border border-white/5"><h3 class="text-slate-500 text-xs uppercase mb-2">Comparison (current list)</h3>' + compHtml + '</div></div>' +
+                '<div class="mt-4 p-4 bg-[#16161f] rounded-xl border border-white/5"><h3 class="text-slate-500 text-xs uppercase mb-2">Flags & Alerts</h3><p class="text-slate-400 text-sm">' + (detailState.decision && detailState.decision.escalated ? '⚡ Escalation 발생' : '✅ 정상') + '</p></div>';
+        }
+
+        function loadRuns() {
+            fetch(API + '/api/dev/runs?limit=20')
+                .then(r => r.json())
+                .then(data => {
+                    runList = data.runs || [];
+                    renderRunList();
+                    document.getElementById('footerRuns').textContent = 'Runs: ' + runList.length;
+                    var times = runList.map(function (r) { return r.processing_time ?? r.infer_ms ?? r.duration_ms; }).filter(function (n) { return typeof n === 'number' && n > 0; });
+                    var avg = times.length ? Math.round(times.reduce(function (a, b) { return a + b; }, 0) / times.length) : null;
+                    var footerAvgEl = document.getElementById('footerAvg');
+                    if (footerAvgEl) footerAvgEl.textContent = avg != null ? 'Avg: ' + avg + 'ms' : 'Avg: -';
+                    const params = new URLSearchParams(window.location.search);
+                    const runIdParam = params.get('run_id');
+                    if (runIdParam) selectRun(runIdParam);
+                    else if (runList.length && !selectedRunId) selectRun(runList[0].run_id || runList[0].id);
+                })
+                .catch(() => {
+                    runList = [];
+                    renderRunList();
+                    document.getElementById('footerAvg').textContent = 'Avg: -';
+                });
+        }
+
+        document.querySelectorAll('.detail-tab').forEach(btn => {
+            btn.addEventListener('click', function () {
+                const tab = this.dataset.tab;
+                document.querySelectorAll('.detail-tab').forEach(b => { b.classList.remove('text-white', 'border-b-2', 'border-blue-500'); b.classList.add('text-slate-500'); });
+                this.classList.add('text-white', 'border-b-2', 'border-blue-500');
+                this.classList.remove('text-slate-500');
+                document.querySelectorAll('.detail-pane').forEach(p => { p.classList.add('hidden'); p.classList.remove('flex'); });
+                const paneId = tab === 'timeline' ? 'timelinePane' : tab === 'events' ? 'eventsPane' : tab === 'raw' ? 'rawPane' : 'performancePane';
+                const pane = document.getElementById(paneId);
+                if (pane) { pane.classList.remove('hidden'); pane.classList.add('flex'); }
+            });
+        });
+
+        document.getElementById('btnRefresh').addEventListener('click', loadRuns);
+        updateViewLinks();
+        loadRuns();
+    </script>
+</body>
+</html>

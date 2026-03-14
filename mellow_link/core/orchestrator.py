@@ -19,97 +19,20 @@ Extracted from legacy:
 
 import asyncio
 import logging
+import os
 from typing import Optional, Dict, Any, Callable, List, AsyncGenerator
 from datetime import datetime, timedelta
-from dataclasses import dataclass, field
 from collections import defaultdict
 import time
 
 from .states import SystemState, TaskPriority, TransitionResult
 from .events import Event, TaskEvent, StateChangeEvent, EventType, VRAMEvent
+from .agent_brain import AgentBrain
+from .orchestrator_schemas import ChatState, IntentResult, ChatContext, VALID_TRANSITIONS
+from .orchestrator_persona import load_persona_from_file
+from .orchestrator_chat import ChatPipelineProcessor
 
 logger = logging.getLogger(__name__)
-
-
-# =============================================================================
-# Chat Processing States (from legacy state_machine.py)
-# =============================================================================
-
-class ChatState:
-    """Chat processing pipeline states."""
-    IDLE = "idle"
-    ANALYZING = "analyzing"
-    RETRIEVING = "retrieving"
-    GENERATING = "generating"
-    COMPLETED = "completed"
-    ERROR = "error"
-
-
-@dataclass
-class IntentResult:
-    """
-    Result of intent classification.
-
-    Attributes:
-        intent: Classified intent type (simple_chat, image_request, document_qa)
-        confidence: Confidence score (0.0 ~ 1.0)
-        metadata: Additional metadata from classification
-    """
-    intent: str  # "simple_chat" | "image_request" | "document_qa"
-    confidence: float = 1.0
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class ChatContext:
-    """
-    Context for chat processing pipeline.
-
-    Migrated from legacy StateContext with enhancements for
-    the new modular architecture.
-    """
-    # Input
-    user_query: str
-    system_prompt: str = ""
-    use_rag: bool = False
-    rag_collection_name: Optional[str] = None
-    user_memories: List[str] = field(default_factory=list)
-    session_history: List[Dict[str, str]] = field(default_factory=list)
-    mode: str = "thinking"  # fast, thinking, research, auto
-
-    # Processing state
-    should_use_rag: bool = False
-    rag_context: str = ""
-    rag_sources: List[Dict] = field(default_factory=list)
-
-    # Intent classification results
-    intent_result: Optional[IntentResult] = None
-    target_service: str = "llm"  # "llm" | "image" | "document"
-    refined_prompt: str = ""  # Flux-optimized English prompt for image generation
-
-    # Output
-    final_answer: str = ""
-    state_info: str = ""
-    rag_used: bool = False
-
-    # Metadata
-    current_state: str = ChatState.IDLE
-    error_message: str = ""
-    processing_time: float = 0.0
-    selected_mode: Optional[str] = None
-
-
-# =============================================================================
-# State Transition Matrix
-# =============================================================================
-
-# Valid state transitions: from_state -> set of valid to_states
-VALID_TRANSITIONS: Dict[SystemState, set] = {
-    SystemState.IDLE: {SystemState.TEXT, SystemState.IMAGE, SystemState.ERROR},
-    SystemState.TEXT: {SystemState.IDLE, SystemState.IMAGE, SystemState.ERROR},
-    SystemState.IMAGE: {SystemState.IDLE, SystemState.TEXT, SystemState.ERROR},
-    SystemState.ERROR: {SystemState.IDLE},
-}
 
 
 # =============================================================================
@@ -154,6 +77,16 @@ class Orchestrator:
             cls._instance = super().__new__(cls)
         return cls._instance
 
+    @classmethod
+    def get_instance(cls) -> Optional['Orchestrator']:
+        """
+        Singleton accessor (legacy/extension compatibility).
+
+        Note:
+            일부 확장(예: agent_tools.create_image)에서 기대하는 API.
+        """
+        return cls._instance or cls()
+
     def __init__(self):
         """
         Initialize the Orchestrator.
@@ -194,8 +127,144 @@ class Orchestrator:
         self._active_tasks: Dict[str, TaskEvent] = {}
         self._task_results: Dict[str, Any] = {}
 
+        # LLM + AgentBrain (ReAct loop)
+        # - llm_service는 기존 구조상 self._services["llm"]로 등록되므로 별도 참조를 둔다.
+        # - agent는 LLM이 등록/연결된 직후 초기화된다.
+        self.llm_service: Optional[Any] = None
+        self.agent: Optional[AgentBrain] = None
+
+        self._chat_pipeline = ChatPipelineProcessor(self)
+
+        # In-memory session runtime (fast_fallback_used etc.). Lazy TTL cleanup on access.
+        self._session_runtime: Dict[str, Dict[str, Any]] = {}
+        self._SESSION_RUNTIME_TTL_SECONDS: float = 30 * 60  # 30 minutes
+
         self._initialized = True
         logger.info("[Orchestrator] Instance created (singleton)")
+
+    def _get_session_runtime_state(self, session_id: str) -> Dict[str, Any]:
+        """Get or create session state; lazy TTL cleanup (drop if last_seen older than TTL)."""
+        now = time.time()
+        entry = self._session_runtime.get(session_id)
+        if entry is not None:
+            if now - entry.get("last_seen", 0) > self._SESSION_RUNTIME_TTL_SECONDS:
+                logger.info("Session runtime expired: %s", session_id)
+                try:
+                    from mellow_link.core.metrics_collector import get_metrics_collector
+                    coll = get_metrics_collector()
+                    if coll:
+                        coll.push("SESSION_RUNTIME_EXPIRED", 1.0, "count", metric_id=session_id)
+                except Exception:
+                    pass
+                del self._session_runtime[session_id]
+                entry = None
+        if entry is None:
+            entry = {"fast_fallback_used": False, "last_seen": now}
+            self._session_runtime[session_id] = entry
+        else:
+            entry["last_seen"] = now
+        return entry
+
+    def _init_agent_if_possible(self) -> None:
+        """
+        LLM 서비스가 준비되면 AgentBrain을 1회 초기화한다.
+
+        - FSM/락 구조는 그대로 두고, 텍스트 생성의 LLM 호출만 에이전트 루프로 위임하기 위함.
+        """
+        if self.agent is not None:
+            return
+
+        llm = self.llm_service or self._services.get("llm")
+        if llm is None:
+            return
+
+        self.llm_service = llm
+        self.agent = AgentBrain(self.llm_service)
+        logger.info("[Orchestrator] AgentBrain initialized")
+
+    async def run_agent(
+        self,
+        user_input: str,
+        history: List[Dict[str, str]],
+        is_admin: bool = False,
+        mode: str = "fast",
+        session_id: Optional[str] = None,
+        prompt_category: Optional[str] = None,
+        session_state: Optional[Dict[str, Any]] = None,
+    ):
+        """
+        AgentBrain 실행을 Orchestrator 락/수명주기와 함께 제공하는 공개 메서드.
+
+        - mode: "fast" | "thinking" | "research" | "auto". "auto"면 쿼리 기반으로 fast/thinking 선택 (research는 명시 시에만).
+        - prompt_category: optional "tool" | "fast" | "thinking" | "research". If "tool" and mode=="auto", selected_mode is never "fast".
+        - session_id: 있으면 세션 스코프 런타임(예: fast_fallback_used) 유지.
+        - session_state: Optional session state dict (예: {"run_id": "..."}). 제공되면 사용, 없으면 session_id로부터 생성.
+        """
+        if session_id is not None:
+            session_id = str(session_id)
+        self._init_agent_if_possible()
+        if self.agent is None:
+            raise RuntimeError("AgentBrain is not initialized (LLM service missing)")
+        if self._gpu_lock is None:
+            raise RuntimeError("GPU lock is not initialized (call initialize() first)")
+
+        effective_mode = (mode or "fast").strip().lower()
+        if effective_mode == "auto":
+            # Use caller-provided prompt_category if given; else detect from query
+            if prompt_category is None:
+                tool_keywords = [
+                    '파일', '폴더', '경로', '읽어', '써', '저장', '삭제', '업로드', '문서', '인덱싱', '검색', 'rag',
+                    'file', 'folder', 'path', 'read', 'write', 'save', 'delete', 'upload', 'document', 'index', 'search', 'rag',
+                    '도구', 'tool', '실행', 'execute', '호출', 'call'
+                ]
+                user_input_lower = user_input.lower()
+                if any(keyword in user_input_lower for keyword in tool_keywords):
+                    prompt_category = "tool"
+            effective_mode = self._chat_pipeline._select_mode_for_query(user_input, prompt_category=prompt_category)
+            logger.debug(f"AUTO_MODE_DECISION category={prompt_category} selected={effective_mode}")
+        else:
+            logger.debug(f"AUTO_MODE_DECISION category={prompt_category} selected={effective_mode}")
+
+        # Session-scoped state for fallback etc. (in-memory; lazy TTL 30min)
+        # session_state가 제공되면 사용, 없으면 session_id로부터 생성
+        if session_state is None:
+            session_state = None
+            if session_id:
+                session_state = self._get_session_runtime_state(session_id)
+                session_state["session_id"] = session_id
+        elif session_id and "session_id" not in session_state:
+            # session_state가 제공되었지만 session_id가 없으면 추가
+            session_state["session_id"] = session_id
+
+        # 1. 모드에 따라 파일명 결정
+        filename = "aventurine_persona_v1.txt" if is_admin else "default_system_prompt.txt"
+
+        # 2. 파일에서 텍스트 로딩
+        target_persona = load_persona_from_file(filename)
+
+        # 3. Observation strict: only in thinking/research (env MELLOW_OBSERVATION_STRICT_MODES)
+        require_observation = False
+        try:
+            from mellow_link.config import get_settings
+            s = get_settings()
+            strict_modes_str = getattr(s, "observation_strict_modes", "thinking,research") or "thinking,research"
+            strict_modes = [m.strip().lower() for m in strict_modes_str.split(",") if m.strip()]
+            require_observation = effective_mode in strict_modes
+        except Exception:
+            strict_modes = ["thinking", "research"]
+            require_observation = effective_mode in strict_modes
+
+        async with self._gpu_lock:
+            return await self.agent.run(
+                user_input,
+                context=history,
+                persona=target_persona,
+                require_at_least_one_tool=require_observation,
+                mode=effective_mode,
+                session_id=session_id,
+                session_state=session_state,
+                is_admin=is_admin,
+            )
 
     async def initialize(self) -> None:
         """
@@ -222,6 +291,9 @@ class Orchestrator:
 
         # Try to connect to services
         await self._connect_services()
+
+        # LLM 서비스가 연결된 직후 에이전트 초기화
+        self._init_agent_if_possible()
 
         # Emit initialization event
         await self.emit_event(Event(
@@ -386,6 +458,63 @@ class Orchestrator:
 
         # Perform transition
         try:
+            # ── VRAM_MANAGEMENT: 상태 전환 시 이전 상태의 모델 언로드 ──
+            # 벤치마크 모드 확인 (한 번만 확인)
+            should_unload = True
+            try:
+                from mellow_link.config import get_settings
+                settings = get_settings()
+                should_unload = getattr(settings, "enable_model_unload_on_idle", True)
+            except Exception:
+                # 설정 로드 실패 시 환경 변수 직접 확인
+                import os
+                env_value = os.getenv("ENABLE_MODEL_UNLOAD_ON_IDLE", "").strip().lower()
+                if env_value in {"0", "false", "no", "off", "disabled"}:
+                    should_unload = False
+            
+            # IMAGE -> TEXT/IDLE: 이미지 모델 언로드 (벤치마크 모드에서는 비활성화 가능)
+            if previous_state == SystemState.IMAGE and target_state != SystemState.IMAGE:
+                if should_unload:
+                    image_service = self._services.get("image")
+                    if image_service and hasattr(image_service, "unload_model"):
+                        try:
+                            logger.info("[Orchestrator] IMAGE -> 다른 상태 전환: 이미지 모델 언로드 시작")
+                            unload_success = await image_service.unload_model()
+                            if unload_success:
+                                logger.info("[Orchestrator] 이미지 모델 언로드 완료 (VRAM 해제)")
+                            else:
+                                logger.warning("[Orchestrator] 이미지 모델 언로드 실패 (VRAM이 계속 사용 중일 수 있음)")
+                        except Exception as unload_error:
+                            logger.error(f"[Orchestrator] 이미지 모델 언로드 중 오류: {unload_error}")
+                else:
+                    logger.debug("[Orchestrator] 벤치마크 모드: IDLE 전환 시 이미지 모델 언로드 건너뜀 (모델 유지)")
+            
+            # TEXT -> IMAGE/IDLE: LLM 모델 언로드 (벤치마크 모드에서는 비활성화 가능)
+            if previous_state == SystemState.TEXT and target_state != SystemState.TEXT:
+                if should_unload:
+                    llm_service = self._services.get("llm")
+                    if llm_service and hasattr(llm_service, "unload_model"):
+                        try:
+                            logger.info("[Orchestrator] TEXT -> 다른 상태 전환: LLM 모델 언로드 시작")
+                            unload_success = await llm_service.unload_model()
+                            if unload_success:
+                                logger.info("[Orchestrator] LLM 모델 언로드 완료 (VRAM 해제)")
+                            else:
+                                logger.warning("[Orchestrator] LLM 모델 언로드 실패 (VRAM이 계속 사용 중일 수 있음)")
+                        except Exception as unload_error:
+                            logger.error(f"[Orchestrator] LLM 모델 언로드 중 오류: {unload_error}")
+                else:
+                    logger.debug("[Orchestrator] 벤치마크 모드: IDLE 전환 시 LLM 모델 언로드 건너뜀 (모델 유지)")
+            
+            # 가비지 컬렉션 강제 실행 (모델 언로드 후)
+            if previous_state != target_state and previous_state != SystemState.IDLE:
+                try:
+                    import gc
+                    collected = gc.collect()
+                    logger.debug(f"[Orchestrator] 상태 전환 후 GC 실행: {collected}개 객체 해제")
+                except Exception as gc_error:
+                    logger.debug(f"[Orchestrator] GC 실행 실패 (무시): {gc_error}")
+            
             self.current_state = target_state
             self._last_transition_time = datetime.now()
 
@@ -412,6 +541,55 @@ class Orchestrator:
             logger.error(f"[Orchestrator] State transition error: {e}")
             self._metrics["last_error"] = str(e)
             return TransitionResult.ERROR
+
+    async def force_state_change(
+        self,
+        target_state: SystemState,
+        reason: str = "",
+        run_id: Optional[str] = None,
+    ) -> TransitionResult:
+        """
+        Request state transition ignoring cooldown (FINALLY → FORCE IDLE policy).
+
+        Used in finally blocks to guarantee IDLE recovery regardless of cooldown.
+        On failure, logs and emits an event for diagnostics.
+
+        Args:
+            target_state: Desired state (typically SystemState.IDLE)
+            reason: Human-readable reason
+            run_id: Optional task_id/run_id for logging
+
+        Returns:
+            TransitionResult (SUCCESS or failure reason)
+        """
+        previous_state = self.current_state
+        result = await self.request_state_change(
+            target_state, reason=reason, force=True
+        )
+        if not result.is_success():
+            logger.error(
+                "FSM IDLE recovery failed: previous_state=%s current_state=%s "
+                "failure_reason=%s run_id=%s",
+                previous_state.name,
+                self.current_state.name,
+                result.name,
+                run_id or "n/a",
+            )
+            await self.emit_event(
+                Event(
+                    event_type=EventType.ERROR,
+                    payload={
+                        "kind": "fsm_idle_recovery_failed",
+                        "previous_state": previous_state.name,
+                        "current_state": self.current_state.name,
+                        "failure_reason": result.name,
+                        "run_id": run_id,
+                        "reason": reason,
+                    },
+                    source="orchestrator",
+                )
+            )
+        return result
 
     def _is_valid_transition(
         self,
@@ -647,11 +825,12 @@ class Orchestrator:
             # Remove from active tasks
             self._active_tasks.pop(task_id, None)
 
-            # Return to IDLE state
+            # FINALLY → FORCE IDLE: cooldown 무시하고 항상 IDLE 복귀 시도
             if self.current_state != SystemState.IDLE:
-                await self.request_state_change(
+                await self.force_state_change(
                     SystemState.IDLE,
-                    reason=f"Task {task_id} completed"
+                    reason=f"Task {task_id} completed",
+                    run_id=task_id,
                 )
 
     def _get_state_for_task(self, task_type: str) -> SystemState:
@@ -703,8 +882,7 @@ class Orchestrator:
         """
         Process a chat request through the full pipeline.
 
-        This implements the legacy ChatStateMachine flow:
-            ANALYZING -> RETRIEVING (optional) -> GENERATING -> COMPLETED
+        ANALYZING -> RETRIEVING (optional) -> GENERATING -> GENERATING_RESPONSE -> COMPLETED
 
         Args:
             context: ChatContext with request data
@@ -714,33 +892,7 @@ class Orchestrator:
         Returns:
             Updated ChatContext with response
         """
-        start_time = time.time()
-
-        try:
-            # ANALYZING: Determine if RAG should be used
-            context.current_state = ChatState.ANALYZING
-            context = await self._analyze_request(context)
-
-            # RETRIEVING: Search documents if RAG is enabled
-            if context.should_use_rag and rag_search_fn:
-                context.current_state = ChatState.RETRIEVING
-                context = await self._retrieve_documents(context, rag_search_fn)
-
-            # GENERATING: Call LLM
-            context.current_state = ChatState.GENERATING
-            if llm_generate_fn:
-                context = await self._generate_response(context, llm_generate_fn)
-
-            context.current_state = ChatState.COMPLETED
-
-        except Exception as e:
-            logger.error(f"[Orchestrator] Chat processing error: {e}", exc_info=True)
-            context.current_state = ChatState.ERROR
-            context.error_message = str(e)
-            context.state_info = "ERROR"
-
-        context.processing_time = time.time() - start_time
-        return context
+        return await self._chat_pipeline.process_chat(context, rag_search_fn, llm_generate_fn)
 
     async def process_chat_stream(
         self,
@@ -759,423 +911,10 @@ class Orchestrator:
         Yields:
             Text chunks from LLM response
         """
-        start_time = time.time()
-
-        try:
-            # ANALYZING
-            context.current_state = ChatState.ANALYZING
-            context = await self._analyze_request(context)
-
-            # RETRIEVING
-            if context.should_use_rag and rag_search_fn:
-                context.current_state = ChatState.RETRIEVING
-                context = await self._retrieve_documents(context, rag_search_fn)
-
-            # GENERATING (streaming)
-            context.current_state = ChatState.GENERATING
-
-            if llm_stream_fn:
-                # Build final prompt with RAG context
-                final_prompt = self._build_final_prompt(context)
-
-                # Acquire GPU lock and stream
-                async with self._gpu_lock:
-                    async for chunk in llm_stream_fn(
-                        system_prompt=context.system_prompt,
-                        user_prompt=final_prompt,
-                        mode=context.selected_mode or context.mode
-                    ):
-                        context.final_answer += chunk
-                        yield chunk
-
-            context.current_state = ChatState.COMPLETED
-
-        except Exception as e:
-            logger.error(f"[Orchestrator] Stream error: {e}", exc_info=True)
-            context.current_state = ChatState.ERROR
-            context.error_message = str(e)
-            yield f"\n[Error: {str(e)}]"
-
-        context.processing_time = time.time() - start_time
-
-    async def _analyze_request(self, context: ChatContext) -> ChatContext:
-        """
-        Analyze the user's question to classify intent.
-
-        Intent Classification Flow:
-            1. Keyword-based fast filtering (for speed)
-            2. LLM-based precision analysis (for accuracy)
-            3. Route to appropriate service based on intent
-
-        Returns:
-            Updated ChatContext with intent_result, target_service, and refined_prompt
-        """
-        user_query = context.user_query
-
-        # =================================================================
-        # Step 1: Keyword-based fast filtering (for speed)
-        # =================================================================
-        image_keywords_ko = [
-            "그려", "그림", "이미지", "사진", "만들어", "생성",
-            "일러스트", "그래픽", "캐릭터", "배경", "풍경",
-            "포스터", "로고", "아이콘", "디자인"
-        ]
-        image_keywords_en = [
-            "draw", "create", "generate", "image", "picture",
-            "illustration", "artwork", "painting", "render"
-        ]
-
-        query_lower = user_query.lower()
-
-        # Fast path: Clear image request keywords detected
-        for kw in image_keywords_ko + image_keywords_en:
-            if kw in query_lower:
-                logger.info(f"[Orchestrator] Image keyword detected: '{kw}'")
-                context.intent_result = IntentResult(
-                    intent="image_request",
-                    confidence=0.9,
-                    metadata={"detected_keyword": kw}
-                )
-                context.target_service = "image"
-                context.state_info = "IMAGE_REQUEST"
-
-                # Generate Flux-optimized prompt
-                context.refined_prompt = await self._expand_prompt_for_flux(user_query)
-                return context
-
-        # =================================================================
-        # Step 2: LLM-based precision analysis (for ambiguous cases)
-        # =================================================================
-        llm_service = self._services.get("llm")
-
-        if llm_service:
-            try:
-                analysis_prompt = f"""Analyze the following user input and classify its intent.
-
-User Input: "{user_query}"
-
-Classify into ONE of these categories (respond with keyword only):
-1. simple_chat - casual conversation, greetings, small talk
-2. image_request - request for picture, image, visual creation
-3. document_qa - asking for specific knowledge, documents, data, information
-
-Response (one word only):"""
-
-                # Use fast mode for quick classification
-                raw_intent = await llm_service.generate(
-                    prompt=analysis_prompt,
-                    max_tokens=10,
-                    temperature=0.1
-                )
-                intent = raw_intent.strip().lower()
-                logger.debug(f"[Orchestrator] LLM intent classification: {intent}")
-
-                # Parse LLM response
-                if "image" in intent:
-                    context.intent_result = IntentResult(
-                        intent="image_request",
-                        confidence=0.95,
-                        metadata={"source": "llm_analysis"}
-                    )
-                    context.target_service = "image"
-                    context.state_info = "IMAGE_REQUEST"
-                    context.refined_prompt = await self._expand_prompt_for_flux(user_query)
-
-                elif "document" in intent:
-                    context.intent_result = IntentResult(
-                        intent="document_qa",
-                        confidence=0.9,
-                        metadata={"source": "llm_analysis"}
-                    )
-                    context.target_service = "document"
-                    context.should_use_rag = True
-                    context.state_info = "DOCUMENT_QA"
-
-                else:
-                    # Default to simple chat
-                    context.intent_result = IntentResult(
-                        intent="simple_chat",
-                        confidence=1.0,
-                        metadata={"source": "llm_analysis"}
-                    )
-                    context.target_service = "llm"
-                    context.state_info = "SIMPLE_CHAT"
-
-            except Exception as e:
-                logger.warning(f"[Orchestrator] LLM intent classification failed: {e}")
-                # Fallback to rule-based classification
-                context = self._fallback_intent_classification(context)
-        else:
-            # No LLM service available, use fallback
-            context = self._fallback_intent_classification(context)
-
-        # =================================================================
-        # Step 3: Mode selection for LLM-based responses
-        # =================================================================
-        if context.target_service in ("llm", "document"):
-            if context.mode == "auto":
-                context.selected_mode = self._select_mode_for_query(user_query)
-            else:
-                context.selected_mode = context.mode
-
-        logger.info(
-            f"[Orchestrator] Intent: {context.intent_result.intent if context.intent_result else 'unknown'}, "
-            f"Target: {context.target_service}, Mode: {context.selected_mode}"
-        )
-
-        return context
-
-    def _fallback_intent_classification(self, context: ChatContext) -> ChatContext:
-        """
-        Fallback intent classification using rule-based heuristics.
-
-        Used when LLM service is unavailable.
-        """
-        user_query = context.user_query
-
-        # Check for question patterns suggesting document lookup
-        doc_patterns = [
-            "뭐야", "뭔가요", "알려줘", "설명해", "어떻게",
-            "what is", "explain", "how to", "tell me about"
-        ]
-
-        query_lower = user_query.lower()
-        for pattern in doc_patterns:
-            if pattern in query_lower and context.use_rag:
-                context.intent_result = IntentResult(
-                    intent="document_qa",
-                    confidence=0.7,
-                    metadata={"source": "fallback_rules"}
-                )
-                context.target_service = "document"
-                context.should_use_rag = True
-                context.state_info = "DOCUMENT_QA"
-                return context
-
-        # Default to simple chat
-        context.intent_result = IntentResult(
-            intent="simple_chat",
-            confidence=0.8,
-            metadata={"source": "fallback_rules"}
-        )
-        context.target_service = "llm"
-        context.state_info = "SIMPLE_CHAT"
-        return context
-
-    async def _expand_prompt_for_flux(self, korean_prompt: str) -> str:
-        """
-        Expand Korean user request into Flux-optimized English prompt.
-
-        Flux Model Prompt Guidelines:
-            - Natural language description (not tag-based)
-            - Rich detail for composition, lighting, style
-            - Specify artistic style explicitly
-            - Include quality modifiers
-
-        Args:
-            korean_prompt: Original Korean user request
-
-        Returns:
-            Flux-optimized English prompt
-        """
-        llm_service = self._services.get("llm")
-
-        if not llm_service:
-            # Basic translation fallback
-            logger.warning("[Orchestrator] No LLM for prompt expansion, using original")
-            return korean_prompt
-
-        try:
-            expansion_prompt = f"""You are an expert prompt engineer for the Flux image generation model.
-
-Convert the following Korean image request into an optimized English prompt for Flux.
-
-Korean Request: "{korean_prompt}"
-
-Requirements:
-1. Translate to natural, descriptive English
-2. Add specific details: composition, lighting, atmosphere, colors
-3. Include artistic style (photorealistic, digital art, oil painting, etc.)
-4. Add quality modifiers (highly detailed, 8k, professional)
-5. Keep the core intent but enhance visual description
-6. Output ONLY the final prompt, no explanations
-
-Optimized Flux Prompt:"""
-
-            refined = await llm_service.generate(
-                prompt=expansion_prompt,
-                max_tokens=200,
-                temperature=0.7
-            )
-
-            refined_prompt = refined.strip()
-
-            # Ensure quality suffix if not present
-            quality_keywords = ["detailed", "8k", "4k", "high quality", "professional"]
-            if not any(kw in refined_prompt.lower() for kw in quality_keywords):
-                refined_prompt += ", highly detailed, professional quality"
-
-            logger.info(f"[Orchestrator] Prompt expanded: {refined_prompt[:100]}...")
-            return refined_prompt
-
-        except Exception as e:
-            logger.error(f"[Orchestrator] Prompt expansion failed: {e}")
-            return korean_prompt
-
-    def _select_mode_for_query(self, query: str) -> str:
-        """
-        Select processing mode based on query analysis.
-
-        Ported from legacy should_use_main_model() function.
-        """
-        import re
-
-        # Keywords requiring deep thinking
-        deep_keywords = [
-            '분석', '리포트', '전망', '전략', '계획', '설계',
-            '비교', '평가', '검토', '연구', '조사', '탐구',
-            'analysis', 'report', 'strategy', 'plan', 'research',
-            'compare', 'evaluate', 'review', 'investigate'
-        ]
-
-        query_lower = query.lower()
-        for keyword in deep_keywords:
-            if keyword in query_lower:
-                logger.debug(f"[Orchestrator] Keyword '{keyword}' detected -> thinking mode")
-                return "thinking"
-
-        # Check for simple exclamations/emoticons
-        hangul_consonants = re.findall(r'[ㅋㅎㄷㄱㅅㅈㅂㄴㅁㅇㄹ]+', query)
-        consonant_ratio = sum(len(c) for c in hangul_consonants) / max(len(query), 1)
-
-        if consonant_ratio > 0.5:
-            logger.debug("[Orchestrator] Simple exclamation detected -> fast mode")
-            return "fast"
-
-        # Length-based selection
-        if len(query) < 50:
-            return "fast"
-        else:
-            return "thinking"
-
-    async def _retrieve_documents(
-        self,
-        context: ChatContext,
-        rag_search_fn: Callable
-    ) -> ChatContext:
-        """
-        Retrieve relevant documents using RAG.
-        """
-        if not context.rag_collection_name:
-            logger.warning("[Orchestrator] No RAG collection specified")
-            context.should_use_rag = False
-            return context
-
-        try:
-            # Build search query (context-aware for short queries)
-            search_query = context.user_query
-            if len(context.user_query) < 20 and context.session_history:
-                last_user_msg = next(
-                    (msg['content'] for msg in reversed(context.session_history)
-                     if msg.get('role') == 'user'),
-                    ''
-                )
-                if last_user_msg:
-                    search_query = f"{last_user_msg} {context.user_query}"
-                    logger.debug(f"[Orchestrator] Context-aware search: {search_query[:100]}...")
-
-            # Execute search
-            results = rag_search_fn(
-                query=search_query,
-                collection_name=context.rag_collection_name,
-                k=5
-            )
-
-            if results and len(results) > 0:
-                # Build context from results
-                context_parts = []
-                for i, hit in enumerate(results[:3], 1):
-                    text = hit.get("text", "")
-                    metadata = hit.get("metadata", {})
-                    source = metadata.get("source_file", metadata.get("source", "Unknown"))
-                    context_parts.append(f"[Document {i}] {source}\n{text}")
-
-                    context.rag_sources.append({
-                        "text": text[:200],
-                        "source": source,
-                        "score": hit.get("score", 0.0)
-                    })
-
-                context.rag_context = "\n\n".join(context_parts)
-                context.rag_used = True
-                context.state_info = "RAG_USED"
-                logger.info(f"[Orchestrator] Retrieved {len(results)} documents")
-            else:
-                context.should_use_rag = False
-                context.state_info = "RAG_NO_RESULTS"
-                logger.info("[Orchestrator] No RAG results found")
-
-        except Exception as e:
-            logger.error(f"[Orchestrator] RAG retrieval error: {e}")
-            context.should_use_rag = False
-            context.state_info = "RAG_ERROR"
-
-        return context
-
-    async def _generate_response(
-        self,
-        context: ChatContext,
-        llm_generate_fn: Callable
-    ) -> ChatContext:
-        """
-        Generate LLM response.
-        """
-        final_prompt = self._build_final_prompt(context)
-
-        try:
-            async with self._gpu_lock:
-                context.final_answer = await llm_generate_fn(
-                    system_prompt=context.system_prompt,
-                    user_prompt=final_prompt,
-                    mode=context.selected_mode or context.mode
-                )
-            logger.info("[Orchestrator] LLM generation completed")
-        except Exception as e:
-            logger.error(f"[Orchestrator] LLM generation error: {e}")
-            raise
-
-        return context
-
-    def _build_final_prompt(self, context: ChatContext) -> str:
-        """
-        Build the final user prompt with all context.
-        """
-        parts = []
-
-        # Add user memories
-        if context.user_memories:
-            memory_text = "\n".join([f"- {mem}" for mem in context.user_memories[:3]])
-            parts.append(f"=== User Preferences ===\n{memory_text}")
-
-        # Add RAG context
-        if context.rag_used and context.rag_context:
-            parts.append(f"=== Reference Documents ===\n{context.rag_context}")
-
-        # Add session history
-        if context.session_history:
-            history_parts = []
-            for msg in context.session_history[-5:]:
-                role = msg.get("role", "")
-                content = msg.get("content", "")[:200]
-                if role and content:
-                    history_parts.append(f"{role.upper()}: {content}")
-            if history_parts:
-                parts.append("=== Recent Conversation ===\n" + "\n".join(history_parts))
-
-        # Add current query
-        parts.append(f"=== Current Question ===\n{context.user_query}")
-
-        return "\n\n".join(parts)
+        async for chunk in self._chat_pipeline.process_chat_stream(
+            context, rag_search_fn, llm_stream_fn
+        ):
+            yield chunk
 
     # ==================== Event System ====================
 
@@ -1255,6 +994,9 @@ Optimized Flux Prompt:"""
             service: Service instance implementing required interface
         """
         self._services[name] = service
+        if name == "llm":
+            self.llm_service = service
+            self._init_agent_if_possible()
         logger.info(f"[Orchestrator] Service registered: {name}")
 
     def get_service(self, name: str) -> Optional[Any]:

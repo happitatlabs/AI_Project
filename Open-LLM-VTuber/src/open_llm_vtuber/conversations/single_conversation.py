@@ -188,6 +188,9 @@ async def process_speak_direct(
     tts_manager = TTSTaskManager()
     
     try:
+        from ..utils.sensitive_filter import mask_sensitive_text
+
+        text = mask_sensitive_text(text)
         logger.info(f"[SpeakDirect] Processing direct TTS: {text[:50]}...")
 
         # Send conversation start signal so frontend prepares for audio

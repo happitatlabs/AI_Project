@@ -1,6 +1,396 @@
 // =========================
 // Chat & Message Module
 // =========================
+
+// ---------- Progress panel (plan_created / todos from /runs/{run_id}/events) ----------
+let progressRunEventSource = null;
+let progressRunId = null;
+let progressLastEventId = null;
+let progressTodosState = [];
+let progressRunStatus = null;
+const PROGRESS_LOG_MAX = 50;
+
+// ---------- In-chat TaskBlock (User View: todos + progress inside message bubble) ----------
+const taskBlockEventSourceByRunId = {};
+let currentTaskBlockRunId = null;
+let currentTaskBlockState = null;
+let currentTaskBlockBubbleRef = null;
+let taskBlockLastRenderedSnapshot = '';
+
+function closeTaskBlockEventSource(runId) {
+    if (!runId) return;
+    const es = taskBlockEventSourceByRunId[runId];
+    if (es) {
+        es.close();
+        delete taskBlockEventSourceByRunId[runId];
+    }
+}
+
+function closeAllTaskBlockEventSources() {
+    Object.keys(taskBlockEventSourceByRunId).forEach(runId => closeTaskBlockEventSource(runId));
+}
+
+function taskBlockStateSnapshot(state) {
+    if (!state) return '';
+    return JSON.stringify({
+        runId: state.runId,
+        todos: (state.todos || []).map(t => ({ id: t.id || t.todo_id, title: t.title, status: t.status })),
+        currentTodoId: state.currentTodoId,
+        progress: state.progress,
+        status: state.status,
+        summary: state.summary
+    });
+}
+
+function buildTaskBlockHTML(state) {
+    if (!state) return '';
+    const title = state.title || '작업 계획';
+    const todos = state.todos || [];
+    const progress = state.progress || { done: 0, total: 0 };
+    const total = progress.total || todos.length || 0;
+    const done = Math.min(progress.done, total);
+    const status = state.status || 'running';
+    const summary = state.summary || '';
+    const currentId = state.currentTodoId || '';
+
+    const statusLine = status === 'running' ? '진행 중...' : status === 'finished' ? '완료' : status === 'error' ? (summary ? `오류 (${summary.slice(0, 40)}${summary.length > 40 ? '…' : ''})` : '오류') : '';
+
+    const listHtml = todos.length
+        ? todos.map(t => {
+            const id = t.id || t.todo_id;
+            const st = (t.status || '').toString().toLowerCase();
+            const isDone = st === 'completed' || st === 'done';
+            const isDoing = st === 'in_progress' || st === 'doing' || id === currentId;
+            const icon = isDone ? '✅' : isDoing ? '⏳' : '○';
+            const nowLabel = isDoing ? ' (NOW)' : '';
+            const cls = isDone ? 'text-gray-500 line-through' : isDoing ? 'text-purple-300' : 'text-gray-400';
+            return `<li class="flex items-center gap-2 text-sm ${cls}">${icon} ${escapeHtmlProgress(t.title || id)}${nowLabel}</li>`;
+        }).join('')
+        : '<li class="text-gray-500 text-sm">할 일 없음</li>';
+
+    const runId = state.runId || '';
+    const operatorLink = (typeof window !== 'undefined' && (window.isAdmin === true)) && runId
+        ? `<a href="/operator-console?run_id=${encodeURIComponent(runId)}" target="_blank" rel="noopener" class="text-xs text-purple-400 hover:text-purple-300 mt-1 inline-block">운영자 보기</a>`
+        : '';
+
+    return `<div class="task-block-container mt-3 p-3 rounded-lg border border-gray-600 bg-gray-800/50">
+        <div class="text-xs font-semibold text-gray-400 mb-1">${escapeHtmlProgress(title)}</div>
+        <div class="text-xs text-gray-500 mb-2">${done}/${total} 완료</div>
+        <div class="h-1.5 bg-gray-700 rounded overflow-hidden mb-2 task-block-progress"><div class="h-full bg-purple-500 rounded transition-all duration-300" style="width:${total ? (done/total*100) : 0}%"></div></div>
+        <ul class="space-y-0.5 list-none pl-0">${listHtml}</ul>
+        <div class="text-xs text-gray-500 mt-2">${statusLine}</div>
+        ${operatorLink}
+    </div>`;
+}
+
+function renderTaskBlockInBubble(bubble, state) {
+    if (!bubble || !document.contains(bubble)) return;
+    const container = bubble.querySelector('.task-block-container');
+    if (!container) return;
+    const snapshot = taskBlockStateSnapshot(state);
+    if (snapshot === taskBlockLastRenderedSnapshot) return;
+    taskBlockLastRenderedSnapshot = snapshot;
+    container.outerHTML = buildTaskBlockHTML(state);
+}
+
+function handleTaskBlockRunEvent(runId, eventData) {
+    if (currentTaskBlockRunId !== runId || !currentTaskBlockState) return;
+    const type = eventData.type;
+    const payload = eventData.payload || {};
+    const s = currentTaskBlockState;
+
+    if (type === 'plan_created') {
+        const list = payload.todos || [];
+        s.todos = list.map(t => ({
+            id: t.todo_id || t.id,
+            title: t.title || t.todo_id || '',
+            status: (t.status || 'todo').toString().toLowerCase() === 'completed' ? 'done' : (t.status || 'todo').toString().toLowerCase() === 'in_progress' ? 'doing' : 'todo'
+        }));
+        s.progress = { done: 0, total: list.length };
+        if (window._currentRunPlanOnly && currentTaskBlockBubbleRef && document.contains(currentTaskBlockBubbleRef)) {
+            injectPlanCardIntoBubble(currentTaskBlockBubbleRef, list);
+        }
+    } else if (type === 'todo_started') {
+        s.currentTodoId = payload.todo_id || payload.id || '';
+        const t = s.todos.find(x => (x.id || x.todo_id) === s.currentTodoId);
+        if (t) t.status = 'doing';
+    } else if (type === 'todo_done') {
+        const tid = payload.todo_id || payload.id;
+        const t = s.todos.find(x => (x.id || x.todo_id) === tid);
+        if (t) t.status = 'done';
+        s.progress = { ...s.progress, done: (s.progress.done || 0) + 1, total: s.progress.total || s.todos.length };
+    } else if (type === 'run_finished') {
+        s.status = payload.success !== false ? 'finished' : 'error';
+        s.summary = (payload.summary || (payload.success !== false ? '완료' : '실패')).toString().slice(0, 80);
+        closeTaskBlockEventSource(runId);
+    } else if (type === 'error') {
+        s.status = 'error';
+        s.summary = (payload.message || '오류').toString().slice(0, 80);
+        closeTaskBlockEventSource(runId);
+    }
+
+    renderTaskBlockInBubble(currentTaskBlockBubbleRef, currentTaskBlockState);
+}
+
+function subscribeToTaskBlockRunEvents(runId, lastEventId) {
+    closeTaskBlockEventSource(runId);
+    const url = `${State.getApiBase()}/runs/${runId}/events` + (lastEventId ? `?last_event_id=${lastEventId}` : '');
+    const es = new EventSource(url);
+    taskBlockEventSourceByRunId[runId] = es;
+    es.onmessage = (e) => {
+        try {
+            const data = JSON.parse(e.data);
+            if (data.type === 'timeout') return;
+            handleTaskBlockRunEvent(runId, data);
+        } catch (err) {
+            console.warn('[TaskBlock] parse event error', err);
+        }
+    };
+    es.onerror = () => {
+        if (es.readyState === EventSource.CLOSED) return;
+    };
+}
+
+function buildPlanCardHTML(todos) {
+    const listHtml = (todos || []).map(t => {
+        const title = (t.title || t.todo_id || t.id || '').toString();
+        return '<li class="flex items-center gap-2 text-sm text-slate-300">○ ' + escapeHtmlProgress(title) + '</li>';
+    }).join('');
+    return '<div class="plan-approval-card mt-3 p-4 rounded-xl border border-blue-500/30 bg-blue-900/10 shadow-lg">' +
+        '<div class="text-xs font-semibold text-blue-400 mb-2 flex items-center gap-2">📋 계획</div>' +
+        '<ul class="space-y-1 list-none pl-0 mb-4">' + listHtml + '</ul>' +
+        '<button type="button" class="plan-execute-btn px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium transition-colors">진행하기</button>' +
+        '</div>';
+}
+
+function injectPlanCardIntoBubble(bubble, todos) {
+    if (!bubble || !document.contains(bubble)) return;
+    if (bubble.querySelector('.plan-approval-card')) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'plan-approval-card-wrap';
+    wrap.innerHTML = buildPlanCardHTML(todos || []);
+    const btn = wrap.querySelector('.plan-execute-btn');
+    if (btn) {
+        btn.onclick = function () {
+            const userInput = (window._planOnlyUserInput || '').trim();
+            if (!userInput) return;
+            btn.disabled = true;
+            btn.textContent = '실행 중...';
+            if (typeof sendMessage === 'function') {
+                sendMessage(userInput, { plan_approved: true, skipAddUserMessage: true });
+            }
+        };
+    }
+    bubble.appendChild(wrap);
+}
+
+function injectTaskBlockIntoBubble(bubble) {
+    if (!bubble) return;
+    if (bubble.querySelector('.task-block-container')) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'task-block-container';
+    wrap.innerHTML = buildTaskBlockHTML(currentTaskBlockState);
+    const typingIndicator = bubble.querySelector('.typing-indicator');
+    if (typingIndicator && typingIndicator.parentNode === bubble) {
+        bubble.insertBefore(wrap, typingIndicator);
+    } else {
+        bubble.appendChild(wrap);
+    }
+}
+
+function handleRunMetaForTaskBlock(data, streamDiv) {
+    const runId = data.run_id;
+    if (!runId || !streamDiv) {
+        if (typeof console !== 'undefined' && console.warn) console.warn('[TaskBlock] skip: runId=', runId, 'streamDiv=', !!streamDiv);
+        return;
+    }
+    if (!streamDiv.isConnected) {
+        if (typeof console !== 'undefined' && console.warn) console.warn('[TaskBlock] skip: streamDiv not in DOM');
+        return;
+    }
+    closeTaskBlockEventSource(currentTaskBlockRunId);
+    currentTaskBlockRunId = runId;
+    currentTaskBlockState = {
+        runId,
+        title: '작업 계획',
+        todos: [],
+        currentTodoId: null,
+        progress: { done: 0, total: 0 },
+        status: 'running',
+        summary: null
+    };
+    currentTaskBlockBubbleRef = streamDiv.querySelector('.message-assistant');
+    taskBlockLastRenderedSnapshot = '';
+    injectTaskBlockIntoBubble(currentTaskBlockBubbleRef);
+    if (typeof console !== 'undefined' && console.log) console.log('[TaskBlock] injected runId=', runId);
+    // ✅ 즉시 구독해 plan_created 등 이벤트 누락 방지 (스냅샷 fetch 이후 구독 시 이미 발송된 plan_created를 놓침)
+    subscribeToTaskBlockRunEvents(runId, null);
+    (async () => {
+        try {
+            const res = await fetch(`${State.getApiBase()}/runs/${runId}`, { headers: State.getAuthToken() ? { 'Authorization': 'Bearer ' + State.getAuthToken() } : {} });
+            if (res.ok) {
+                const snap = await res.json();
+                const list = (snap.todos_view && snap.todos_view.length > 0) ? snap.todos_view : (snap.todos || []);
+                if (list.length) {
+                    currentTaskBlockState.todos = list.map(t => ({
+                        id: t.todo_id || t.id,
+                        title: t.title || t.todo_id || '',
+                        status: (t.status || 'todo').toString().toLowerCase() === 'completed' ? 'done' : (t.status || 'todo').toString().toLowerCase() === 'in_progress' ? 'doing' : 'todo'
+                    }));
+                    const done = currentTaskBlockState.todos.filter(t => t.status === 'done').length;
+                    currentTaskBlockState.progress = { done, total: list.length };
+                    renderTaskBlockInBubble(currentTaskBlockBubbleRef, currentTaskBlockState);
+                    if (window._currentRunPlanOnly && currentTaskBlockBubbleRef && document.contains(currentTaskBlockBubbleRef)) {
+                        injectPlanCardIntoBubble(currentTaskBlockBubbleRef, list);
+                    }
+                }
+            }
+        } catch (_) {}
+    })();
+}
+
+window.buildTaskBlockHTML = buildTaskBlockHTML;
+
+function closeProgressEventSource() {
+    if (progressRunEventSource) {
+        progressRunEventSource.close();
+        progressRunEventSource = null;
+    }
+}
+
+function updateProgressTodos(todos) {
+    const el = document.getElementById('progressTodos');
+    const summaryEl = document.getElementById('progressSummary');
+    if (!el) return;
+    if (!todos || todos.length === 0) {
+        el.innerHTML = '<li class="text-gray-500">작업 목록 없음</li>';
+        if (summaryEl) summaryEl.textContent = 'Progress';
+        return;
+    }
+    el.innerHTML = todos.map(t => {
+        const st = (t.status || '').toString().toLowerCase();
+        const done = st === 'completed';
+        const label = t.title || t.todo_id || t.id || '';
+        return `<li class="flex items-center gap-2 ${done ? 'text-gray-500 line-through' : ''}"><i class="fas fa-${done ? 'check-circle text-green-500' : 'circle'}"></i> ${escapeHtmlProgress(label)}</li>`;
+    }).join('');
+    if (summaryEl) summaryEl.textContent = `Progress (${todos.length}개)`;
+}
+
+function addProgressLog(level, message) {
+    const el = document.getElementById('progressLog');
+    if (!el) return;
+    const entry = document.createElement('div');
+    entry.className = level === 'error' ? 'text-red-400' : level === 'success' ? 'text-green-400' : 'text-gray-500';
+    entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+    el.appendChild(entry);
+    while (el.children.length > PROGRESS_LOG_MAX) el.removeChild(el.firstChild);
+    el.scrollTop = el.scrollHeight;
+}
+
+function escapeHtmlProgress(text) {
+    if (text == null) return '';
+    const div = document.createElement('div');
+    div.textContent = String(text);
+    return div.innerHTML;
+}
+
+function handleRunEvent(eventData) {
+    const type = eventData.type;
+    const payload = eventData.payload || {};
+    if (type === 'plan_created') {
+        progressTodosState = payload.todos || [];
+        updateProgressTodos(progressTodosState);
+        addProgressLog('info', `계획 생성: ${progressTodosState.length}개 작업`);
+    } else if (type === 'todo_started') {
+        const tid = payload.todo_id;
+        const t = progressTodosState.find(x => x && x.todo_id === tid);
+        if (t) t.status = 'in_progress';
+        updateProgressTodos(progressTodosState);
+        addProgressLog('info', `시작: ${payload.title || tid}`);
+    } else if (type === 'todo_done') {
+        const tid = payload.todo_id;
+        const t = progressTodosState.find(x => x && x.todo_id === tid);
+        if (t) t.status = payload.status || 'completed';
+        updateProgressTodos(progressTodosState);
+        addProgressLog('success', `완료: ${payload.title || tid}`);
+    } else if (type === 'tool_started') {
+        addProgressLog('info', `도구: ${payload.tool_name || ''}`);
+    } else if (type === 'tool_done') {
+        addProgressLog('info', `도구 완료: ${payload.tool_name || ''}`);
+    } else if (type === 'run_finished') {
+        progressRunStatus = (payload.success !== false) ? 'completed' : 'failed';
+        addProgressLog('success', '실행 완료');
+        closeProgressEventSource();
+    } else if (type === 'error') {
+        progressRunStatus = 'failed';
+        addProgressLog('error', payload.message || '오류');
+    }
+    if (eventData.id) progressLastEventId = eventData.id;
+}
+
+function subscribeToRunEvents(runId, lastEventId) {
+    closeProgressEventSource();
+    progressRunId = runId;
+    progressLastEventId = lastEventId || null;
+    const url = `${State.getApiBase()}/runs/${runId}/events` + (progressLastEventId ? `?last_event_id=${progressLastEventId}` : '');
+    console.log('[PROGRESS_UI] subscribing /runs/' + runId + '/events ...');
+    const es = new EventSource(url);
+    progressRunEventSource = es;
+    es.onmessage = (e) => {
+        try {
+            const data = JSON.parse(e.data);
+            handleRunEvent(data);
+        } catch (err) {
+            console.warn('[PROGRESS_UI] parse event error', err);
+        }
+    };
+    es.onerror = () => {
+        if (es.readyState === EventSource.CLOSED) return;
+        if (progressRunStatus === 'completed' || progressRunStatus === 'failed') {
+            closeProgressEventSource();
+            return;
+        }
+        addProgressLog('error', '연결 끊김');
+    };
+}
+
+async function handleRunMeta(data) {
+    const runId = data.run_id;
+    if (!runId) return;
+    console.log('[PROGRESS_UI] run_meta received run_id=' + runId);
+    progressRunId = runId;
+    const panel = document.getElementById('progressPanel');
+    const details = document.getElementById('progressDetails');
+    if (panel) {
+        panel.classList.remove('hidden');
+        if (details && !details.open) details.open = true;
+    }
+    try {
+        const res = await fetch(`${State.getApiBase()}/runs/${runId}`, { headers: State.getAuthToken() ? { 'Authorization': 'Bearer ' + State.getAuthToken() } : {} });
+        if (res.ok) {
+            const snapshot = await res.json();
+            const todosView = snapshot.todos_view && snapshot.todos_view.length > 0 ? snapshot.todos_view : [];
+            const todos = todosView.length ? todosView : (snapshot.todos || []);
+            progressTodosState = todos;
+            progressRunStatus = (snapshot.status || '').toLowerCase();
+            if (todos.length) {
+                updateProgressTodos(todos);
+                addProgressLog('info', todosView.length ? '할 일 3단계 로드됨' : ('할 일 ' + todos.length + '개 로드됨'));
+            } else {
+                updateProgressTodos([]);
+                addProgressLog('info', '스냅샷 로드 (할 일 대기 중)');
+            }
+            progressLastEventId = snapshot.last_event_id || null;
+        } else {
+            addProgressLog('error', '스냅샷 조회 실패: ' + res.status);
+        }
+    } catch (e) {
+        console.warn('[PROGRESS_UI] snapshot fetch failed', e);
+        addProgressLog('error', '스냅샷 로드 실패');
+    }
+    subscribeToRunEvents(runId, progressLastEventId);
+}
+
 /**
  * [DEBUG Ver] 편집 백업 스냅샷 생성
  * - 실패 원인을 콘솔에 상세히 출력하도록 보강
@@ -9,7 +399,7 @@
  * [DEBUG Ver] 편집 백업 스냅샷 생성
  */
 async function createEditBackup(originMessageId) {
-    const sessionId = CURRENT_SESSION_ID;
+    const sessionId = State.getCurrentSessionId();
     console.log(`📦 [Backup] Start for msg=${originMessageId}, session=${sessionId}`);
 
     if (!sessionId) {
@@ -18,8 +408,8 @@ async function createEditBackup(originMessageId) {
     }
 
     try {
-        const res = await fetch(`${API_BASE}/chat/sessions/${sessionId}/messages`, {
-            headers: AUTH_TOKEN ? { 'Authorization': `Bearer ${AUTH_TOKEN}` } : {}
+        const res = await fetch(`${State.getApiBase()}/chat/sessions/${sessionId}/messages`, {
+            headers: State.getAuthToken() ? { 'Authorization': `Bearer ${State.getAuthToken()}` } : {}
         });
         if (!res.ok) throw new Error('Failed to load session messages');
         
@@ -33,11 +423,11 @@ async function createEditBackup(originMessageId) {
 
         const backupMessages = messages.slice(idx);
 
-        window.EDIT_CONTEXT.backupMessages = backupMessages;
-        window.EDIT_CONTEXT.backupSessionId = sessionId;
-        window.EDIT_CONTEXT.backupFolderId = CURRENT_FOLDER_ID;
-        window.EDIT_CONTEXT.backupCreatedAt = new Date().toISOString();
-        window.EDIT_CONTEXT.canRestore = false; 
+        State.getEditContext().backupMessages = backupMessages;
+        State.getEditContext().backupSessionId = sessionId;
+        State.getEditContext().backupFolderId = State.getCurrentFolderId();
+        State.getEditContext().backupCreatedAt = new Date().toISOString();
+        State.getEditContext().canRestore = false; 
 
         console.log(`✅ [Backup] Success! Snapshot size: ${backupMessages.length}`);
     } catch (e) {
@@ -75,13 +465,14 @@ function attachBtnToBubble(bubble, mid) {
  * 메시지 전송 (간소화 버전)
  */
 async function sendMessage(prompt = null, options = {}) {
+    if (State.getIsGenerating()) return;
     const input = document.getElementById('messageInput');
     // ✅ [FIX] 인자로 받은 prompt 우선 사용 (Regenerate용)
     const question = prompt !== null ? prompt : input.value.trim();
     if(!question) return;
 
     // ✅ 편집 모드면: 적용 후 재전송
-    if (prompt === null && window.EDIT_CONTEXT?.active) {
+    if (prompt === null && State.getEditContext()?.active) {
         // 사용자가 입력창에서 수정한 텍스트로 확정
         await applyEditAndResend(question);
         return;
@@ -91,7 +482,8 @@ async function sendMessage(prompt = null, options = {}) {
         skipAddUserMessage = false, // 기본값 false로 변경 (일반 전송 시 표시)
         isRegenerate = false,
         regenerateTargetMid = null,
-        preserveRestore = false  // 🆕 이 줄을 추가해. (기본값은 false)
+        preserveRestore = false,
+        plan_approved = false
     } = options;
 
     // ✅ [Regenerate] 사용자 메시지 전송 시작 → 이전 regenerate 버튼 모두 숨김
@@ -99,8 +491,12 @@ async function sendMessage(prompt = null, options = {}) {
         updateRegenerateVisibility({ hideAll: true });
     }
 
-    isGenerating = true; updateSendButtonState(true);
-    abortController = new AbortController();
+    State.setIsGenerating(true); updateSendButtonState(true);
+    State.setAbortController(new AbortController());
+
+    // 새 요청 시 이전 run EventSource 정리 (새 run_meta 도착 시 재구독)
+    closeProgressEventSource();
+    closeTaskBlockEventSource(currentTaskBlockRunId);
 
     // ✅ [P0-2] 사용자 메시지 중복 생성 방지
     if (!skipAddUserMessage) {
@@ -171,21 +567,27 @@ async function sendMessage(prompt = null, options = {}) {
 
     try {
         const headers = { 'Content-Type': 'application/json' };
-        if(AUTH_TOKEN) headers['Authorization'] = `Bearer ${AUTH_TOKEN}`;
+        if(State.getAuthToken()) headers['Authorization'] = `Bearer ${State.getAuthToken()}`;
 
-        const res = await fetch(`${API_BASE}/chat/ask`, {
+        const res = await fetch(`${State.getApiBase()}/chat/ask`, {
             method: 'POST', headers,
             body: JSON.stringify({
-                question, session_id: CURRENT_SESSION_ID,
-                folder_id: CURRENT_FOLDER_ID,
-                temp_session_id: TEMP_SESSION_ID || null,
+                question, session_id: State.getCurrentSessionId(),
+                folder_id: State.getCurrentFolderId(),
+                temp_session_id: State.getTempSessionId() || null,
                 mode: CURRENT_MODE,
-                skip_user_message: skipAddUserMessage  // ✅ [FIX] 서버로 플래그 전달
+                skip_user_message: skipAddUserMessage,
+                plan_approved: plan_approved
             }),
-            signal: abortController.signal
+            signal: State.getAbortController().signal
         });
 
         if(!res.ok) {
+            if (res.status === 409) {
+                const data = await res.json().catch(() => ({}));
+                const msg = (typeof data.detail === 'string' ? data.detail : '이 세션에서 이미 요청을 처리 중입니다. 응답을 기다린 후 다시 시도해 주세요.');
+                alert(msg);
+            }
             throw new Error(`HTTP ${res.status}`);
         }
 
@@ -199,6 +601,7 @@ async function sendMessage(prompt = null, options = {}) {
         const thoughtLength = streamDiv.querySelector('.thought-length');
 
         let buffer = "";  // 청크 버퍼 (태그 경계 처리용)
+        let sseEventType = null;  // run_meta 등 SSE event 타입 (다음 data: 라인에 적용)
 
         while(true) {
             const {done, value} = await reader.read();
@@ -208,9 +611,32 @@ async function sendMessage(prompt = null, options = {}) {
             const lines = chunk.split('\n');
 
             for(const line of lines) {
+                if (line.startsWith('event:')) {
+                    sseEventType = line.slice(6).trim();
+                    continue;
+                }
                 if(line.startsWith('data: ')) {
                     try {
-                        const jsonData = JSON.parse(line.slice(6));
+                        // [JSON_PARSING_FIX] 빈 문자열이나 잘못된 형식 체크
+                        const jsonStr = line.slice(6).trim();
+                        if(!jsonStr || jsonStr.length === 0) {
+                            sseEventType = null;
+                            continue;  // 빈 라인은 무시
+                        }
+                        const jsonData = JSON.parse(jsonStr);
+
+                        // run_meta: 첫 SSE 이벤트 → Progress 패널 표시 + 인채팅 TaskBlock 구독
+                        const isRunMeta = sseEventType === 'run_meta' || (jsonData.run_id && jsonData.chunk === undefined && jsonData.done === undefined);
+                        if (isRunMeta) {
+                            if (typeof console !== 'undefined' && console.log) console.log('[TaskBlock] run_meta received run_id=', jsonData.run_id);
+                            window._currentRunPlanOnly = !!jsonData.plan_only;
+                            window._planOnlyUserInput = question;
+                            handleRunMeta(jsonData);
+                            handleRunMetaForTaskBlock(jsonData, streamDiv);
+                            sseEventType = null;
+                            continue;
+                        }
+                        sseEventType = null;
 
                         // 텍스트 청크 처리
                         if(jsonData.chunk) {
@@ -271,7 +697,7 @@ async function sendMessage(prompt = null, options = {}) {
                                 // ✅ [P0] 반복 루프 감지 및 자동 중단
                                 if(detectRepetitionLoop(buffer)) {
                                     console.warn('⛔ [Auto-Stop] Repetition loop detected, aborting generation');
-                                    abortController.abort();
+                                    State.getAbortController().abort();
                                     fullAnswer += '\n\n⛔ [자동 중단: 반복 루프 감지]';
                                     contentDiv.textContent = fullAnswer;
                                     break;  // 스트리밍 루프 탈출
@@ -285,7 +711,12 @@ async function sendMessage(prompt = null, options = {}) {
                         // 메타데이터 처리 (스트리밍 완료)
                         if(jsonData.done) {
                             messageMetadata = jsonData;
-                            CURRENT_SESSION_ID = jsonData.session_id;
+                            State.setCurrentSessionId(jsonData.session_id);
+                            // 폴백: run_meta가 먼저 오지 않았을 때 done에 run_id 있으면 Progress 패널 표시 + 스냅샷 로드
+                            if (jsonData.run_id) {
+                                handleRunMeta({ run_id: jsonData.run_id });
+                                if (!currentTaskBlockRunId) handleRunMetaForTaskBlock({ run_id: jsonData.run_id }, streamDiv);
+                            }
                         }
 
                         // 에러 처리
@@ -301,7 +732,13 @@ async function sendMessage(prompt = null, options = {}) {
                             }
                         }
                     } catch(e) {
-                        console.warn('Failed to parse SSE data:', line, e);
+                        // [JSON_PARSING_FIX] JSON 파싱 오류를 더 자세히 로깅하고 안전하게 처리
+                        if(e instanceof SyntaxError) {
+                            console.warn(`[JSON Parse Error] Invalid JSON in SSE data: ${line.substring(0, 100)}...`, e);
+                            // JSON 파싱 실패 시 해당 라인을 건너뛰고 계속 진행
+                        } else {
+                            console.warn('Failed to parse SSE data:', line.substring(0, 100), e);
+                        }
                     }
                 }
             }
@@ -328,11 +765,11 @@ async function sendMessage(prompt = null, options = {}) {
         if (isRegenerate && regenerateTargetMid) {
             const originMid = String(regenerateTargetMid);
 
-            if (!answerVersions[originMid]) {
-                answerVersions[originMid] = { index: 0, items: [] };
+            if (!State.getAnswerVersions()[originMid]) {
+                State.getAnswerVersions()[originMid] = { index: 0, items: [] };
             }
 
-            answerVersions[originMid].items.push({
+            State.getAnswerVersions()[originMid].items.push({
                 content: finalAnswerWithThought,
                 metadata: {
                     rag_used: messageMetadata.rag_used,
@@ -343,15 +780,32 @@ async function sendMessage(prompt = null, options = {}) {
                 ts: Date.now()
             });
 
-            answerVersions[originMid].index = answerVersions[originMid].items.length - 1;
+            State.getAnswerVersions()[originMid].index = State.getAnswerVersions()[originMid].items.length - 1;
         }
 
         const originKey = String(isRegenerate ? regenerateTargetMid : messageMetadata.message_id);
 
+        // ✅ Evolution → Patch: 서버가 content_display(patch_report) + evolution_payload 보냈으면 그대로 표시
+        const displayContent = (messageMetadata.content_display != null && messageMetadata.content_display !== '') ? messageMetadata.content_display : finalAnswerWithThought;
+        const evolutionPayloadFromMeta = messageMetadata.evolution_payload || null;
+
+        // ✅ plan_only run 종료 시 최종 버블에 계획 카드/진행하기 버튼 표시용 planCard
+        let planCard = null;
+        if (window._currentRunPlanOnly && currentTaskBlockRunId && currentTaskBlockState && Array.isArray(currentTaskBlockState.todos) && currentTaskBlockState.todos.length > 0) {
+            const userInput = (window._planOnlyUserInput || question || '').trim();
+            if (userInput) {
+                planCard = {
+                    run_id: currentTaskBlockRunId,
+                    todos: currentTaskBlockState.todos,
+                    user_input: userInput
+                };
+            }
+        }
+
         // ✅ originKey가 유효할 때 prompt 스냅샷 저장
         if (originKey && originKey !== "null" && originKey !== "undefined") {
-          if (!answerVersions[originKey]) answerVersions[originKey] = { index: 0, items: [], prompt: "" };
-          if (!answerVersions[originKey].prompt) answerVersions[originKey].prompt = question; 
+          if (!State.getAnswerVersions()[originKey]) State.getAnswerVersions()[originKey] = { index: 0, items: [], prompt: "" };
+          if (!State.getAnswerVersions()[originKey].prompt) State.getAnswerVersions()[originKey].prompt = question; 
         }
 
         // ✅ [HOT-SWAP] Regenerate 시 기존 버블 업데이트 (새 버블 생성 안 함!)
@@ -385,26 +839,37 @@ async function sendMessage(prompt = null, options = {}) {
                     timeSpan.textContent = `⏱️ ${parseFloat(finalTime).toFixed(2)}s`;
                 }
 
-                // 3. 네비게이션 UI 업데이트
+                // 3. plan_only면 계획 카드/진행하기 버튼 주입 (재렌더 동기화)
+                if (planCard && !bubbleEl.querySelector('.plan-approval-card')) {
+                    const list = planCard.todos.map(t => ({ todo_id: t.id, id: t.id, title: t.title || t.id }));
+                    injectPlanCardIntoBubble(bubbleEl, list);
+                }
+
+                // 4. 네비게이션 UI 업데이트
                 setTimeout(() => {
                     attachOrUpdateVersionControls(bubbleEl, originMid);
                 }, 100);
 
-                // 4. 기존 버블 opacity 복원
+                // 5. 기존 버블 opacity 복원
                 if (bubbleEl.style.opacity === '0.3') {
                     bubbleEl.style.opacity = '1';
                 }
 
             } else {
-                addMessageToUI('assistant', finalAnswerWithThought, messageMetadata.rag_used, messageMetadata.message_id, null, messageMetadata.auto_selected, messageMetadata.selected_mode, finalTime, originKey);
+                addMessageToUI('assistant', displayContent, messageMetadata.rag_used, messageMetadata.message_id, null, messageMetadata.auto_selected, messageMetadata.selected_mode, finalTime, originKey, currentTaskBlockState, planCard, evolutionPayloadFromMeta);
             }
         } else {
-            // ✅ 일반 모드: 새 버블 생성
-            addMessageToUI('assistant', finalAnswerWithThought, messageMetadata.rag_used, messageMetadata.message_id, null, messageMetadata.auto_selected, messageMetadata.selected_mode, finalTime, originKey);
+            // ✅ 일반 모드: 새 버블 생성 (planCard 넘기면 카드+진행하기 버튼 표시, evolution_payload면 접힌 상세)
+            addMessageToUI('assistant', displayContent, messageMetadata.rag_used, messageMetadata.message_id, null, messageMetadata.auto_selected, messageMetadata.selected_mode, finalTime, originKey, currentTaskBlockState, planCard, evolutionPayloadFromMeta);
         }
+        closeTaskBlockEventSource(currentTaskBlockRunId);
+        currentTaskBlockRunId = null;
+        currentTaskBlockState = null;
+        currentTaskBlockBubbleRef = null;
+        taskBlockLastRenderedSnapshot = '';
 
         document.getElementById('statusText').textContent = 'Ready';
-        if(AUTH_TOKEN) await loadUncategorizedSessions();
+        if(State.getAuthToken()) await loadUncategorizedSessions();
 
     } catch(e) {
         console.error('Streaming error:', e);
@@ -422,14 +887,19 @@ async function sendMessage(prompt = null, options = {}) {
             const stoppedMessage = finalAnswerWithThought + (fullAnswer ? '\n\n' : '') + '⏸️ [사용자에 의해 중단되었습니다]';
             const fallbackOrigin = String(messageMetadata.message_id || `local_${Date.now()}`);
             
-            addMessageToUI('assistant', stoppedMessage, messageMetadata.rag_used || false, messageMetadata.message_id || null, null, messageMetadata.auto_selected || false, messageMetadata.selected_mode || null, null, fallbackOrigin);
+            addMessageToUI('assistant', stoppedMessage, messageMetadata.rag_used || false, messageMetadata.message_id || null, null, messageMetadata.auto_selected || false, messageMetadata.selected_mode || null, null, fallbackOrigin, currentTaskBlockState);
         } else {
             streamDiv.remove();
             addMessageToUI('assistant', `⚠️ 스트리밍 오류: ${e.message}`);
         }
+        closeTaskBlockEventSource(currentTaskBlockRunId);
+        currentTaskBlockRunId = null;
+        currentTaskBlockState = null;
+        currentTaskBlockBubbleRef = null;
+        taskBlockLastRenderedSnapshot = '';
     } finally {
-        isGenerating = false;
-        abortController = null;
+        State.setIsGenerating(false);
+        State.setAbortController(null);
         updateSendButtonState(false);
         const statusText = document.getElementById('statusText');
         if (statusText) statusText.textContent = 'Ready';
@@ -437,8 +907,8 @@ async function sendMessage(prompt = null, options = {}) {
         if (existingBubble && existingBubble.style.opacity === '0.3') {
             existingBubble.style.opacity = '1';
         }
-        if (window.EDIT_CONTEXT?.canRestore && !preserveRestore) { // 🆕 !preserveRestore 조건 추가
-            window.EDIT_CONTEXT.canRestore = false;
+        if (State.getEditContext()?.canRestore && !preserveRestore) { // 🆕 !preserveRestore 조건 추가
+            State.getEditContext().canRestore = false;
             hideEditWarningBar();
         }
     }
@@ -448,7 +918,7 @@ async function sendMessage(prompt = null, options = {}) {
 /***
  * 사용자 메시지 수정 및 재전송
  */
-window.EDIT_CONTEXT = window.EDIT_CONTEXT || { active:false, originMessageId:null, originText:'', draftBeforeEdit:'', canRestore:false };
+// EDIT_CONTEXT는 state.js에서 초기화됨
 
 /**
  * [FINAL] 수정 모드 진입 함수
@@ -456,7 +926,7 @@ window.EDIT_CONTEXT = window.EDIT_CONTEXT || { active:false, originMessageId:nul
 async function startEditMessage(btn) {
     console.log('🚀 [Logic] Start Edit Triggered');
 
-    if (window.isGenerating || isGenerating) {
+    if (State.getIsGenerating()) {
         return alert("⚠️ AI가 답변을 생성 중입니다. 잠시만 기다려주세요.");
     }
 
@@ -476,15 +946,14 @@ async function startEditMessage(btn) {
     const currentText = contentDiv.innerText.trim();
     const originalHtml = contentDiv.innerHTML;
     
-    // [FIX] 컨텍스트 먼저 초기화
-    window.EDIT_CONTEXT = {
+    Object.assign(State.getEditContext(), {
         active: true,
         originMessageId: mid,
         originText: currentText,
         draftBeforeEdit: currentText,
         canRestore: false,
-        backupMessages: [] // 초기화
-    };
+        backupMessages: []
+    });
 
     // [FIX] 🧨 핵심: 서버에서 백업 데이터 가져오기 (이게 없어서 안 됐던 것임!)
     // (UI가 약간 늦게 떠도 데이터를 확실히 챙겨야 함)
@@ -509,7 +978,7 @@ async function startEditMessage(btn) {
     wrapper.querySelector('.cancel-btn').onclick = (e) => {
         e.stopPropagation();
         contentDiv.innerHTML = originalHtml;
-        window.EDIT_CONTEXT.active = false;
+        State.getEditContext().active = false;
     };
 
     // ----------------------------------------------------
@@ -554,7 +1023,7 @@ async function startEditMessage(btn) {
         }
 
         // 3. 수정 모드 종료
-        window.EDIT_CONTEXT.active = false;
+        State.getEditContext().active = false;
 
         // 4. 전송 (기존 UI를 수정했으므로 skipAddUserMessage: true로 전송)
         if (mid && typeof applyEditAndResend === 'function') {
@@ -572,14 +1041,14 @@ async function startEditMessage(btn) {
 }
 
 async function applyEditAndResend(editedText) {
-    const sessionId = CURRENT_SESSION_ID;
-    const originId = window.EDIT_CONTEXT.originMessageId;
+    const sessionId = State.getCurrentSessionId();
+    const originId = State.getEditContext().originMessageId;
     if (!sessionId || !originId) return;
 
     try {
         // 1. 서버 데이터 정리 (삭제 기다림)
-        const res = await fetch(`${API_BASE}/chat/sessions/${sessionId}/messages`, {
-            headers: AUTH_TOKEN ? { 'Authorization': `Bearer ${AUTH_TOKEN}` } : {}
+        const res = await fetch(`${State.getApiBase()}/chat/sessions/${sessionId}/messages`, {
+            headers: State.getAuthToken() ? { 'Authorization': `Bearer ${State.getAuthToken()}` } : {}
         });
         if (res.ok) {
             const messages = await res.json();
@@ -587,9 +1056,9 @@ async function applyEditAndResend(editedText) {
             if (idx >= 0) {
                 const toDelete = messages.slice(idx).map(m => m.id);
                 await Promise.all(toDelete.map(mid => 
-                    fetch(`${API_BASE}/chat/messages/${mid}`, {
+                    fetch(`${State.getApiBase()}/chat/messages/${mid}`, {
                         method: 'DELETE',
-                        headers: AUTH_TOKEN ? { 'Authorization': `Bearer ${AUTH_TOKEN}` } : {}
+                        headers: State.getAuthToken() ? { 'Authorization': `Bearer ${State.getAuthToken()}` } : {}
                     })
                 ));
             }
@@ -599,7 +1068,7 @@ async function applyEditAndResend(editedText) {
         const oldBubble = document.querySelector(`[data-message-id="${originId}"]`);
         if(oldBubble && oldBubble.closest('.flex')) oldBubble.closest('.flex').remove();
 
-        window.EDIT_CONTEXT.canRestore = true;
+        State.getEditContext().canRestore = true;
 
         // 3. 새 메시지 전송 (화면에 추가됨)
         document.getElementById('messageInput').value = '';
@@ -693,8 +1162,8 @@ async function syncMessageIds(sessionId) {
     if (!sessionId) return;
     try {
         // 화면을 지우지 않고 데이터만 가져옴
-        const res = await fetch(`${API_BASE}/chat/sessions/${sessionId}/messages`, {
-            headers: AUTH_TOKEN ? { 'Authorization': `Bearer ${AUTH_TOKEN}` } : {}
+        const res = await fetch(`${State.getApiBase()}/chat/sessions/${sessionId}/messages`, {
+            headers: State.getAuthToken() ? { 'Authorization': `Bearer ${State.getAuthToken()}` } : {}
         });
         if (!res.ok) return;
         const messages = await res.json();
@@ -738,7 +1207,7 @@ async function sendMessage(prompt = null, options = {}) {
     const question = prompt !== null ? prompt : input.value.trim();
     if(!question) return;
 
-    if (prompt === null && window.EDIT_CONTEXT?.active) {
+    if (prompt === null && State.getEditContext()?.active) {
         await applyEditAndResend(question);
         return;
     }
@@ -747,15 +1216,16 @@ async function sendMessage(prompt = null, options = {}) {
         skipAddUserMessage = false, 
         isRegenerate = false,
         regenerateTargetMid = null,
-        preserveRestore = false
+        preserveRestore = false,
+        plan_approved = false
     } = options;
 
     if (!skipAddUserMessage) {
         updateRegenerateVisibility({ hideAll: true });
     }
 
-    isGenerating = true; updateSendButtonState(true);
-    abortController = new AbortController();
+    State.setIsGenerating(true); updateSendButtonState(true);
+    State.setAbortController(new AbortController());
 
     if (!skipAddUserMessage) {
         addMessageToUI('user', question);
@@ -812,18 +1282,19 @@ async function sendMessage(prompt = null, options = {}) {
 
     try {
         const headers = { 'Content-Type': 'application/json' };
-        if(AUTH_TOKEN) headers['Authorization'] = `Bearer ${AUTH_TOKEN}`;
+        if(State.getAuthToken()) headers['Authorization'] = `Bearer ${State.getAuthToken()}`;
 
-        const res = await fetch(`${API_BASE}/chat/ask`, {
+        const res = await fetch(`${State.getApiBase()}/chat/ask`, {
             method: 'POST', headers,
             body: JSON.stringify({
-                question, session_id: CURRENT_SESSION_ID,
-                folder_id: CURRENT_FOLDER_ID,
-                temp_session_id: TEMP_SESSION_ID || null,
+                question, session_id: State.getCurrentSessionId(),
+                folder_id: State.getCurrentFolderId(),
+                temp_session_id: State.getTempSessionId() || null,
                 mode: CURRENT_MODE,
-                skip_user_message: skipAddUserMessage
+                skip_user_message: skipAddUserMessage,
+                plan_approved: plan_approved
             }),
-            signal: abortController.signal
+            signal: State.getAbortController().signal
         });
 
         if(!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -837,6 +1308,7 @@ async function sendMessage(prompt = null, options = {}) {
         const thoughtLength = streamDiv.querySelector('.thought-length');
 
         let buffer = "";
+        let sseEventType = null;
 
         while(true) {
             const {done, value} = await reader.read();
@@ -846,9 +1318,31 @@ async function sendMessage(prompt = null, options = {}) {
             const lines = chunk.split('\n');
 
             for(const line of lines) {
+                if (line.startsWith('event:')) {
+                    sseEventType = line.slice(6).trim();
+                    continue;
+                }
                 if(line.startsWith('data: ')) {
                     try {
-                        const jsonData = JSON.parse(line.slice(6));
+                        // [JSON_PARSING_FIX] 빈 문자열이나 잘못된 형식 체크
+                        const jsonStr = line.slice(6).trim();
+                        if(!jsonStr || jsonStr.length === 0) {
+                            sseEventType = null;
+                            continue;  // 빈 라인은 무시
+                        }
+                        const jsonData = JSON.parse(jsonStr);
+
+                        const isRunMeta = sseEventType === 'run_meta' || (jsonData.run_id && jsonData.chunk === undefined && jsonData.done === undefined);
+                        if (isRunMeta) {
+                            if (typeof console !== 'undefined' && console.log) console.log('[TaskBlock] run_meta received run_id=', jsonData.run_id);
+                            window._currentRunPlanOnly = !!jsonData.plan_only;
+                            window._planOnlyUserInput = question;
+                            handleRunMeta(jsonData);
+                            handleRunMetaForTaskBlock(jsonData, streamDiv);
+                            sseEventType = null;
+                            continue;
+                        }
+                        sseEventType = null;
 
                         if(jsonData.chunk) {
                             buffer += jsonData.chunk;
@@ -885,7 +1379,7 @@ async function sendMessage(prompt = null, options = {}) {
                                 fullAnswer += buffer;
                                 contentDiv.textContent = fullAnswer;
                                 if(detectRepetitionLoop(buffer)) {
-                                    abortController.abort();
+                                    State.getAbortController().abort();
                                     fullAnswer += '\n\n⛔ [자동 중단: 반복 루프 감지]';
                                     contentDiv.textContent = fullAnswer;
                                     break;
@@ -897,9 +1391,21 @@ async function sendMessage(prompt = null, options = {}) {
 
                         if(jsonData.done) {
                             messageMetadata = jsonData;
-                            CURRENT_SESSION_ID = jsonData.session_id;
+                            State.setCurrentSessionId(jsonData.session_id);
+                            if (jsonData.run_id) {
+                                handleRunMeta({ run_id: jsonData.run_id });
+                                if (!currentTaskBlockRunId) handleRunMetaForTaskBlock({ run_id: jsonData.run_id }, streamDiv);
+                            }
                         }
-                    } catch(e) {}
+                    } catch(e) {
+                        // [JSON_PARSING_FIX] JSON 파싱 오류를 더 자세히 로깅하고 안전하게 처리
+                        if(e instanceof SyntaxError) {
+                            console.warn(`[JSON Parse Error] Invalid JSON in SSE data: ${line.substring(0, 100)}...`, e);
+                            // JSON 파싱 실패 시 해당 라인을 건너뛰고 계속 진행
+                        } else {
+                            console.warn('Failed to parse SSE data:', line.substring(0, 100), e);
+                        }
+                    }
                 }
             }
         }
@@ -915,19 +1421,19 @@ async function sendMessage(prompt = null, options = {}) {
         // Versioning Logic
         const originKey = String(isRegenerate ? regenerateTargetMid : messageMetadata.message_id);
         if (originKey && originKey !== "null") {
-            if (!answerVersions[originKey]) answerVersions[originKey] = { index: 0, items: [], prompt: "" };
-            if (!answerVersions[originKey].prompt) answerVersions[originKey].prompt = question; 
+            if (!State.getAnswerVersions()[originKey]) State.getAnswerVersions()[originKey] = { index: 0, items: [], prompt: "" };
+            if (!State.getAnswerVersions()[originKey].prompt) State.getAnswerVersions()[originKey].prompt = question; 
         }
 
         if (isRegenerate && regenerateTargetMid) {
             const originMid = String(regenerateTargetMid);
-            if (!answerVersions[originMid]) answerVersions[originMid] = { index: 0, items: [] };
-            answerVersions[originMid].items.push({
+            if (!State.getAnswerVersions()[originMid]) State.getAnswerVersions()[originMid] = { index: 0, items: [] };
+            State.getAnswerVersions()[originMid].items.push({
                 content: finalAnswerWithThought,
                 metadata: { ...messageMetadata, processing_time: finalTime },
                 ts: Date.now()
             });
-            answerVersions[originMid].index = answerVersions[originMid].items.length - 1;
+            State.getAnswerVersions()[originMid].index = State.getAnswerVersions()[originMid].items.length - 1;
 
             const bubbleEl = findBubbleByOriginMid(String(regenerateTargetMid));
             if (bubbleEl) {
@@ -944,18 +1450,23 @@ async function sendMessage(prompt = null, options = {}) {
                 setTimeout(() => attachOrUpdateVersionControls(bubbleEl, String(regenerateTargetMid)), 100);
                 if(bubbleEl.style.opacity === '0.3') bubbleEl.style.opacity = '1';
             } else {
-                addMessageToUI('assistant', finalAnswerWithThought, messageMetadata.rag_used, messageMetadata.message_id, null, messageMetadata.auto_selected, messageMetadata.selected_mode, finalTime, originKey);
+                addMessageToUI('assistant', finalAnswerWithThought, messageMetadata.rag_used, messageMetadata.message_id, null, messageMetadata.auto_selected, messageMetadata.selected_mode, finalTime, originKey, currentTaskBlockState);
             }
         } else {
-            addMessageToUI('assistant', finalAnswerWithThought, messageMetadata.rag_used, messageMetadata.message_id, null, messageMetadata.auto_selected, messageMetadata.selected_mode, finalTime, originKey);
+            addMessageToUI('assistant', finalAnswerWithThought, messageMetadata.rag_used, messageMetadata.message_id, null, messageMetadata.auto_selected, messageMetadata.selected_mode, finalTime, originKey, currentTaskBlockState);
         }
+        closeTaskBlockEventSource(currentTaskBlockRunId);
+        currentTaskBlockRunId = null;
+        currentTaskBlockState = null;
+        currentTaskBlockBubbleRef = null;
+        taskBlockLastRenderedSnapshot = '';
 
         document.getElementById('statusText').textContent = 'Ready';
         
         // 💎 [CRITICAL FIX] loadSession 대신 조용한 ID 동기화 호출
         // 이제 화면이 사라지거나 깜빡이지 않습니다.
-        if (AUTH_TOKEN && CURRENT_SESSION_ID && !isRegenerate) {
-            await syncMessageIds(CURRENT_SESSION_ID);
+        if (State.getAuthToken() && State.getCurrentSessionId() && !isRegenerate) {
+            await syncMessageIds(State.getCurrentSessionId());
         } else {
             await loadUncategorizedSessions(); // 사이드바 목록만 갱신
         }
@@ -965,19 +1476,24 @@ async function sendMessage(prompt = null, options = {}) {
         if(e.name === 'AbortError') {
             streamDiv.remove();
             let msg = (fullThought ? `<think>${fullThought}</think>` : '') + fullAnswer + (fullAnswer ? '\n\n' : '') + '⏸️ [중단됨]';
-            addMessageToUI('assistant', msg, false, null, null, false, null, null, null);
+            addMessageToUI('assistant', msg, false, null, null, false, null, null, null, currentTaskBlockState);
         } else {
             streamDiv.remove();
             addMessageToUI('assistant', `⚠️ 오류: ${e.message}`);
         }
+        closeTaskBlockEventSource(currentTaskBlockRunId);
+        currentTaskBlockRunId = null;
+        currentTaskBlockState = null;
+        currentTaskBlockBubbleRef = null;
+        taskBlockLastRenderedSnapshot = '';
     } finally {
-        isGenerating = false;
-        abortController = null;
+        State.setIsGenerating(false);
+        State.setAbortController(null);
         updateSendButtonState(false);
         if (existingBubble && existingBubble.style.opacity === '0.3') existingBubble.style.opacity = '1';
         
-        if (window.EDIT_CONTEXT?.canRestore && !preserveRestore) {
-            window.EDIT_CONTEXT.canRestore = false;
+        if (State.getEditContext()?.canRestore && !preserveRestore) {
+            State.getEditContext().canRestore = false;
         }
     }
 }
@@ -986,7 +1502,7 @@ async function sendMessage(prompt = null, options = {}) {
  * [FINAL] 수정 모드 진입
  */
 async function startEditMessage(btn) {
-    if (window.isGenerating || isGenerating) return alert("⚠️ 생성 중입니다.");
+    if (State.getIsGenerating()) return alert("⚠️ 생성 중입니다.");
 
     const bubble = btn.closest('.message-user');
     if (!bubble) return;
@@ -995,7 +1511,7 @@ async function startEditMessage(btn) {
     if (!mid) {
         alert("⚠️ 아직 저장되지 않은 메시지입니다. 잠시 후 다시 시도해주세요.");
         // 여기서도 sync 한 번 시도해주면 좋음
-        if(CURRENT_SESSION_ID) await syncMessageIds(CURRENT_SESSION_ID);
+        if(State.getCurrentSessionId()) await syncMessageIds(State.getCurrentSessionId());
         return;
     }
 
@@ -1004,16 +1520,14 @@ async function startEditMessage(btn) {
 
     const currentText = contentDiv.innerText.trim();
     const originalHtml = contentDiv.innerHTML;
-    
-    window.EDIT_CONTEXT = {
+    Object.assign(State.getEditContext(), {
         active: true,
         originMessageId: mid,
         originText: currentText,
         draftBeforeEdit: currentText,
         canRestore: false,
         backupMessages: []
-    };
-
+    });
     await createEditBackup(mid);
 
     contentDiv.innerHTML = `
@@ -1032,7 +1546,7 @@ async function startEditMessage(btn) {
     wrapper.querySelector('.cancel-btn').onclick = (e) => {
         e.stopPropagation();
         contentDiv.innerHTML = originalHtml;
-        window.EDIT_CONTEXT.active = false;
+        State.getEditContext().active = false;
     };
 
     wrapper.querySelector('.save-btn').onclick = async (e) => {
@@ -1058,7 +1572,7 @@ async function startEditMessage(btn) {
             }
         }
 
-        window.EDIT_CONTEXT.active = false;
+        State.getEditContext().active = false;
 
         // 2. 전송
         await applyEditAndResend(newText);
@@ -1074,11 +1588,11 @@ async function startEditMessage(btn) {
    * 백업에서 복원
    */
   async function restoreFromBackup() {
-    if (isGenerating) return alert('생성 중에는 복원할 수 없습니다.');
-    if (!window.EDIT_CONTEXT?.canRestore) return alert('복원 가능한 백업이 없습니다.');
+    if (State.getIsGenerating()) return alert('생성 중에는 복원할 수 없습니다.');
+    if (!State.getEditContext()?.canRestore) return alert('복원 가능한 백업이 없습니다.');
 
-    const sessionId = window.EDIT_CONTEXT.backupSessionId;
-    const backupMessages = window.EDIT_CONTEXT.backupMessages;
+    const sessionId = State.getEditContext().backupSessionId;
+    const backupMessages = State.getEditContext().backupMessages;
 
     if (!sessionId || !backupMessages?.length) return alert('백업 데이터가 없습니다.');
     if (!confirm(`${backupMessages.length}개 메시지를 복원하시겠습니까?`)) return;
@@ -1087,15 +1601,15 @@ async function startEditMessage(btn) {
         document.getElementById('statusText').textContent = '복원 중...';
 
         // 1. 현재 세션 메시지 전체 삭제
-        const currentRes = await fetch(`${API_BASE}/chat/sessions/${sessionId}/messages`, {
-            headers: AUTH_TOKEN ? { 'Authorization': `Bearer ${AUTH_TOKEN}` } : {}
+        const currentRes = await fetch(`${State.getApiBase()}/chat/sessions/${sessionId}/messages`, {
+            headers: State.getAuthToken() ? { 'Authorization': `Bearer ${State.getAuthToken()}` } : {}
         });
         if (currentRes.ok) {
             const currentMessages = await currentRes.json();
             for (const msg of currentMessages) {
-                await fetch(`${API_BASE}/chat/messages/${msg.id}`, {
+                await fetch(`${State.getApiBase()}/chat/messages/${msg.id}`, {
                     method: 'DELETE',
-                    headers: AUTH_TOKEN ? { 'Authorization': `Bearer ${AUTH_TOKEN}` } : {}
+                    headers: State.getAuthToken() ? { 'Authorization': `Bearer ${State.getAuthToken()}` } : {}
                 });
             }
         }
@@ -1113,11 +1627,11 @@ async function startEditMessage(btn) {
             }))
         };
 
-        const restoreRes = await fetch(`${API_BASE}/chat/sessions/${sessionId}/restore_messages`, {
+        const restoreRes = await fetch(`${State.getApiBase()}/chat/sessions/${sessionId}/restore_messages`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                ...(AUTH_TOKEN ? { 'Authorization': `Bearer ${AUTH_TOKEN}` } : {})
+                ...(State.getAuthToken() ? { 'Authorization': `Bearer ${State.getAuthToken()}` } : {})
             },
             body: JSON.stringify(restorePayload)
         });
@@ -1125,9 +1639,9 @@ async function startEditMessage(btn) {
         if (!restoreRes.ok) throw new Error(await restoreRes.text());
 
         // 3. 화면 갱신 (복원 시에는 전체 리로드가 맞음)
-        await loadSession(sessionId, window.EDIT_CONTEXT.backupFolderId);
+        await loadSession(sessionId, State.getEditContext().backupFolderId);
 
-        window.EDIT_CONTEXT.canRestore = false;
+        State.getEditContext().canRestore = false;
         document.getElementById('statusText').textContent = 'Ready';
         alert('✅ 복원 완료');
 
@@ -1142,14 +1656,14 @@ async function startEditMessage(btn) {
 // [SBMA][INTENT] regenerate 시작: /events intent=regenerate 전송 (originMid 포함)
 async function regenerateResponse(mid, btnEl = null) {
     // ✅ [P0] 중복 클릭 방지
-    if (isRegenerating) {
+    if (State.getIsRegenerating()) {
         console.warn('⚠️ [Regenerate] Already in progress, ignoring duplicate click');
         return;
     }
 
     // ✅ [P0] 상태 제어 시작 (팝업 없음, 즉시 진입)
-    isRegenerating = true;
-    isGenerating = true;
+    State.setIsRegenerating(true);
+    State.setIsGenerating(true);
     updateSendButtonState(true);
     document.getElementById('statusText').textContent = 'Regenerating...';
 
@@ -1209,7 +1723,7 @@ async function regenerateResponse(mid, btnEl = null) {
         }
 
         // ✅ [P0] 세션 ID 고정 (타이밍 이슈 방지)
-        const sessionId = CURRENT_SESSION_ID;
+        const sessionId = State.getCurrentSessionId();
         if (!sessionId) {
             alert('No session found');
             return;
@@ -1218,8 +1732,8 @@ async function regenerateResponse(mid, btnEl = null) {
         console.log(`🔄 [Regenerate] Starting for message ${mid} in session ${sessionId}`);
 
         // 1. 세션 메시지 목록 가져오기
-        const messagesRes = await fetch(`${API_BASE}/chat/sessions/${sessionId}/messages`, {
-            headers: AUTH_TOKEN ? { 'Authorization': `Bearer ${AUTH_TOKEN}` } : {}
+        const messagesRes = await fetch(`${State.getApiBase()}/chat/sessions/${sessionId}/messages`, {
+            headers: State.getAuthToken() ? { 'Authorization': `Bearer ${State.getAuthToken()}` } : {}
         });
 
         if (!messagesRes.ok) {
@@ -1232,11 +1746,7 @@ async function regenerateResponse(mid, btnEl = null) {
         // ✅ [P1] 이전 답변 아카이빙 (삭제 전 저장)
         const targetMessage = messages.find(m => m.id === mid);
         if (targetMessage && targetMessage.role === 'assistant') {
-            // answerArchive 없으면 방어적으로 초기화
-            if (typeof answerArchive === 'undefined' || !answerArchive) {
-                window.answerArchive = {};
-            }
-
+            var answerArchive = State.getAnswerArchive();
             answerArchive[mid] = {
                 content: targetMessage.content,
                 metadata: {
@@ -1252,13 +1762,13 @@ async function regenerateResponse(mid, btnEl = null) {
 
             // ✅ [A안] 이전 답변을 첫 버전으로 저장
             const originMid = String(mid);
-            if (!answerVersions[originMid]) {
-                answerVersions[originMid] = { index: 0, items: [], prompt: "" };
+            if (!State.getAnswerVersions()[originMid]) {
+                State.getAnswerVersions()[originMid] = { index: 0, items: [], prompt: "" };
             }
 
             // 첫 번째 버전으로 추가 (이미 있으면 스킵)
-            if (answerVersions[originMid].items.length === 0) {
-                answerVersions[originMid].items.push({
+            if (State.getAnswerVersions()[originMid].items.length === 0) {
+                State.getAnswerVersions()[originMid].items.push({
                     content: targetMessage.content,
                     metadata: {
                         rag_used: targetMessage.rag_used,
@@ -1273,7 +1783,7 @@ async function regenerateResponse(mid, btnEl = null) {
         }
 
         // ✅ [P0] originMid 기반 prompt 스냅샷 우선 사용
-        let userPromptSnapshot = answerVersions[String(mid)]?.prompt || null;
+        let userPromptSnapshot = State.getAnswerVersions()[String(mid)]?.prompt || null;
 
         // 2. 사용자 질문 추출 및 하위 메시지 목록 식별
         let messagesToDelete = [mid];
@@ -1322,8 +1832,8 @@ async function regenerateResponse(mid, btnEl = null) {
         alert(`Regenerate 오류: ${e.message || e}`);
     } finally {
         // ✅ [P0] 종료 경로 통일
-        isRegenerating = false;
-        isGenerating = false;
+        State.setIsRegenerating(false);
+        State.setIsGenerating(false);
         updateSendButtonState(false);
         document.getElementById('statusText').textContent = 'Ready';
     }
@@ -1334,15 +1844,15 @@ async function regenerateResponse(mid, btnEl = null) {
  */
 async function continueResponse(mid, btnEl = null) {
     // 중복 클릭 방지
-    if (isGenerating) {
+    if (State.getIsGenerating()) {
         console.warn('⚠️ [Continue] Generation already in progress, ignoring');
         return;
     }
 
-    isGenerating = true;
+    State.setIsGenerating(true);
     updateSendButtonState(true);
     document.getElementById('statusText').textContent = 'Continuing...';
-    abortController = new AbortController();
+    State.setAbortController(new AbortController());
 
     try {
         // 1. 기존 메시지 버블 찾기
@@ -1386,19 +1896,19 @@ async function continueResponse(mid, btnEl = null) {
 
         // 6. API 호출 (스트리밍)
         const headers = { 'Content-Type': 'application/json' };
-        if(AUTH_TOKEN) headers['Authorization'] = `Bearer ${AUTH_TOKEN}`;
+        if(State.getAuthToken()) headers['Authorization'] = `Bearer ${State.getAuthToken()}`;
 
-        const res = await fetch(`${API_BASE}/chat/ask`, {
+        const res = await fetch(`${State.getApiBase()}/chat/ask`, {
             method: 'POST',
             headers,
             body: JSON.stringify({
                 question: continuePrompt,
-                session_id: CURRENT_SESSION_ID,
-                folder_id: CURRENT_FOLDER_ID,
+                session_id: State.getCurrentSessionId(),
+                folder_id: State.getCurrentFolderId(),
                 mode: CURRENT_MODE,
                 skip_user_message: true  // ✅ [FIX] Continue는 user 메시지 저장 안 함
             }),
-            signal: abortController.signal
+            signal: State.getAbortController().signal
         });
 
         if (!res.ok) {
@@ -1425,7 +1935,12 @@ async function continueResponse(mid, btnEl = null) {
             for (const line of lines) {
                 if (line.startsWith('data: ')) {
                     try {
-                        const jsonData = JSON.parse(line.slice(6));
+                        // [JSON_PARSING_FIX] 빈 문자열이나 잘못된 형식 체크
+                        const jsonStr = line.slice(6).trim();
+                        if(!jsonStr || jsonStr.length === 0) {
+                            continue;  // 빈 라인은 무시
+                        }
+                        const jsonData = JSON.parse(jsonStr);
 
                         if (jsonData.chunk) {
                             continuedText += jsonData.chunk;
@@ -1443,7 +1958,13 @@ async function continueResponse(mid, btnEl = null) {
                             contentDiv.textContent = existingContent + continuedText;
                         }
                     } catch (e) {
-                        console.warn('Failed to parse SSE data:', line, e);
+                        // [JSON_PARSING_FIX] JSON 파싱 오류를 더 자세히 로깅하고 안전하게 처리
+                        if(e instanceof SyntaxError) {
+                            console.warn(`[JSON Parse Error] Invalid JSON in SSE data: ${line.substring(0, 100)}...`, e);
+                            // JSON 파싱 실패 시 해당 라인을 건너뛰고 계속 진행
+                        } else {
+                            console.warn('Failed to parse SSE data:', line.substring(0, 100), e);
+                        }
                     }
                 }
             }
@@ -1461,17 +1982,17 @@ async function continueResponse(mid, btnEl = null) {
         if (messageMetadata.message_id) {
             try {
                 // 10-1. 서버가 생성한 새 메시지 삭제
-                await fetch(`${API_BASE}/chat/messages/${messageMetadata.message_id}`, {
+                await fetch(`${State.getApiBase()}/chat/messages/${messageMetadata.message_id}`, {
                     method: 'DELETE',
-                    headers: AUTH_TOKEN ? { 'Authorization': `Bearer ${AUTH_TOKEN}` } : {}
+                    headers: State.getAuthToken() ? { 'Authorization': `Bearer ${State.getAuthToken()}` } : {}
                 });
 
                 // 10-2. 원본 메시지 업데이트 (전체 내용으로)
-                await fetch(`${API_BASE}/chat/messages/${mid}`, {
+                await fetch(`${State.getApiBase()}/chat/messages/${mid}`, {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
-                        ...(AUTH_TOKEN ? { 'Authorization': `Bearer ${AUTH_TOKEN}` } : {})
+                        ...(State.getAuthToken() ? { 'Authorization': `Bearer ${State.getAuthToken()}` } : {})
                     },
                     body: JSON.stringify({
                         content: fullContent,
@@ -1487,12 +2008,12 @@ async function continueResponse(mid, btnEl = null) {
 
         // 11. 버전 관리 시스템에 저장
         const originMid = String(mid);
-        if (!answerVersions[originMid]) {
-            answerVersions[originMid] = { index: 0, items: [], prompt: "" };
+        if (!State.getAnswerVersions()[originMid]) {
+            State.getAnswerVersions()[originMid] = { index: 0, items: [], prompt: "" };
         }
 
         // 새 버전 추가
-        answerVersions[originMid].items.push({
+        State.getAnswerVersions()[originMid].items.push({
             content: fullContent,
             metadata: {
                 rag_used: messageMetadata.rag_used || false,
@@ -1504,7 +2025,7 @@ async function continueResponse(mid, btnEl = null) {
         });
 
         // 최신 버전으로 인덱스 설정
-        answerVersions[originMid].index = answerVersions[originMid].items.length - 1;
+        State.getAnswerVersions()[originMid].index = State.getAnswerVersions()[originMid].items.length - 1;
 
         console.log(`✅ [Continue] Added ${continuedText.length} chars to message ${mid}`);
 
@@ -1535,10 +2056,10 @@ async function continueResponse(mid, btnEl = null) {
             alert(`Continue 오류: ${e.message || e}`);
         }
     } finally {
-        isGenerating = false;
+        State.setIsGenerating(false);
         updateSendButtonState(false);
         document.getElementById('statusText').textContent = 'Ready';
-        abortController = null;
+        State.setAbortController(null);
     }
 }
 
@@ -1551,12 +2072,11 @@ async function loadSession(id, folderId = null) {
     // ============================================================
     
     // 1. 진행 중인 생성 중단
-    if (isGenerating && abortController) {
+    if (State.getIsGenerating() && State.getAbortController()) {
         stopGeneration();
     }
 
-    // 2. 편집 모드 & 복원 상태 강제 초기화
-    window.EDIT_CONTEXT = {
+    Object.assign(State.getEditContext(), {
         active: false,
         originMessageId: null,
         originText: "",
@@ -1566,7 +2086,7 @@ async function loadSession(id, folderId = null) {
         backupFolderId: null,
         backupCreatedAt: null,
         canRestore: false
-    };
+    });
 
     // 3. UI에 남아있는 인라인 복원 버튼 제거
     document.querySelectorAll('.btn-inline-restore').forEach(btn => btn.remove());
@@ -1579,19 +2099,19 @@ async function loadSession(id, folderId = null) {
     history.pushState(null, '', `?session_id=${id}`);
     console.log(`🔗 [URL] Updated to session_id=${id}`);
 
-    const res=await fetch(`${API_BASE}/chat/sessions/${id}/messages`,{headers:AUTH_TOKEN?{'Authorization':`Bearer ${AUTH_TOKEN}`}:{}});
+    const res=await fetch(`${State.getApiBase()}/chat/sessions/${id}/messages`,{headers:State.getAuthToken()?{'Authorization':`Bearer ${State.getAuthToken()}`}:{}});
     if(res.ok) {
         const m=await res.json();
-        CURRENT_SESSION_ID=id;
+        State.setCurrentSessionId(id);
 
         // ✅ [FIX] CURRENT_FOLDER 설정하여 Regenerate 버튼 표시 보장
         if (folderId !== null) {
-            CURRENT_FOLDER_ID = folderId;
-            CURRENT_FOLDER = FOLDERS.find(f => f.id === folderId);
+            State.setCurrentFolderId(folderId);
+            State.setCurrentFolder(State.getFolders().find(f => f.id === folderId));
         } else {
             // folder_id가 없으면 초기화 (Uncategorized)
-            CURRENT_FOLDER_ID = null;
-            CURRENT_FOLDER = null;
+            State.setCurrentFolderId(null);
+            State.setCurrentFolder(null);
         }
 
         // ✅ [P0] 컨테이너 초기화 (중간 재생성 시 순서 꼬임 방지)
@@ -1662,14 +2182,59 @@ async function loadSession(id, folderId = null) {
             groups.push(currentGroup);
         }
 
+        // ✅ [Plan Card 복원] 세션의 run 목록 조회 후 각 그룹별 run_id·todos 확보
+        let runsAsc = [];
+        try {
+            const runsRes = await fetch(`${State.getApiBase()}/runs?session_id=${id}&limit=100`, { headers: State.getAuthToken() ? { 'Authorization': 'Bearer ' + State.getAuthToken() } : {} });
+            if (runsRes.ok) {
+                const runsData = await runsRes.json();
+                const runsList = runsData.runs || [];
+                runsAsc = [...runsList].reverse();
+            }
+        } catch (e) { console.warn('[loadSession] runs fetch failed', e); }
+
+        const runIdsByGroupIndex = [];
+        for (let i = 0; i < groups.length; i++) {
+            const group = groups[i];
+            if (group.assistants.length === 0) { runIdsByGroupIndex.push(null); continue; }
+            const lastMsg = group.assistants[group.assistants.length - 1];
+            let runId = null;
+            if (lastMsg.state_info) {
+                try {
+                    const si = JSON.parse(lastMsg.state_info);
+                    if (si.plan_only && si.run_id) runId = si.run_id;
+                } catch (err) {}
+            }
+            if (!runId && runsAsc[i]) runId = runsAsc[i].run_id || null;
+            runIdsByGroupIndex.push(runId);
+        }
+
+        const snapshots = await Promise.all(
+            runIdsByGroupIndex.map(rid =>
+                rid ? fetch(`${State.getApiBase()}/runs/${encodeURIComponent(rid)}`, { headers: State.getAuthToken() ? { 'Authorization': 'Bearer ' + State.getAuthToken() } : {} }).then(r => r.ok ? r.json() : null).catch(() => null)
+                    : Promise.resolve(null)
+            )
+        );
+
+        const planCardForGroup = snapshots.map((snap, i) => {
+            const runId = runIdsByGroupIndex[i];
+            const group = groups[i];
+            if (!runId || !group || !group.assistants.length) return null;
+            const todos = (snap && snap.todos) ? snap.todos : [];
+            if (todos.length === 0) return null;
+            const userInput = (group.userMsg && group.userMsg.content) ? String(group.userMsg.content).trim() : '';
+            if (!userInput) return null;
+            return { run_id: runId, todos: todos, user_input: userInput };
+        });
+
         // ✅ [VERSION SYSTEM] 각 그룹의 assistant 메시지 처리
-        groups.forEach(group => {
+        groups.forEach((group, idx) => {
             if (group.assistants.length === 0) return;
 
             const originMid = String(group.assistants[0].id);
 
             // ✅ 버전 저장소 무조건 초기화 (새로고침 시 깨끗한 상태)
-            answerVersions[originMid] = {
+            State.getAnswerVersions()[originMid] = {
                 index: group.assistants.length - 1,  // 최신 버전 인덱스
                 items: [],
                 prompt: group.userMsg.content
@@ -1677,7 +2242,7 @@ async function loadSession(id, folderId = null) {
 
             // 모든 버전 저장 (DB에서 가져온 순서대로)
             group.assistants.forEach(msg => {
-                answerVersions[originMid].items.push({
+                State.getAnswerVersions()[originMid].items.push({
                     content: msg.content,
                     metadata: {
                         rag_used: msg.rag_used,
@@ -1689,8 +2254,10 @@ async function loadSession(id, folderId = null) {
                 });
             });
 
-            // ✅ 최신 버전만 렌더링 (화면에 1개만 표시)
+            // ✅ 최신 버전만 렌더링 (화면에 1개만 표시) + planCard 복원 + evolution_payload (접힌 상세)
             const lastMsg = group.assistants[group.assistants.length - 1];
+            const planCard = planCardForGroup[idx] || null;
+            const evolutionPayload = lastMsg.evolution_payload || null;
             addMessageToUI(
                 'assistant',
                 lastMsg.content,
@@ -1700,7 +2267,10 @@ async function loadSession(id, folderId = null) {
                 lastMsg.auto_selected || false,
                 lastMsg.selected_mode || null,
                 lastMsg.processing_time || null,
-                originMid  // ✅ originMid 전달 (버전 추적용)
+                originMid,  // ✅ originMid 전달 (버전 추적용)
+                null,       // taskBlockState
+                planCard,   // ✅ 세션 로드 시 계획 카드 복원
+                evolutionPayload  // ✅ patch_report 시 접힌 상세에 Evolution 원문
             );
 
             // ✅ 버전이 2개 이상이면 < 1/3 > 네비게이션 표시
@@ -1723,11 +2293,66 @@ async function loadSession(id, folderId = null) {
     }// 여기가 loadSession 끝나는 괄호
 }
 
+// ============================================================
+// ✅ Background message polling (Autopilot reports)
+// - 백그라운드 태스크가 DB에 삽입한 assistant 메시지를 채팅창에 표시
+// ============================================================
+let _bgPollTimer = null;
+
+function _getMaxRenderedMessageId() {
+    let maxId = 0;
+    try {
+        document.querySelectorAll('[data-message-id],[data-mid]').forEach(el => {
+            const raw = el.getAttribute('data-message-id') || el.getAttribute('data-mid') || '';
+            const n = parseInt(String(raw), 10);
+            if (!isNaN(n) && n > maxId) maxId = n;
+        });
+    } catch(e) {}
+    return maxId;
+}
+
+async function _pollBackgroundMessages() {
+    try {
+        if (!State.getAuthToken() || !State.getCurrentSessionId()) return;
+        if (State.getIsGenerating()) return; // 생성 중엔 UI 꼬임 방지
+
+        const maxRendered = _getMaxRenderedMessageId();
+        const res = await fetch(`${State.getApiBase()}/chat/sessions/${State.getCurrentSessionId()}/messages`, {
+            headers: { 'Authorization': `Bearer ${State.getAuthToken()}` }
+        });
+        if (!res.ok) return;
+        const messages = await res.json();
+        if (!Array.isArray(messages) || messages.length === 0) return;
+
+        const newOnes = messages
+            .filter(m => m && m.id && Number(m.id) > maxRendered)
+            .sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
+
+        // user 메시지는 UI에서 이미 입력으로 생성되는 경우가 많으니 assistant만 추가
+        for (const msg of newOnes) {
+            if (msg.role !== 'assistant') continue;
+            addMessageToUI('assistant', msg.content || '', false, msg.id, null, false, null, null, null, null, null, msg.evolution_payload || null);
+        }
+    } catch(e) {
+        // 조용히 실패(네트워크/권한/세션 전환 중)
+    }
+}
+
+function startBackgroundMessagePolling() {
+    try {
+        if (_bgPollTimer) clearInterval(_bgPollTimer);
+        _bgPollTimer = setInterval(_pollBackgroundMessages, 2500);
+    } catch(e) {}
+}
+
+// 페이지 로드 시 1회 시작 (세션 선택 이후에도 계속 돌며 State.getCurrentSessionId() 기준으로 표시)
+try { startBackgroundMessagePolling(); } catch(e) {}
+
 /**
  * Chat 액션 핸들러
  */
 function handleChatAction() {
-    if (isGenerating) {
+    if (State.getIsGenerating()) {
         stopGeneration();
     } else {
         sendMessage();
@@ -1743,13 +2368,36 @@ function addSearchApprovalCard(plan, sid, mid) {
     const div = document.createElement('div');
     div.className = 'flex justify-start mb-4';
     div.id = `approval-${mid}`;
+    div.dataset.plan = JSON.stringify(plan);
+    div.dataset.sid = String(sid);
+    div.dataset.mid = String(mid);
     const keywords = plan.keywords.map(k=>`<span class="bg-blue-900 px-2 py-1 rounded text-xs text-blue-200">${escapeHtml(k)}</span>`).join(' ');
-    div.innerHTML = `<div class="max-w-[85%] rounded-xl p-4 bg-gray-800 border border-blue-500 shadow-lg"><h3 class="text-blue-400 font-bold mb-2">🌐 웹 검색 계획</h3><div class="mb-3 text-sm text-gray-300">${escapeHtml(plan.purpose)}</div><div class="flex gap-2 mb-4 flex-wrap">${keywords}</div><div class="flex gap-2"><button onclick='executeResearch(${sid},${mid},${JSON.stringify(plan)})' class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded text-sm">승인</button><button onclick="document.getElementById('approval-${mid}').remove()" class="px-4 bg-gray-700 hover:bg-gray-600 text-white rounded text-sm">취소</button></div></div>`;
+    const adminOk = (typeof isAdmin !== 'undefined' && isAdmin) || (typeof window !== 'undefined' && window.isAdmin);
+    const approveBtnHtml = adminOk
+        ? `<button class="search-approve-btn flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded text-sm">승인</button>`
+        : `<button class="search-approve-btn flex-1 bg-gray-600 text-gray-400 py-2 rounded text-sm cursor-not-allowed" disabled title="Admin 전용">승인 (Admin 전용)</button>`;
+    div.innerHTML = `<div class="max-w-[85%] rounded-xl p-4 bg-gray-800 border border-blue-500 shadow-lg"><h3 class="text-blue-400 font-bold mb-2">🌐 웹 검색 계획</h3><div class="mb-3 text-sm text-gray-300">${escapeHtml(plan.purpose)}</div><div class="flex gap-2 mb-4 flex-wrap">${keywords}</div><div class="flex gap-2">${approveBtnHtml}<button onclick="document.getElementById('approval-${mid}').remove()" class="px-4 bg-gray-700 hover:bg-gray-600 text-white rounded text-sm">취소</button></div></div>`;
     container.prepend(div);
+    const approveBtn = div.querySelector('.search-approve-btn');
+    if (approveBtn) {
+        if (adminOk) {
+            approveBtn.onclick = () => executeResearch(sid, mid, plan);
+        } else {
+            approveBtn.onclick = () => typeof showAdminOnlyWarning === 'function' && showAdminOnlyWarning();
+            approveBtn.removeAttribute('disabled');
+            approveBtn.classList.remove('cursor-not-allowed');
+        }
+    }
 }
 
 async function executeResearch(sid, mid, plan) {
-    document.getElementById(`approval-${mid}`).remove();
+    const adminOk = (typeof isAdmin !== 'undefined' && isAdmin) || (typeof window !== 'undefined' && window.isAdmin);
+    if (!adminOk) {
+        if (typeof showAdminOnlyWarning === 'function') showAdminOnlyWarning();
+        return;
+    }
+    const approvalEl = document.getElementById(`approval-${mid}`);
+    if (approvalEl) approvalEl.remove();
 
     // ✅ [P0-1 FIX] 로딩 메시지를 추적 가능한 ID로 저장
     const loadingMessageId = `research-loading-${mid}`;
@@ -1765,8 +2413,8 @@ async function executeResearch(sid, mid, plan) {
     requestStartTime = Date.now(); // 검색 시간 측정 시작
 
     try {
-        const res = await fetch(`${API_BASE}/chat/research/execute`, {
-            method:'POST', headers:{'Content-Type':'application/json', ...(AUTH_TOKEN?{'Authorization':`Bearer ${AUTH_TOKEN}`}:{})},
+        const res = await fetch(`${State.getApiBase()}/chat/research/execute`, {
+            method:'POST', headers:{'Content-Type':'application/json', ...(State.getAuthToken()?{'Authorization':`Bearer ${State.getAuthToken()}`}:{})},
             body:JSON.stringify({session_id:sid, message_id:mid, search_plan:plan})
         });
         if(res.ok) {
@@ -1815,11 +2463,11 @@ async function submitFeedback(mid, pos, btn) {
         }
 
         // 2. 서버에 피드백 전송
-        const response = await fetch(`${API_BASE}/chat/messages/${mid}/feedback`, {
+        const response = await fetch(`${State.getApiBase()}/chat/messages/${mid}/feedback`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                ...(AUTH_TOKEN ? {'Authorization': `Bearer ${AUTH_TOKEN}`} : {})
+                ...(State.getAuthToken() ? {'Authorization': `Bearer ${State.getAuthToken()}`} : {})
             },
             body: JSON.stringify({is_positive: pos})
         });

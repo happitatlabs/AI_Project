@@ -1,255 +1,31 @@
-import subprocess
-import time
-import webbrowser
-import requests
+"""
+Launcher - Mellow-Link 시스템 진입점.
+
+Ollama 확인, 의존성 진단, Mellow-Link 서버 기동, 프로세스 관리.
+"""
 import os
-import sys
-import signal
-import re
-import threading
 import queue
-import json
+import signal
+import subprocess
+import sys
+import threading
+import time
 from pathlib import Path
-from typing import List, Tuple, Dict, Set ,Optional
+from typing import Dict
+
+import launcher_env
+import launcher_deps
+import launcher_server
+
+# 입구 컷: MOLTBOOK_API_KEY 확인
+launcher_env.run_launcher_check()
 
 # 프로세스 저장용
 vtuber_proc = None
 mellow_proc = None
 
-
-def setup_environment(base_dir: Path):
-    """
-    런처 실행 시 환경 변수를 설정합니다.
-    - FFmpeg 경로를 시스템 PATH에 추가 (프로세스 내 임시 등록)
-    """
-    vtuber_dir = base_dir / "Open-LLM-VTuber"
-    ffmpeg_dir = str(vtuber_dir.absolute())
-    
-    # 현재 PATH 가져오기
-    current_path = os.environ.get("PATH", "")
-    
-    # FFmpeg 디렉토리가 PATH에 없으면 추가
-    if ffmpeg_dir not in current_path:
-        # Windows에서는 세미콜론으로 구분
-        separator = ";" if sys.platform == "win32" else ":"
-        new_path = f"{ffmpeg_dir}{separator}{current_path}"
-        os.environ["PATH"] = new_path
-        print(f"✅ FFmpeg 경로 추가됨: {ffmpeg_dir}")
-    else:
-        print(f"ℹ️  FFmpeg 경로가 이미 설정되어 있습니다.")
-
-
-def parse_requirements_file(requirements_path: Path) -> List[str]:
-    """
-    requirements.txt 파일을 파싱하여 패키지 이름 목록 추출.
-    
-    형식 지원:
-    - package==1.0.0
-    - package>=1.0.0
-    - package~=1.0.0
-    - package ; python_version < '3.11'
-    - # 주석
-    """
-    packages = []
-    if not requirements_path.exists():
-        return packages
-    
-    try:
-        with open(requirements_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                # 주석이나 빈 줄 건너뛰기
-                if not line or line.startswith('#'):
-                    continue
-                
-                # 조건부 의존성 처리 (; 이후 제거)
-                if ';' in line:
-                    line = line.split(';')[0].strip()
-                
-                # 패키지 이름 추출 (버전 정보 제거)
-                # 예: "fastapi==0.118.0" -> "fastapi"
-                # 예: "fastapi[standard]>=0.115.8" -> "fastapi"
-                match = re.match(r'^([a-zA-Z0-9_-]+)', line)
-                if match:
-                    package_name = match.group(1)
-                    packages.append(package_name.lower())
-    except Exception as e:
-        print(f"⚠️  requirements.txt 파싱 오류 ({requirements_path}): {e}")
-    
-    return packages
-
-def normalize_name(name: str) -> str:
-    """
-    [Core Patch] 패키지 이름에서 점(.), 하이픈(-), 언더바(_)를 모두 제거하고 소문자로 만듭니다.
-    예: 'Ruamel.YAML' -> 'ruamelyaml', 'pdfminer-six' -> 'pdfminersix'
-    이것이 바로 '변장술'을 꿰뚫어 보는 아키텍트의 눈이지.
-    """
-    return re.sub(r'[^a-zA-Z0-9]', '', name).lower()
-
-def get_installed_packages_fast(python_exe: str) -> Set[str]:
-    """[Optimized] 설치된 패키지 명단을 '알맹이'만 남겨서 가져옵니다."""
-    try:
-        result = subprocess.run(
-            [python_exe, "-m", "pip", "list", "--format=json"],
-            capture_output=True, text=True, encoding='utf-8', errors='replace'
-        )
-        if result.returncode != 0:
-            return set()
-        
-        data = json.loads(result.stdout)
-        # 모든 특수문자 제거 후 저장
-        return {normalize_name(pkg['name']) for pkg in data}
-    except Exception:
-        return set()
-
-def diagnose_dependencies(base_dir: Path, python_exe: str) -> Tuple[bool, Dict[str, List[str]]]:
-    """[고속 진단] 이름 불일치 문제를 해결한 최종 버전."""
-    print("\n" + "="*60 + "\n⚡ 시스템 정밀 점검: 이름표 떼고 알맹이만 확인 중...\n" + "="*60)
-    
-    installed_set = get_installed_packages_fast(python_exe)
-    if not installed_set:
-        print("⚠️  패키지 목록 로드 실패. 일단 통과합니다.")
-        return True, {}
-
-    missing = {"vtuber": [], "mellow_link": []}
-    
-    check_targets = [
-        ("vtuber", base_dir / "Open-LLM-VTuber" / "requirements.txt"),
-        ("mellow_link", base_dir / "requirements.txt") 
-    ]
-
-    for key, req_path in check_targets:
-        if not req_path.exists() and key == "mellow_link":
-             req_path = base_dir / "mellow_link" / "requirements.txt"
-
-        packages = parse_requirements_file(req_path)
-        if packages:
-            print(f"📦 {key.upper()} 검문 중... ({len(packages)}개)")
-            for pkg in packages:
-                # 요구사항 파일의 이름도 똑같이 '알맹이'만 남겨서 비교
-                pkg_normalized = normalize_name(pkg.split('[')[0])
-                
-                # 예외 처리
-                if pkg_normalized in {'precommit', 'ruff', 'setuptools', 'wheel'}: continue
-                
-                if pkg_normalized not in installed_set:
-                    missing[key].append(pkg)
-            
-            if not missing[key]:
-                print(f"   ✅ 전원 통과")
-            else:
-                print(f"   ⚠️  {len(missing[key])}개 불일치 ({', '.join(missing[key][:3])}...)")
-
-    all_ok = not missing["vtuber"] and not missing["mellow_link"]
-    
-    if not all_ok:
-        print("\n❌ 여전히 감지되지 않는 패키지가 있습니다.")
-        # 하지만 실행은 막지 않도록 유도
-        print("💡 팁: 'y'를 눌러 무시하고 실행해도 괜찮을 확률이 99%입니다.")
-    else:
-        print("✅ 모든 시스템 준비 완료.\n" + "="*60 + "\n")
-
-    return all_ok, missing
-
-def check_ollama():
-    """Ollama 서버가 실행 중인지 확인"""
-    try:
-        response = requests.get("http://localhost:11434/api/tags", timeout=2)
-        if response.status_code == 200:
-            print("✅ Ollama: Online")
-            return True
-    except requests.RequestException:
-        pass
-    print("❌ Ollama가 꺼져 있군. 먼저 켜주게!")
-    return False
-
-
-def wait_for_server(url, name, timeout=30, process=None):
-    """
-    서버가 준비될 때까지 대기.
-    
-    Args:
-        url: 확인할 서버 URL
-        name: 서버 이름
-        timeout: 최대 대기 시간 (초)
-        process: 프로세스 객체 (타임아웃 시에도 살아있는지 확인)
-    """
-    print(f"⏳ {name} 서버 시작 대기 중... (최대 {timeout}초)")
-    start_time = time.time()
-    check_count = 0
-    
-    while time.time() - start_time < timeout:
-        check_count += 1
-        
-        # 프로세스 상태 확인 (매 5초마다)
-        if process and check_count % 5 == 0:
-            if process.poll() is not None:
-                # 프로세스가 종료되었으면 즉시 실패 반환
-                elapsed = time.time() - start_time
-                print(f"\n❌ {name} 프로세스가 종료되었습니다! (경과 시간: {elapsed:.1f}초)")
-                return False
-        
-        try:
-            response = requests.get(url, timeout=5)
-            if response.status_code == 200:
-                elapsed = time.time() - start_time
-                print(f"✅ {name} 서버: Ready (대기 시간: {elapsed:.1f}초)")
-                return True
-        except requests.RequestException:
-            # 5초마다 진행 상황 출력
-            if check_count % 5 == 0:
-                elapsed = time.time() - start_time
-                process_status = "실행 중" if (process and process.poll() is None) else "종료됨"
-                print(f"   ... {name} 서버 대기 중 ({elapsed:.1f}초 경과, 프로세스: {process_status})")
-            time.sleep(1)
-    
-    elapsed = time.time() - start_time
-    print(f"\n⚠️  {name} 서버 시작 타임아웃 ({elapsed:.1f}초 경과)")
-    print(f"   URL: {url}")
-    
-    # 프로세스 상태 확인
-    if process:
-        if process.poll() is None:
-            # 프로세스가 살아있으면 경고만 표시하고 계속 진행
-            print(f"   ⚠️  프로세스는 여전히 실행 중입니다 (PID: {process.pid})")
-            print(f"   서버가 로딩 중일 수 있으므로 계속 진행합니다...")
-            return True  # 프로세스가 살아있으면 True 반환
-        else:
-            # 프로세스가 종료되었으면 실패
-            print(f"   ❌ 프로세스가 종료되었습니다 (종료 코드: {process.returncode})")
-            return False
-    
-    print(f"   서버 로그를 확인하세요.")
-    return False
-
-
-def find_python_executable():
-    """
-    가상환경의 Python 실행 파일을 찾습니다.
-    
-    우선순위:
-    1. 현재 디렉토리의 .venv/Scripts/python.exe (Windows)
-    2. 현재 디렉토리의 .venv/bin/python (Linux/Mac)
-    3. 현재 실행 중인 Python (sys.executable)
-    """
-    base_dir = Path(__file__).parent.absolute()
-    
-    # Windows 가상환경 경로
-    venv_python = base_dir / ".venv" / "Scripts" / "python.exe"
-    if venv_python.exists():
-        print(f"✅ 가상환경 Python 발견: {venv_python}")
-        return str(venv_python.absolute())
-    
-    # Linux/Mac 가상환경 경로
-    venv_python = base_dir / ".venv" / "bin" / "python"
-    if venv_python.exists():
-        print(f"✅ 가상환경 Python 발견: {venv_python}")
-        return str(venv_python.absolute())
-    
-    # 가상환경을 찾지 못하면 현재 실행 중인 Python 사용
-    python_exe = sys.executable
-    print(f"⚠️  가상환경을 찾지 못해 현재 Python 사용: {python_exe}")
-    return python_exe
+launcher_status_every_seconds: int = 30
+launcher_last_mellow_line: Dict[str, float | str] = {"text": "", "ts": 0.0}
 
 
 def launch_system():
@@ -260,14 +36,9 @@ def launch_system():
     base_dir = Path(__file__).parent.absolute()
     project_root = str(base_dir)
     
-    # 환경 설정 (FFmpeg 경로 등)
-    setup_environment(base_dir)
-    
-    # Python 실행 파일 찾기
-    python_exe = find_python_executable()
-    
-    # 0. 자가 진단: 필수 라이브러리 확인
-    all_deps_ok, missing_packages = diagnose_dependencies(base_dir, python_exe)
+    launcher_env.setup_environment(base_dir)
+    python_exe = launcher_server.find_python_executable()
+    all_deps_ok, missing_packages = launcher_deps.diagnose_dependencies(base_dir, python_exe)
     
     if not all_deps_ok:
         print("⚠️  경고: 일부 라이브러리가 누락되었습니다.")
@@ -276,8 +47,7 @@ def launch_system():
             print("❌ 사용자가 취소했습니다.")
             return False
     
-    # 1. Ollama 확인
-    if not check_ollama():
+    if not launcher_server.check_ollama():
         return False
     
     # [비활성화] VTuber 서버는 이제 Mellow-Link API를 통해 Admin이 요청할 때만 실행됩니다.
@@ -472,7 +242,24 @@ def launch_system():
     try:
         # 환경 변수 복사 및 PYTHONPATH 설정
         env = os.environ.copy()
-        
+
+        # mellow_link/.env 로드 (Guardian API 키 등 - 자식 프로세스에 전달)
+        _mellow_env = mellow_dir / ".env"
+        if _mellow_env.exists():
+            try:
+                from dotenv import dotenv_values
+                dotenv_vars = dotenv_values(dotenv_path=str(_mellow_env))
+                for k, v in (dotenv_vars or {}).items():
+                    if k and v is not None:
+                        env[k] = str(v)
+                        # os.environ에도 반영 (LauncherStatus 등에서 읽기 위해)
+                        os.environ[k] = str(v)
+                print(f"   ✅ mellow_link/.env 로드됨 ({len(dotenv_vars or {})} 변수)")
+            except ImportError:
+                pass
+            except Exception as e:
+                print(f"   ⚠️ .env 로드 실패: {e}")
+
         # site_packages 경로 찾기
         site_packages = base_dir / ".venv" / "Lib" / "site-packages"
         site_packages_path = str(site_packages.absolute()) if site_packages.exists() else None
@@ -510,8 +297,9 @@ def launch_system():
         
         # [핵심 수정] 파일 직접 실행이 아니라 모듈(-m)로 실행
         # 이렇게 하면 D:\AI_Project\mellow_link\main.py를 알아서 찾아감
+        # NOTE: -u (unbuffered)로 실행해야 stdout 로그가 즉시 뜹니다.
         mellow_proc = subprocess.Popen(
-            [python_exe, "-m", "mellow_link.main"], 
+            [python_exe, "-u", "-m", "mellow_link.main"],
             cwd=str(base_dir), # 반드시 프로젝트 루트(D:\AI_Project)에서 실행
             env=env,
             stdout=subprocess.PIPE,
@@ -557,6 +345,33 @@ def launch_system():
     # 백그라운드에서 stdout/stderr 읽기 (에러 감지용)
     mellow_output_queue = queue.Queue()
     mellow_error_detected = threading.Event()
+    global launcher_status_every_seconds, launcher_last_mellow_line
+    launcher_last_mellow_line = {"text": "", "ts": 0.0}
+
+    # 런처가 너무 조용해서 “상태를 알 수 없다”는 문제를 해결하기 위한 옵션들
+    # - LAUNCHER_STREAM_MELLOW_LOGS=true : 중요한 로그(autopilot/startup 등)만 콘솔로 스트리밍
+    # - LAUNCHER_STREAM_ALL_LOGS=true    : 모든 Mellow-Link stdout을 콘솔로 스트리밍(매우 시끄러울 수 있음)
+    # - LAUNCHER_STATUS_EVERY_SECONDS=30 : 런처 하트비트 주기
+    stream_all = launcher_env.is_truthy_env("LAUNCHER_STREAM_ALL_LOGS", default=False)
+    stream_important = launcher_env.is_truthy_env("LAUNCHER_STREAM_MELLOW_LOGS", default=True)
+    launcher_status_every_seconds = max(
+        5, launcher_env.get_int_env("LAUNCHER_STATUS_EVERY_SECONDS", 30)
+    )
+
+    # 모든 stdout을 파일에도 저장(추후 디버깅용). logs/는 .gitignore 대상.
+    logs_dir = (base_dir / "logs")
+    try:
+        logs_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    log_path = logs_dir / "mellow_link_stdout.log"
+    try:
+        mellow_log_fp = open(log_path, "a", encoding="utf-8", errors="replace")
+        mellow_log_fp.write(f"\n\n===== LAUNCH @ {time.strftime('%Y-%m-%d %H:%M:%S')} =====\n")
+        mellow_log_fp.flush()
+        print(f"📝 Mellow-Link stdout 로그 파일: {log_path}")
+    except Exception:
+        mellow_log_fp = None
     
     def read_mellow_output():
         """Mellow-Link 프로세스 출력을 읽어서 에러 감지"""
@@ -568,6 +383,37 @@ def launch_system():
                         break
                     line = line.strip()
                     mellow_output_queue.put(('stdout', line))
+                    launcher_last_mellow_line["text"] = line
+                    launcher_last_mellow_line["ts"] = time.time()
+
+                    # 파일 로깅(가능하면 항상)
+                    if mellow_log_fp:
+                        try:
+                            mellow_log_fp.write(line + "\n")
+                            mellow_log_fp.flush()
+                        except Exception:
+                            pass
+
+                    # 선택적으로 콘솔 스트리밍
+                    printed = False
+                    if stream_all:
+                        print(f"[Mellow-Link] {line}")
+                        printed = True
+                    elif stream_important:
+                        # autopilot/라이프사이클/핵심 상태 로그는 기본 표시
+                        low = line.lower()
+                        if (
+                            "autopilot" in low
+                            or "moltbook" in low
+                            or "[startup]" in low
+                            or "[shutdown]" in low
+                            or "[companion]" in low
+                            or "intelligentautopilot" in low
+                            or "autopilot:exec" in low
+                        ):
+                            print(f"[Mellow-Link] {line}")
+                            printed = True
+
                     # 에러 키워드 감지 (치명적이지 않은 경고는 제외)
                     line_lower = line.lower()
                     # 치명적이지 않은 경고 패턴
@@ -600,10 +446,12 @@ def launch_system():
                     # 치명적 에러만 감지
                     if not is_non_critical and any(pattern in line_lower for pattern in critical_patterns):
                         mellow_error_detected.set()
-                        print(f"\n   [Mellow-Link] ⚠️  치명적 에러 감지: {line[:150]}")
+                        if not printed:
+                            print(f"\n   [Mellow-Link] ⚠️  치명적 에러 감지: {line[:150]}")
                     elif 'error' in line_lower and not is_non_critical:
                         # 'error' 키워드가 있지만 치명적이지 않은 경우는 경고만
-                        print(f"\n   [Mellow-Link] ℹ️  경고: {line[:150]}")
+                        if not printed:
+                            print(f"\n   [Mellow-Link] ℹ️  경고: {line[:150]}")
         except Exception as e:
             mellow_output_queue.put(('error', str(e)))
     
@@ -611,8 +459,9 @@ def launch_system():
     mellow_output_thread = threading.Thread(target=read_mellow_output, daemon=True)
     mellow_output_thread.start()
     
-    # Mellow-Link 서버 준비 대기
-    server_ready = wait_for_server("http://localhost:8000/docs", "Mellow-Link", timeout=30, process=mellow_proc)
+    server_ready = launcher_server.wait_for_server(
+        "http://localhost:8000/docs", "Mellow-Link", timeout=30, process=mellow_proc
+    )
     
     # 타임아웃 후 프로세스 상태 재확인
     if not server_ready:
@@ -749,6 +598,7 @@ if __name__ == "__main__":
     if launch_system():
         # 서버들이 꺼지지 않게 메인 스크립트를 잡아둠
         try:
+            last_status = 0.0
             while True:
                 # 프로세스 상태 확인
                 if vtuber_proc and vtuber_proc.poll() is not None:
@@ -757,6 +607,22 @@ if __name__ == "__main__":
                 if mellow_proc and mellow_proc.poll() is not None:
                     print("⚠️  Mellow-Link 프로세스가 예기치 않게 종료되었습니다.")
                     break
+                # 런처 하트비트(상태가 안 보이는 문제 해결)
+                now = time.time()
+                if now - last_status >= launcher_status_every_seconds:
+                    last_status = now
+                    age = int(now - (launcher_last_mellow_line.get("ts") or now))  # type: ignore[arg-type]
+                    last_line = (launcher_last_mellow_line.get("text") or "").strip()  # type: ignore[union-attr]
+                    last_line = (last_line[:160] + "...") if len(last_line) > 160 else last_line
+                    # 실제 사용되는 설정만 확인 (미구현 기능 제거)
+                    lockdown = os.environ.get("MELLOW_EMERGENCY_LOCKDOWN", "")
+                    lockdown_status = ""
+                    if lockdown.strip().lower() in {"1", "true", "yes", "y", "on"}:
+                        lockdown_status = " Emergency_Lockdown=ON"
+                    print(
+                        f"[LauncherStatus] mellow_pid={getattr(mellow_proc, 'pid', '?')} "
+                        f"last_stdout_age={age}s{lockdown_status} last_line={last_line}"
+                    )
                 time.sleep(2)
         except KeyboardInterrupt:
             pass

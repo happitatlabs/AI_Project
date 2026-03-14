@@ -1,8 +1,6 @@
 // =========================
-// API Module
+// API Module — State API 사용
 // =========================
-
-const API_BASE = window.location.origin; //✅ [P0] API 기본 URL (state.js에서 참조)
 
 // =========================
 // AbortController Lifecycle
@@ -12,17 +10,19 @@ const API_BASE = window.location.origin; //✅ [P0] API 기본 URL (state.js에�
  * 새 AbortController 생성
  */
 function createAbort() {
-    abortController = new AbortController();
-    return abortController;
+    var ctrl = new AbortController();
+    State.setAbortController(ctrl);
+    return ctrl;
 }
 
 /**
  * 현재 활성 요청 중단
  */
 function abortActive() {
-    if (abortController) {
-        abortController.abort();
-        abortController = null;
+    var ctrl = State.getAbortController();
+    if (ctrl) {
+        ctrl.abort();
+        State.setAbortController(null);
     }
 }
 
@@ -31,7 +31,7 @@ function abortActive() {
  */
 function stopGeneration() {
     abortActive();
-    isGenerating = false;
+    State.setIsGenerating(false);
     updateSendButtonState(false);
     document.getElementById('statusText').textContent = 'Stopped';
 }
@@ -45,14 +45,9 @@ function stopGeneration() {
  */
 async function apiFetch(path, options = {}) {
     const headers = { ...options.headers };
-    if (AUTH_TOKEN) {
-        headers['Authorization'] = `Bearer ${AUTH_TOKEN}`;
-    }
-
-    return fetch(`${API_BASE}${path}`, {
-        ...options,
-        headers
-    });
+    var token = State.getAuthToken();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    return fetch(`${State.getApiBase()}${path}`, { ...options, headers });
 }
 
 /**
@@ -63,14 +58,10 @@ async function apiFetch(path, options = {}) {
  * @param {AbortSignal} signal - abort signal
  */
 async function apiStreamAsk(path, payload, onDataLine, signal) {
-    const headers = {
-        'Content-Type': 'application/json'
-    };
-    if (AUTH_TOKEN) {
-        headers['Authorization'] = `Bearer ${AUTH_TOKEN}`;
-    }
-
-    const response = await fetch(`${API_BASE}${path}`, {
+    const headers = { 'Content-Type': 'application/json' };
+    var token = State.getAuthToken();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const response = await fetch(`${State.getApiBase()}${path}`, {
         method: 'POST',
         headers,
         body: JSON.stringify(payload),
@@ -113,12 +104,11 @@ async function fetchVRAMStatus() {
         const res = await apiFetch('/vram-status');
         if (res.ok) {
             const data = await res.json();
-            window.VRAM_STATUS = {
-                used: data.used || 0,
-                total: data.total || 0,
-                percent: data.percent || 0,
-                lastUpdate: new Date()
-            };
+            var vs = State.getVRAMStatus();
+            vs.used = data.used || 0;
+            vs.total = data.total || 0;
+            vs.percent = data.percent || 0;
+            vs.lastUpdate = new Date();
             updateVRAMWidget();
             return data;
         }
@@ -132,17 +122,9 @@ async function fetchVRAMStatus() {
  * VRAM 폴링 시작 (5초 간격)
  */
 function startVRAMPolling() {
-    if (window.VRAM_POLL_INTERVAL) {
-        clearInterval(window.VRAM_POLL_INTERVAL);
-    }
-
-    // 즉시 1회 호출
+    if (State.getVRAMPollInterval()) clearInterval(State.getVRAMPollInterval());
     fetchVRAMStatus();
-
-    // 5초마다 폴링
-    window.VRAM_POLL_INTERVAL = setInterval(() => {
-        fetchVRAMStatus();
-    }, 5000);
+    State.setVRAMPollInterval(setInterval(function () { fetchVRAMStatus(); }, 5000));
 
     console.log('[VRAM] Polling started (5s interval)');
 }
@@ -151,9 +133,10 @@ function startVRAMPolling() {
  * VRAM 폴링 중지
  */
 function stopVRAMPolling() {
-    if (window.VRAM_POLL_INTERVAL) {
-        clearInterval(window.VRAM_POLL_INTERVAL);
-        window.VRAM_POLL_INTERVAL = null;
+    var iv = State.getVRAMPollInterval();
+    if (iv) {
+        clearInterval(iv);
+        State.setVRAMPollInterval(null);
         console.log('[VRAM] Polling stopped');
     }
 }

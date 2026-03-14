@@ -7,10 +7,25 @@ This module contains infrastructure components:
 - Hardware abstraction layer
 - Event logging (JSONL + DB)
 - Database models & authentication
+- Persistent experience memory system
 """
 
 from .watchdog import VRAMWatchdog, VRAMStatus, create_watchdog
 from .event_logger import log_event, log_intent, SBMA_INTENTS, EVENTS_DIR, EVENTS_FILE
+from .memory_database import (
+    MemoryDatabase,
+    ExperienceRecord,
+    ToolStatRecord,
+    GoalRecord,
+    BehaviorInsight,
+    ScheduledTask,
+    get_memory_db,
+)
+from .archiver import (
+    MemoryArchiver,
+    TaskData,
+    get_archiver,
+)
 from .database import (
     # Engine & Session
     engine,
@@ -33,6 +48,8 @@ from .database import (
     DailyUsage,
     GuestUsage,
     DocumentChunk,
+    AgentRun,
+    AgentRunEvent,
     # Helper Functions
     create_default_folders_for_user,
     ensure_user_has_folders,
@@ -52,6 +69,21 @@ from .database import (
     # Constants
     ACCESS_TOKEN_EXPIRE_MINUTES,
 )
+from .run_events import (
+    create_run,
+    emit_event,
+    get_run_events,
+    get_run_snapshot,
+    EVENT_TYPE_RUN_STARTED,
+    EVENT_TYPE_PLAN_CREATED,
+    EVENT_TYPE_TODO_STARTED,
+    EVENT_TYPE_TODO_DONE,
+    EVENT_TYPE_TOOL_STARTED,
+    EVENT_TYPE_TOOL_DONE,
+    EVENT_TYPE_LOG,
+    EVENT_TYPE_RUN_FINISHED,
+    EVENT_TYPE_ERROR,
+)
 
 __all__ = [
     # Watchdog
@@ -64,6 +96,18 @@ __all__ = [
     "SBMA_INTENTS",
     "EVENTS_DIR",
     "EVENTS_FILE",
+    # Memory Database
+    "MemoryDatabase",
+    "ExperienceRecord",
+    "ToolStatRecord",
+    "GoalRecord",
+    "BehaviorInsight",
+    "ScheduledTask",
+    "get_memory_db",
+    # Memory Archiver
+    "MemoryArchiver",
+    "TaskData",
+    "get_archiver",
     # Database Engine & Session
     "engine",
     "SessionLocal",
@@ -85,6 +129,22 @@ __all__ = [
     "DailyUsage",
     "GuestUsage",
     "DocumentChunk",
+    "AgentRun",
+    "AgentRunEvent",
+    # Run Events
+    "create_run",
+    "emit_event",
+    "get_run_events",
+    "get_run_snapshot",
+    "EVENT_TYPE_RUN_STARTED",
+    "EVENT_TYPE_PLAN_CREATED",
+    "EVENT_TYPE_TODO_STARTED",
+    "EVENT_TYPE_TODO_DONE",
+    "EVENT_TYPE_TOOL_STARTED",
+    "EVENT_TYPE_TOOL_DONE",
+    "EVENT_TYPE_LOG",
+    "EVENT_TYPE_RUN_FINISHED",
+    "EVENT_TYPE_ERROR",
     # Helper Functions
     "create_default_folders_for_user",
     "ensure_user_has_folders",
