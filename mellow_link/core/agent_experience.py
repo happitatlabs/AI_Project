@@ -11,6 +11,7 @@ import asyncio
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from weakref import WeakSet
 
 from mellow_link.core.agent_schemas import AgentResult, AgentStep
 
@@ -31,6 +32,8 @@ class ExperienceHelper:
             diagnosis_interval=50,
         )
     """
+
+    _instances: "WeakSet[ExperienceHelper]" = WeakSet()
 
     def __init__(
         self,
@@ -53,6 +56,8 @@ class ExperienceHelper:
         self._diagnosis_interval = diagnosis_interval
         self._analysis_tasks: set = set()   # GC 방지
         self._diagnosis_tasks: set = set()  # GC 방지
+        self._ledger_tasks: set = set()     # 종료 시 정리할 background ledger tasks
+        self.__class__._instances.add(self)
 
     def build_context_summary(
         self,
@@ -122,6 +127,51 @@ class ExperienceHelper:
             )
         except Exception as e:
             logger.debug("[AgentBrain] Experience ledger record failed: %s", e)
+
+    def schedule_record_experience_ledger(
+        self,
+        run_state: Dict[str, Any],
+        start_time: datetime,
+        steps: List[AgentStep],
+        user_input: str,
+    ) -> None:
+        """Schedule ledger recording without blocking the main response path."""
+        task = asyncio.create_task(
+            self.record_experience_ledger(run_state, start_time, steps, user_input)
+        )
+        self._ledger_tasks.add(task)
+        task.add_done_callback(self._ledger_tasks.discard)
+
+    async def shutdown(self) -> None:
+        """Drain background helper tasks to avoid pending-task warnings on shutdown."""
+        pending = [
+            task
+            for task in (
+                list(self._ledger_tasks)
+                + list(self._analysis_tasks)
+                + list(self._diagnosis_tasks)
+            )
+            if not task.done()
+        ]
+        if not pending:
+            return
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*pending, return_exceptions=True),
+                timeout=3.0,
+            )
+        except asyncio.TimeoutError:
+            for task in pending:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    @classmethod
+    async def shutdown_all(cls) -> None:
+        helpers = list(cls._instances)
+        if not helpers:
+            return
+        await asyncio.gather(*(helper.shutdown() for helper in helpers), return_exceptions=True)
 
     async def archive_experience(
         self,

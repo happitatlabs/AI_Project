@@ -34,8 +34,8 @@ EVENT_TYPE_ERROR = "error"
 STUCK_THRESHOLD_SEC = 30
 DISCONNECTED_THRESHOLD_SEC = 60
 
-# 페이로드 크기 제한 (2KB)
-MAX_PAYLOAD_SIZE = 2048
+# 페이로드 크기 제한 (8KB)
+MAX_PAYLOAD_SIZE = 8192
 
 # 공통 민감정보 마스킹 (KEY/SECRET/TOKEN/BEARER/Authorization/OPENAI/ANTHROPIC/GOOGLE)
 from mellow_link.utils.sensitive_redact import redact_sensitive_data as _redact_keys
@@ -155,7 +155,7 @@ def emit_event(
                     run.status = "running"
                 elif event_type == EVENT_TYPE_RUN_FINISHED:
                     run.status = "completed" if payload_final.get("success", True) else "failed"
-                    run.summary = payload_final.get("summary", "")[:1000]  # 요약은 최대 1000자
+                    run.summary = payload_final.get("summary", "")[:4000]  # 사용자 콘솔 표시용 요약은 더 길게 유지
                 elif event_type == EVENT_TYPE_ERROR:
                     run.status = "failed"
                 run.updated_at = datetime.utcnow()

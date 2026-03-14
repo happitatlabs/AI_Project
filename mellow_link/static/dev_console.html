@@ -295,7 +295,7 @@
         window.fetch = function (input, init) {
             init = init || {};
             const headers = new Headers(init.headers || {});
-            const token = localStorage.getItem('authToken');
+            const token = localStorage.getItem('authToken') || localStorage.getItem('auth_token');
             if (token && !headers.has('Authorization')) headers.set('Authorization', 'Bearer ' + token);
             init.headers = headers;
             return __nativeFetch(input, init);
@@ -939,7 +939,7 @@
             if (state.runId !== runId) return;
             if (state.status === 'finished' || state.status === 'error') return;
             closeSSE();
-            const token = localStorage.getItem('authToken') || '';
+            const token = localStorage.getItem('authToken') || localStorage.getItem('auth_token') || '';
             const params = new URLSearchParams();
             if (lastEventId != null) params.set('last_event_id', lastEventId);
             if (token) params.set('access_token', token);

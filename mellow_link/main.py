@@ -209,6 +209,7 @@ async def startup() -> None:
     )
     try:
         await app_state.llm_service.connect()
+        await app_state.llm_service.unload_all_models()
         logger.info("[Startup] LLM Service connected")
     except Exception as e:
         logger.warning(f"[Startup] LLM Service connection failed: {e}")
@@ -498,6 +499,14 @@ async def shutdown() -> None:
     if app_state.orchestrator:
         await app_state.orchestrator.shutdown()
         logger.info("[Shutdown] Orchestrator shutdown")
+
+    # Drain background experience tasks before loop teardown.
+    try:
+        from mellow_link.core.agent_experience import ExperienceHelper
+        await ExperienceHelper.shutdown_all()
+        logger.info("[Shutdown] Experience helper tasks drained")
+    except Exception:
+        pass
 
     # Disconnect services
     if app_state.llm_service:

@@ -77,3 +77,34 @@ def test_sql_analytics_run_has_module_metadata(client):
     body = snap.json()
     assert body["module_id"] == "sql_analytics"
     assert body["run_kind"] == "sql_analysis"
+
+
+def test_research_assistant_reuses_temp_upload_flow(client):
+    headers = _user_headers()
+    temp_session_id = f"research-temp-{uuid.uuid4().hex[:8]}"
+
+    upload = client.post(
+        "/chat/upload-temp",
+        data={"session_id": temp_session_id},
+        files={"file": ("brief.txt", b"Quarterly revenue increased by 18 percent. Refunds decreased by 4 percent.")},
+    )
+    assert upload.status_code == 200, upload.text
+
+    res = client.post(
+        "/modules/research_assistant/runs",
+        headers={**headers, "Content-Type": "application/json"},
+        json={
+            "question": "업로드한 문서를 기준으로 핵심 변화를 요약해줘",
+            "context_note": "간단한 요약으로 정리",
+            "temp_session_id": temp_session_id,
+        },
+    )
+    assert res.status_code == 200, res.text
+    data = res.json()
+    run_id = data["run_id"]
+
+    snap = client.get(f"/runs/{run_id}", headers=headers)
+    assert snap.status_code == 200, snap.text
+    body = snap.json()
+    assert body["module_id"] == "research_assistant"
+    assert body["run_kind"] == "research_run"

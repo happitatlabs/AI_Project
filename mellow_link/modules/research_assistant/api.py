@@ -30,5 +30,11 @@ def start_research_assistant(
 ) -> ResearchAssistantStartResponse:
     session_id = _resolve_run_session_id(db, user, None)
     run_id = create_run(session_id=session_id, db=db, module_id="research_assistant", run_kind="research_run")
-    start_research_run(run_id=run_id, session_id=session_id, question=payload.question, context_note=payload.context_note)
+    start_research_run(
+        run_id=run_id,
+        session_id=session_id,
+        question=payload.question,
+        context_note=payload.context_note,
+        temp_session_id=payload.temp_session_id,
+    )
     return ResearchAssistantStartResponse(run_id=run_id, session_id=session_id)

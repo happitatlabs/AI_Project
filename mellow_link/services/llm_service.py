@@ -20,6 +20,7 @@ import aiohttp
 import json
 import logging
 import os
+import re
 import time
 import uuid
 import traceback
@@ -228,9 +229,9 @@ class LLMService:
 
     # Model configuration (설치된 모델에 맞게 설정)
     DEFAULT_MODELS = {
-        ModelType.FAST: "qwen2.5:7b",      # Tool Calling 지원
-        ModelType.THINKING: "qwen2.5:7b",  # Tool Calling 공식 지원
-        ModelType.RESEARCH: "qwen2.5:7b",  # Tool Calling 공식 지원
+        ModelType.FAST: "qwen2.5:7b",      # Fast path는 VRAM 절약 우선
+        ModelType.THINKING: "qwen3.5:9b",  # Tool Calling 공식 지원
+        ModelType.RESEARCH: "qwen3.5:9b",  # Tool Calling 공식 지원
     }
 
     def __init__(
@@ -259,6 +260,7 @@ class LLMService:
         self._base_url: str = f"http://{host}:{port}"
         self._status: LLMStatus = LLMStatus.DISCONNECTED
         self._session: Optional[aiohttp.ClientSession] = None
+        self._session_loop: Optional[asyncio.AbstractEventLoop] = None
 
         # Model configuration
         self._models = models or self.DEFAULT_MODELS.copy()
@@ -267,7 +269,7 @@ class LLMService:
         # Keep-alive configuration
         # Priority: parameter > environment variable > default ("5m")
         if keep_alive is None:
-            keep_alive = os.getenv("OLLAMA_KEEP_ALIVE", "5m")
+            keep_alive = os.getenv("OLLAMA_KEEP_ALIVE", "30s")
         self._keep_alive: str = keep_alive
 
         # Context management
@@ -283,6 +285,120 @@ class LLMService:
 
     # ==================== Connection Management ====================
 
+    def _session_matches_current_loop(self) -> bool:
+        if not self._session or self._session.closed:
+            return False
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return False
+        session_loop = getattr(self._session, "_loop", None) or self._session_loop
+        return session_loop is None or session_loop is current_loop
+
+    async def _ensure_session(self) -> None:
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError as e:
+            raise RuntimeError("LLMService requires a running asyncio task/loop") from e
+
+        if self._session and not self._session.closed:
+            session_loop = getattr(self._session, "_loop", None) or self._session_loop
+            if session_loop is not None and session_loop is not current_loop:
+                logger.warning(
+                    "[LLMService] Recreating HTTP session because event loop changed (old=%s, new=%s)",
+                    id(session_loop),
+                    id(current_loop),
+                )
+                await self._cleanup_session(reason="session loop mismatch")
+                self._status = LLMStatus.DISCONNECTED
+
+        if not self._session or self._session.closed:
+            logger.info(f"[LLMService] Creating HTTP session for Ollama at {self._base_url}")
+            self._session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=self.timeout)
+            )
+            self._session_loop = current_loop
+            logger.debug(f"[LLMService] Created session, timeout={self.timeout}s")
+
+    async def _prepare_model_for_request(self, requested_model: str) -> None:
+        """
+        Ensure only one Ollama model stays resident on GPU at a time.
+        If the requested model differs from the currently tracked model, unload the old one first.
+        """
+        active_model = self._current_model
+        if active_model and active_model != requested_model:
+            logger.info("[LLMService] Switching model %s -> %s; unloading previous model first", active_model, requested_model)
+            await self.unload_model()
+        await self.cleanup_stale_models(current_model=requested_model)
+        self._current_model = requested_model
+
+    def _should_unload_after_request(self) -> bool:
+        return os.getenv("ENABLE_MODEL_UNLOAD_ON_IDLE", "1").strip().lower() not in {"0", "false", "no", "off", "disabled"}
+
+    async def _run_ollama_command(self, *args: str) -> tuple[int, str, str]:
+        proc = await asyncio.create_subprocess_exec(
+            "ollama",
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        return proc.returncode, stdout.decode("utf-8", errors="ignore"), stderr.decode("utf-8", errors="ignore")
+
+    async def list_loaded_models(self) -> List[str]:
+        """
+        Return currently loaded Ollama models from `ollama ps`.
+        """
+        try:
+            rc, stdout, stderr = await self._run_ollama_command("ps")
+            if rc != 0:
+                logger.debug("[LLMService] `ollama ps` failed: %s", stderr.strip())
+                return []
+            models: List[str] = []
+            for raw_line in stdout.splitlines():
+                line = raw_line.strip()
+                if not line or line.lower().startswith("name") or line.startswith("MODEL"):
+                    continue
+                cols = re.split(r"\s{2,}", line)
+                if cols:
+                    model_name = cols[0].strip()
+                    if model_name and model_name.lower() != "name":
+                        models.append(model_name)
+            return models
+        except FileNotFoundError:
+            logger.warning("[LLMService] `ollama` executable not found; stale model cleanup skipped")
+            return []
+        except Exception as e:
+            logger.debug("[LLMService] Failed to list loaded models: %s", e)
+            return []
+
+    async def cleanup_stale_models(self, current_model: Optional[str] = None) -> List[str]:
+        """
+        Stop all loaded Ollama models except the current model to keep GPU residency to 0-1 models.
+        Returns the list of models that remain after cleanup.
+        """
+        loaded_models = await self.list_loaded_models()
+        stale_models = [name for name in loaded_models if current_model is None or name != current_model]
+        for model_name in stale_models:
+            try:
+                rc, _, stderr = await self._run_ollama_command("stop", model_name)
+                if rc == 0:
+                    logger.info("[LLMService] Stale Ollama model stopped: %s", model_name)
+                else:
+                    logger.warning("[LLMService] Failed to stop stale Ollama model %s: %s", model_name, stderr.strip())
+            except Exception as e:
+                logger.warning("[LLMService] Error stopping stale Ollama model %s: %s", model_name, e)
+        remaining = await self.list_loaded_models()
+        logger.info("[LLMService] Ollama loaded models after cleanup: %s", remaining if remaining else "(none)")
+        return remaining
+
+    async def unload_all_models(self) -> List[str]:
+        """
+        Clean-slate startup helper: stop every loaded Ollama model.
+        """
+        self._current_model = None
+        return await self.cleanup_stale_models(current_model=None)
+
     async def connect(self) -> bool:
         """
         Establish connection to Ollama server.
@@ -296,14 +412,8 @@ class LLMService:
         Raises:
             ConnectionError: If Ollama server is unreachable
         """
-        # Create session if not exists or closed
-        if not self._session or self._session.closed:
-            logger.info(f"[LLMService] Creating HTTP session for Ollama at {self._base_url}")
-            self._session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=self.timeout)
-            )
-            logger.debug(f"[LLMService] Created session, timeout={self.timeout}s")
-        else:
+        await self._ensure_session()
+        if self._session and not self._session.closed:
             logger.debug("[LLMService] Reusing existing session")
         
         try:
@@ -383,6 +493,7 @@ class LLMService:
                 logger.warning(f"[LLMService] Error during session cleanup: {e}")
             finally:
                 self._session = None
+                self._session_loop = None
     
     def __del__(self):
         """소멸자: 세션이 열려있으면 경고 로그만 출력 (비동기 정리는 불가능)"""
@@ -458,7 +569,7 @@ class LLMService:
             True if connected (or reconnected), False if failed
         """
         # Fast path: already connected
-        if self._session and not self._session.closed and self._status == LLMStatus.CONNECTED:
+        if self._session_matches_current_loop() and self._status == LLMStatus.CONNECTED:
             return True
         
         # Acquire reconnect lock to prevent concurrent reconnects
@@ -466,16 +577,16 @@ class LLMService:
             logger.debug("[LLMService] Reconnect already in progress, waiting...")
             # Wait for ongoing reconnect, then check status
             async with self._reconnect_lock:
-                return self._session and not self._session.closed and self._status == LLMStatus.CONNECTED
+                return self._session_matches_current_loop() and self._status == LLMStatus.CONNECTED
         
         async with self._reconnect_lock:
             # Double-check after acquiring lock
-            if self._session and not self._session.closed and self._status == LLMStatus.CONNECTED:
+            if self._session_matches_current_loop() and self._status == LLMStatus.CONNECTED:
                 return True
             
             logger.warning(
                 f"[LLMService] Connection check failed - "
-                f"session={'closed' if (not self._session or self._session.closed) else 'open'}, "
+                f"session={'reusable' if self._session_matches_current_loop() else ('closed' if (not self._session or self._session.closed) else 'loop-mismatch')}, "
                 f"status={self._status.name}, "
                 f"attempting auto-reconnect (max_retries={max_retries})..."
             )
@@ -712,7 +823,7 @@ class LLMService:
             raise LLMServiceError("LLMService not connected and auto-reconnect failed")
 
         model = self.get_model_for_mode(mode)
-        self._current_model = model
+        await self._prepare_model_for_request(model)
         self._status = LLMStatus.GENERATING
         self._is_generating = True
 
@@ -733,6 +844,7 @@ class LLMService:
                 "model": model,
                 "messages": messages,
                 "stream": False,
+                "keep_alive": self._keep_alive,
                 **kwargs
             }
             
@@ -796,6 +908,9 @@ class LLMService:
         finally:
             self._is_generating = False
             self._status = LLMStatus.CONNECTED
+            if self._should_unload_after_request() and self._current_model == model:
+                await self.unload_model()
+                await self.cleanup_stale_models(current_model=None)
 
     async def generate_stream(
         self,
@@ -830,7 +945,7 @@ class LLMService:
             raise LLMServiceError("LLMService not connected and auto-reconnect failed")
 
         model = self.get_model_for_mode(mode)
-        self._current_model = model
+        await self._prepare_model_for_request(model)
         self._status = LLMStatus.GENERATING
         self._is_generating = True
         self._cancel_requested = False
@@ -856,6 +971,7 @@ class LLMService:
                 "model": model,
                 "messages": messages,
                 "stream": True,
+                "keep_alive": self._keep_alive,
                 **kwargs
             }
             
@@ -942,6 +1058,9 @@ class LLMService:
         finally:
             self._is_generating = False
             self._status = LLMStatus.CONNECTED
+            if self._should_unload_after_request() and self._current_model == model:
+                await self.unload_model()
+                await self.cleanup_stale_models(current_model=None)
 
     async def chat(
         self,
@@ -966,10 +1085,13 @@ class LLMService:
         if not await self._ensure_connected(max_retries=1):
             raise LLMServiceError("LLMService not connected and auto-reconnect failed")
 
+        await self._prepare_model_for_request(model)
+
         payload = {
             "model": model,
             "messages": messages,
             "stream": False,
+            "keep_alive": self._keep_alive,
             **kwargs
         }
         
@@ -984,24 +1106,43 @@ class LLMService:
         if "num_ctx" not in payload["options"]:
             payload["options"]["num_ctx"] = 4096  # Limit context size to reduce VRAM usage
 
-        start_mono = time.monotonic()
+        try:
+            start_mono = time.monotonic()
 
-        # 디버깅: 요청 페이로드 확인
-        logger.debug(f"[LLMService] Chat request - model: {model}, messages count: {len(messages)}, tools: {len(tools) if tools else 0}")
-        if messages:
-            logger.debug(f"[LLMService] First message role: {messages[0].get('role')}, content length: {len(messages[0].get('content', ''))}")
+            # 디버깅: 요청 페이로드 확인
+            logger.debug(f"[LLMService] Chat request - model: {model}, messages count: {len(messages)}, tools: {len(tools) if tools else 0}")
+            if messages:
+                logger.debug(f"[LLMService] First message role: {messages[0].get('role')}, content length: {len(messages[0].get('content', ''))}")
 
-        # Session is ensured by _ensure_connected() above
-        async with self._session.post(
-            f"{self._base_url}/api/chat",
-            json=payload
-        ) as resp:
-            if resp.status != 200:
-                error_text = await resp.text()
-                logger.error(f"[LLMService] Chat API error - status: {resp.status}, error: {error_text[:500]}")
-                raise LLMServiceError(f"Chat failed: {error_text}")
+            # Session is ensured by _ensure_connected() above
+            try:
+                async with self._session.post(
+                    f"{self._base_url}/api/chat",
+                    json=payload
+                ) as resp:
+                    if resp.status != 200:
+                        error_text = await resp.text()
+                        logger.error(f"[LLMService] Chat API error - status: {resp.status}, error: {error_text[:500]}")
+                        raise LLMServiceError(f"Chat failed: {error_text}")
 
-            data = await resp.json()
+                    data = await resp.json()
+            except RuntimeError as e:
+                if "Timeout context manager should be used inside a task" not in str(e):
+                    raise
+                logger.warning("[LLMService] Detected stale aiohttp session; resetting and retrying chat once")
+                await self._cleanup_session(reason="chat runtime timeout-context mismatch")
+                self._status = LLMStatus.DISCONNECTED
+                if not await self._ensure_connected(max_retries=1):
+                    raise LLMServiceError("LLMService session reset failed")
+                async with self._session.post(
+                    f"{self._base_url}/api/chat",
+                    json=payload
+                ) as resp:
+                    if resp.status != 200:
+                        error_text = await resp.text()
+                        logger.error(f"[LLMService] Chat API error after session reset - status: {resp.status}, error: {error_text[:500]}")
+                        raise LLMServiceError(f"Chat failed: {error_text}")
+                    data = await resp.json()
             
             # ⚠️ 중요: 빈 응답 진단을 위해 INFO 레벨로 로깅
             logger.info(f"[LLMService] Ollama response keys: {list(data.keys())}")
@@ -1032,60 +1173,65 @@ class LLMService:
             else:
                 logger.error(f"[LLMService] ⚠️ 'message' 키가 없음! 전체 응답: {json.dumps(data, ensure_ascii=False)[:500]}")
 
-        message = data.get("message", {})
-        content = message.get("content", "")
-        
-        # content가 None이면 빈 문자열로 변환
-        if content is None:
-            content = ""
-            logger.warning("[LLMService] Message content is None, converting to empty string")
-        
-        # Extract tool_calls if present
-        tool_calls = None
-        if "tool_calls" in message:
-            tool_calls = message.get("tool_calls", [])
-            if tool_calls:
-                logger.info(f"[LLMService] Received {len(tool_calls)} tool calls in chat")
-            else:
-                logger.debug("[LLMService] tool_calls key exists but is empty")
-        
-        # 빈 응답이고 tool_calls도 없는 경우 상세 경고
-        if not content and not tool_calls:
-            logger.warning(
-                f"[LLMService] 빈 응답 반환 (model={model}, status={data.get('done', 'unknown')}, "
-                f"done_reason={data.get('done_reason', 'unknown')}). "
-                "AgentBrain에서 단계적 폴백을 진행합니다."
+            message = data.get("message", {})
+            content = message.get("content", "")
+            
+            # content가 None이면 빈 문자열로 변환
+            if content is None:
+                content = ""
+                logger.warning("[LLMService] Message content is None, converting to empty string")
+            
+            # Extract tool_calls if present
+            tool_calls = None
+            if "tool_calls" in message:
+                tool_calls = message.get("tool_calls", [])
+                if tool_calls:
+                    logger.info(f"[LLMService] Received {len(tool_calls)} tool calls in chat")
+                else:
+                    logger.debug("[LLMService] tool_calls key exists but is empty")
+            
+            # 빈 응답이고 tool_calls도 없는 경우 상세 경고
+            if not content and not tool_calls:
+                logger.warning(
+                    f"[LLMService] 빈 응답 반환 (model={model}, status={data.get('done', 'unknown')}, "
+                    f"done_reason={data.get('done_reason', 'unknown')}). "
+                    "AgentBrain에서 단계적 폴백을 진행합니다."
+                )
+
+            generation_time = (time.monotonic() - start_mono) * 1000
+            tokens_out = data.get("eval_count", 0)
+            tokens_in = data.get("prompt_eval_count", 0)
+            duration_sec = (time.monotonic() - start_mono)
+            tps_approx = (tokens_out / duration_sec) if duration_sec > 0 else 0.0
+
+            # Phase 1 metrics (async queue only; no DB write in request path)
+            try:
+                from mellow_link.core.metrics_collector import get_metrics_collector
+                coll = get_metrics_collector()
+                if coll:
+                    req_id = str(uuid.uuid4())
+                    coll.push_infer_ms(generation_time, req_id)
+                    coll.push("TOKENS_IN", float(tokens_in), "tokens", metric_id=f"{req_id}_in")
+                    coll.push("TOKENS_OUT", float(tokens_out), "tokens", metric_id=f"{req_id}_out")
+                    coll.push_tps_approx(tps_approx, f"{req_id}_tps_approx")
+                    coll.push("TTFT_MS", -1.0, "ms", metric_id=f"{req_id}_ttft")  # not measured
+                    coll.push_ttft_measured(False, f"{req_id}_ttft_m")
+            except Exception as e:
+                logger.debug("[LLMService] Metrics push (chat) failed: %s", e)
+
+            return LLMResponse(
+                text=content,
+                model=model,
+                tokens_generated=tokens_out,
+                generation_time_ms=generation_time,
+                is_complete=True,
+                tool_calls=tool_calls
             )
-
-        generation_time = (time.monotonic() - start_mono) * 1000
-        tokens_out = data.get("eval_count", 0)
-        tokens_in = data.get("prompt_eval_count", 0)
-        duration_sec = (time.monotonic() - start_mono)
-        tps_approx = (tokens_out / duration_sec) if duration_sec > 0 else 0.0
-
-        # Phase 1 metrics (async queue only; no DB write in request path)
-        try:
-            from mellow_link.core.metrics_collector import get_metrics_collector
-            coll = get_metrics_collector()
-            if coll:
-                req_id = str(uuid.uuid4())
-                coll.push_infer_ms(generation_time, req_id)
-                coll.push("TOKENS_IN", float(tokens_in), "tokens", metric_id=f"{req_id}_in")
-                coll.push("TOKENS_OUT", float(tokens_out), "tokens", metric_id=f"{req_id}_out")
-                coll.push_tps_approx(tps_approx, f"{req_id}_tps_approx")
-                coll.push("TTFT_MS", -1.0, "ms", metric_id=f"{req_id}_ttft")  # not measured
-                coll.push_ttft_measured(False, f"{req_id}_ttft_m")
-        except Exception as e:
-            logger.debug("[LLMService] Metrics push (chat) failed: %s", e)
-
-        return LLMResponse(
-            text=content,
-            model=model,
-            tokens_generated=tokens_out,
-            generation_time_ms=generation_time,
-            is_complete=True,
-            tool_calls=tool_calls
-        )
+        finally:
+            if self._should_unload_after_request() and self._current_model == model:
+                await self.unload_model()
+                await self.cleanup_stale_models(current_model=None)
+        
 
     async def execute(self, request_data: Dict[str, Any]) -> str:
         """

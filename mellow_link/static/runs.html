@@ -50,7 +50,7 @@
         let runs = [];
 
         function authHeaders() {
-            const token = localStorage.getItem('authToken');
+            const token = localStorage.getItem('authToken') || localStorage.getItem('auth_token');
             const headers = { 'Accept': 'application/json' };
             if (token) headers['Authorization'] = 'Bearer ' + token;
             return headers;
