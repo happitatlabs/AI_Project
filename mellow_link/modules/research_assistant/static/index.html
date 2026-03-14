@@ -173,7 +173,7 @@
                 body: JSON.stringify({
                     question: question,
                     context_note: contextNote,
-                    temp_session_id: uploadedFiles.length ? uploadSessionId : null
+                    temp_session_id: uploadSessionId
                 })
             });
             if (!res.ok) {

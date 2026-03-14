@@ -98,6 +98,11 @@ class Settings(BaseSettings):
         ge=1.0,
         description="Ollama request timeout in seconds"
     )
+    research_timeout: float = Field(
+        default=90.0,
+        ge=1.0,
+        description="Dedicated Ollama timeout for research inference requests"
+    )
 
     # Ollama model configuration
     fast_model: str = Field(

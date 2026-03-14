@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
+import logging
 
 from mellow_link import app_state
+from mellow_link.config.settings import get_settings
+from mellow_link.services.llm_service import LLMServiceError, LLMServiceTimeoutError
 from mellow_link.infra.run_events import (
+    EVENT_TYPE_LOG,
     EVENT_TYPE_PLAN_CREATED,
     EVENT_TYPE_RUN_FINISHED,
     EVENT_TYPE_RUN_STARTED,
@@ -14,6 +19,8 @@ from mellow_link.infra.run_events import (
 )
 
 from .service import ResearchAssistantService
+
+logger = logging.getLogger(__name__)
 
 
 def start_research_run(
@@ -32,10 +39,167 @@ def start_research_run(
 
     async def _run_async() -> None:
         svc = ResearchAssistantService()
+        llm = getattr(app_state, "llm_service", None)
+        if not llm:
+            raise RuntimeError("LLM service not initialized")
         try:
             document_context = ""
             if temp_session_id:
                 document_context = str(app_state.TEMP_CONTEXT_STORE.get(temp_session_id, "") or "")
+            has_document_context = bool(document_context)
+            logger.info(
+                "[ResearchAssistant] run_id=%s temp_session_id=%s document_chars=%s store_keys=%s",
+                run_id,
+                temp_session_id,
+                len(document_context),
+                list(app_state.TEMP_CONTEXT_STORE.keys())[:10],
+            )
+            model_name = llm.get_model_for_mode("research")
+            research_timeout_seconds = float(get_settings().research_timeout)
+            question_chars = len(question or "")
+            document_chars = len(document_context or "")
+            effective_timeout_source = "http_client"
+
+            async def _generate_once(attempt_no: int, prompt: str, num_ctx: int, temperature: float) -> tuple[str, int, str]:
+                started = time.perf_counter()
+                prompt_chars = len(prompt or "")
+                logger.info(
+                    "[ResearchAssistant] attempt=%s mode=%s model=%s timeout_seconds=%s "
+                    "effective_timeout_source=%s question_chars=%s document_chars=%s prompt_chars=%s",
+                    attempt_no,
+                    "research",
+                    model_name,
+                    research_timeout_seconds,
+                    effective_timeout_source,
+                    question_chars,
+                    document_chars,
+                    prompt_chars,
+                )
+                emit_event(
+                    run_id,
+                    EVENT_TYPE_LOG,
+                    {
+                        "level": "info",
+                        "message": f"research attempt {attempt_no}",
+                        "attempt": attempt_no,
+                        "mode": "research",
+                        "model": model_name,
+                        "timeout_seconds": research_timeout_seconds,
+                        "effective_timeout_source": effective_timeout_source,
+                        "question_chars": question_chars,
+                        "document_chars": document_chars,
+                        "prompt_chars": prompt_chars,
+                    },
+                )
+                try:
+                    result = await llm.generate(
+                        prompt=prompt,
+                        mode="research",
+                        context_id=f"research:{run_id}:attempt:{attempt_no}",
+                        auto_unload=False,
+                        request_timeout_seconds=research_timeout_seconds,
+                        options={"num_ctx": num_ctx, "temperature": temperature},
+                    )
+                    elapsed_ms = round((time.perf_counter() - started) * 1000)
+                    content = result.content or ""
+                    cause = "empty_output" if not content.strip() else ("weak_output" if svc.is_weak_summary(content) else "ok")
+                    logger.info(
+                        "[ResearchAssistant] attempt=%s mode=%s cause=%s elapsed_ms=%s model=%s "
+                        "timeout_seconds=%s effective_timeout_source=%s prompt_chars=%s document_chars=%s",
+                        attempt_no,
+                        "research",
+                        cause,
+                        elapsed_ms,
+                        model_name,
+                        research_timeout_seconds,
+                        effective_timeout_source,
+                        prompt_chars,
+                        document_chars,
+                    )
+                    emit_event(
+                        run_id,
+                        EVENT_TYPE_LOG,
+                        {
+                            "level": "info",
+                            "message": f"research attempt {attempt_no} finished",
+                            "attempt": attempt_no,
+                            "mode": "research",
+                            "elapsed_ms": elapsed_ms,
+                            "failure_reason": None if cause == "ok" else cause,
+                            "model": model_name,
+                            "timeout_seconds": research_timeout_seconds,
+                            "effective_timeout_source": effective_timeout_source,
+                            "prompt_chars": prompt_chars,
+                            "document_chars": document_chars,
+                        },
+                    )
+                    return content, elapsed_ms, cause
+                except LLMServiceTimeoutError as e:
+                    logger.warning(
+                        "[ResearchAssistant] attempt=%s mode=%s cause=timeout elapsed_ms=%s model=%s "
+                        "timeout_seconds=%s effective_timeout_source=%s prompt_chars=%s document_chars=%s error=%s",
+                        attempt_no,
+                        e.mode,
+                        e.elapsed_ms,
+                        e.model,
+                        e.timeout_seconds,
+                        e.effective_timeout_source,
+                        prompt_chars,
+                        document_chars,
+                        e,
+                    )
+                    emit_event(
+                        run_id,
+                        EVENT_TYPE_LOG,
+                        {
+                            "level": "warning",
+                            "message": f"research attempt {attempt_no} timeout",
+                            "attempt": attempt_no,
+                            "mode": e.mode,
+                            "elapsed_ms": e.elapsed_ms,
+                            "failure_reason": "timeout",
+                            "model": e.model,
+                            "timeout_seconds": e.timeout_seconds,
+                            "effective_timeout_source": e.effective_timeout_source,
+                            "prompt_chars": prompt_chars,
+                            "document_chars": document_chars,
+                        },
+                    )
+                    return "", e.elapsed_ms, "timeout"
+                except (asyncio.TimeoutError, LLMServiceError) as e:
+                    elapsed_ms = round((time.perf_counter() - started) * 1000)
+                    logger.warning(
+                        "[ResearchAssistant] attempt=%s mode=%s cause=timeout elapsed_ms=%s model=%s "
+                        "timeout_seconds=%s effective_timeout_source=%s prompt_chars=%s document_chars=%s error=%s",
+                        attempt_no,
+                        "research",
+                        elapsed_ms,
+                        model_name,
+                        research_timeout_seconds,
+                        effective_timeout_source,
+                        prompt_chars,
+                        document_chars,
+                        e,
+                    )
+                    emit_event(
+                        run_id,
+                        EVENT_TYPE_LOG,
+                        {
+                            "level": "warning",
+                            "message": f"research attempt {attempt_no} timeout",
+                            "attempt": attempt_no,
+                            "mode": "research",
+                            "elapsed_ms": elapsed_ms,
+                            "failure_reason": "timeout",
+                            "model": model_name,
+                            "timeout_seconds": research_timeout_seconds,
+                            "effective_timeout_source": effective_timeout_source,
+                            "prompt_chars": prompt_chars,
+                            "document_chars": document_chars,
+                        },
+                    )
+                    return "", elapsed_ms, "timeout"
+
             emit_event(
                 run_id,
                 EVENT_TYPE_RUN_STARTED,
@@ -44,7 +208,7 @@ def start_research_run(
                     "mode": "research",
                     "session_id": session_id,
                     "temp_session_id": temp_session_id,
-                    "has_document_context": bool(document_context),
+                    "has_document_context": has_document_context,
                 },
             )
             emit_event(run_id, EVENT_TYPE_PLAN_CREATED, {"todos": todos})
@@ -71,25 +235,42 @@ def start_research_run(
                 },
             )
 
-            orch = getattr(app_state, "orchestrator", None)
-            if not orch:
-                raise RuntimeError("Orchestrator not initialized")
-            prompt = svc.build_prompt(question, context_note, document_context=document_context)
             emit_event(run_id, EVENT_TYPE_TODO_STARTED, todos[2])
-            result = await orch.run_agent(
-                prompt,
-                history=[],
-                is_admin=False,
-                mode="research",
-                session_id=session_id,
-                session_state={
-                    "run_id": run_id,
-                    "module_id": "research_assistant",
-                    "temp_session_id": temp_session_id,
-                },
+            retry_count = 0
+            fallback_used = False
+            degraded = False
+            failure_reason = None
+            attempt_elapsed_ms = []
+
+            primary_prompt = svc.build_prompt(question, context_note, document_context=document_context)
+            raw_summary, elapsed_ms, attempt_cause = await _generate_once(1, primary_prompt, num_ctx=3072, temperature=0.2)
+            attempt_elapsed_ms.append(elapsed_ms)
+            if attempt_cause != "ok":
+                failure_reason = attempt_cause
+
+            if not raw_summary or svc.is_weak_summary(raw_summary):
+                retry_count = 1
+                fallback_used = True
+                reduced_prompt = svc.build_reduced_prompt(question, context_note, document_context=document_context)
+                raw_summary, elapsed_ms, attempt_cause = await _generate_once(2, reduced_prompt, num_ctx=2048, temperature=0.1)
+                attempt_elapsed_ms.append(elapsed_ms)
+                if attempt_cause != "ok":
+                    failure_reason = attempt_cause
+                else:
+                    failure_reason = None
+
+            if not raw_summary or svc.is_weak_summary(raw_summary):
+                degraded = True
+                fallback_used = True
+                if not failure_reason:
+                    failure_reason = "empty_output"
+                raw_summary = ""
+
+            summary = svc.format_user_summary(
+                str(raw_summary),
+                question=question,
+                has_document_context=has_document_context,
             )
-            raw_summary = getattr(result, "text", None) or getattr(result, "summary", None) or ""
-            summary = str(raw_summary).strip() or "문서 기반 리서치 실행이 완료되었습니다."
             emit_event(
                 run_id,
                 EVENT_TYPE_TODO_DONE,
@@ -113,21 +294,51 @@ def start_research_run(
                 {
                     "success": True,
                     "summary": str(summary)[:4000],
+                    "fallback_used": fallback_used,
+                    "failure_reason": failure_reason,
+                    "retry_count": retry_count,
+                    "degraded": degraded,
+                    "attempt_elapsed_ms": attempt_elapsed_ms,
+                    "model": model_name,
                     "module_id": "research_assistant",
                     "run_kind": "research_run",
                 },
             )
         except Exception as e:
+            failure_summary = svc.format_user_summary(
+                "",
+                question=question,
+                has_document_context=has_document_context,
+            )
             emit_event(
                 run_id,
                 EVENT_TYPE_RUN_FINISHED,
                 {
-                    "success": False,
-                    "summary": f"Research run failed: {str(e)[:300]}",
+                    "success": True,
+                    "summary": f"{failure_summary}\n\n추가 정보\n- 실행 중 오류: {str(e)[:240]}",
+                    "fallback_used": True,
+                    "failure_reason": "unexpected_error",
+                    "retry_count": 0,
+                    "degraded": True,
+                    "model": model_name if 'model_name' in locals() else None,
+                    "timeout_seconds": research_timeout_seconds if 'research_timeout_seconds' in locals() else None,
+                    "effective_timeout_source": effective_timeout_source if 'effective_timeout_source' in locals() else None,
                     "module_id": "research_assistant",
                     "run_kind": "research_run",
                 },
             )
+        finally:
+            for attempt_no in (1, 2):
+                try:
+                    llm.clear_context(f"research:{run_id}:attempt:{attempt_no}")
+                except Exception:
+                    pass
+            try:
+                if llm._current_model == model_name:
+                    await llm.unload_model()
+                    await llm.cleanup_stale_models(current_model=None)
+            except Exception as cleanup_error:
+                logger.warning("[ResearchAssistant] cleanup failed for run %s: %s", run_id, cleanup_error)
 
     def _run_thread() -> None:
         loop = asyncio.new_event_loop()

@@ -195,6 +195,32 @@ class LLMServiceError(Exception):
     pass
 
 
+class LLMServiceTimeoutError(LLMServiceError):
+    """Structured timeout raised when an LLM request exceeds its effective timeout."""
+
+    def __init__(
+        self,
+        *,
+        mode: str,
+        model: str,
+        timeout_seconds: float,
+        effective_timeout_source: str,
+        elapsed_ms: int,
+        prompt_chars: int,
+    ) -> None:
+        self.mode = mode
+        self.model = model
+        self.timeout_seconds = timeout_seconds
+        self.effective_timeout_source = effective_timeout_source
+        self.elapsed_ms = elapsed_ms
+        self.prompt_chars = prompt_chars
+        super().__init__(
+            "LLM request timed out "
+            f"(mode={mode}, model={model}, timeout_seconds={timeout_seconds}, "
+            f"effective_timeout_source={effective_timeout_source}, elapsed_ms={elapsed_ms})"
+        )
+
+
 # =============================================================================
 # LLM Service Class
 # =============================================================================
@@ -790,6 +816,17 @@ class LLMService:
         """Get name of currently loaded model."""
         return self._current_model
 
+    def _resolve_request_timeout(
+        self,
+        *,
+        mode: str,
+        request_timeout_seconds: Optional[float],
+    ) -> tuple[float, str]:
+        """Resolve the effective timeout applied at the HTTP client request layer."""
+        if request_timeout_seconds is not None:
+            return float(request_timeout_seconds), "http_client"
+        return float(self.timeout), "http_client"
+
     # ==================== Generation ====================
 
     async def generate(
@@ -799,6 +836,7 @@ class LLMService:
         mode: str = "fast",
         context_id: Optional[str] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
+        auto_unload: bool = True,
         **kwargs
     ) -> GenerationResult:
         """
@@ -823,11 +861,17 @@ class LLMService:
             raise LLMServiceError("LLMService not connected and auto-reconnect failed")
 
         model = self.get_model_for_mode(mode)
+        request_timeout_seconds = kwargs.pop("request_timeout_seconds", None)
+        effective_timeout_seconds, effective_timeout_source = self._resolve_request_timeout(
+            mode=mode,
+            request_timeout_seconds=request_timeout_seconds,
+        )
         await self._prepare_model_for_request(model)
         self._status = LLMStatus.GENERATING
         self._is_generating = True
 
         start_time = time.time()
+        prompt_chars = len(prompt or "")
 
         try:
             # Get or create context
@@ -859,12 +903,19 @@ class LLMService:
                 payload["tools"] = tools
                 logger.debug(f"[LLMService] Added {len(tools)} tools to request")
 
-            logger.info(f"[LLMService] Generating with {model} (mode: {mode})")
+            logger.info(
+                "[LLMService] Generating with %s (mode: %s, timeout_seconds=%s, effective_timeout_source=%s)",
+                model,
+                mode,
+                effective_timeout_seconds,
+                effective_timeout_source,
+            )
 
             # Session is ensured by _ensure_connected() above
             async with self._session.post(
                 f"{self._base_url}/api/chat",
-                json=payload
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=effective_timeout_seconds),
             ) as resp:
                 if resp.status != 200:
                     error_text = await resp.text()
@@ -904,11 +955,31 @@ class LLMService:
             )
 
             return result
+        except asyncio.TimeoutError as exc:
+            elapsed_ms = round((time.time() - start_time) * 1000)
+            logger.warning(
+                "[LLMService] Generation timeout mode=%s model=%s timeout_seconds=%s "
+                "effective_timeout_source=%s elapsed_ms=%s prompt_chars=%s",
+                mode,
+                model,
+                effective_timeout_seconds,
+                effective_timeout_source,
+                elapsed_ms,
+                prompt_chars,
+            )
+            raise LLMServiceTimeoutError(
+                mode=mode,
+                model=model,
+                timeout_seconds=effective_timeout_seconds,
+                effective_timeout_source=effective_timeout_source,
+                elapsed_ms=elapsed_ms,
+                prompt_chars=prompt_chars,
+            ) from exc
 
         finally:
             self._is_generating = False
             self._status = LLMStatus.CONNECTED
-            if self._should_unload_after_request() and self._current_model == model:
+            if auto_unload and self._should_unload_after_request() and self._current_model == model:
                 await self.unload_model()
                 await self.cleanup_stale_models(current_model=None)
 

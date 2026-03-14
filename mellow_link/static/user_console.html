@@ -137,14 +137,12 @@
             badge.className = 'px-3 py-1 rounded-full text-xs border ' + statusTone(snap.status);
             badge.textContent = snap.status || 'idle';
 
-            const todos = (snap.todos_view && snap.todos_view.length) ? snap.todos_view : (snap.todos || []);
-            const total = todos.length;
-            const done = todos.filter(function (todo) { return (todo.status || '') === 'completed'; }).length;
+            const todos = Array.isArray(snap.todos_view) ? snap.todos_view : [];
             const current = todos.find(function (todo) { return (todo.status || '') === 'in_progress'; });
-            const pct = total ? Math.round((done / total) * 100) : 0;
+            const pct = typeof snap.progress_percent === 'number' ? snap.progress_percent : 0;
             document.getElementById('progressBar').style.width = pct + '%';
             document.getElementById('progressText').textContent = pct + '%';
-            document.getElementById('currentStep').textContent = current ? ('현재 단계: ' + (current.title || current.todo_id || current.id)) : '현재 진행 중인 단계가 없습니다.';
+            document.getElementById('currentStep').textContent = current ? ('현재 단계: ' + (current.title || current.id)) : '현재 진행 중인 단계가 없습니다.';
 
             const todoList = document.getElementById('todoList');
             if (!todos.length) {
@@ -156,8 +154,12 @@
                         ? 'border-emerald-400/20 bg-emerald-500/5 text-emerald-200'
                         : status === 'in_progress'
                             ? 'border-cyan-400/20 bg-cyan-500/5 text-cyan-100'
-                            : 'border-white/10 bg-slate-950/50 text-slate-300';
-                    const label = todo.title || todo.todo_id || todo.id || ('Step ' + (index + 1));
+                            : status === 'skipped'
+                                ? 'border-slate-400/20 bg-slate-500/5 text-slate-200'
+                                : status === 'aborted'
+                                    ? 'border-rose-400/20 bg-rose-500/5 text-rose-200'
+                                    : 'border-white/10 bg-slate-950/50 text-slate-300';
+                    const label = todo.title || todo.id || ('Step ' + (index + 1));
                     return '<div class="rounded-2xl border px-4 py-3 ' + tone + '">' +
                         '<div class="flex items-center justify-between gap-3">' +
                         '<span class="text-sm">' + label + '</span>' +
