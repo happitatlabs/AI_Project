@@ -88,6 +88,10 @@ class VTuberRelayService:
         self._last_heartbeat: Optional[datetime] = None
         self._vtuber_status = VTuberStatus()
 
+        # Subtitle auto-clear timer (10초 후 빈 프레임 전송)
+        self._clear_timer_task: Optional[asyncio.Task] = None
+        self._subtitle_clear_delay: float = 10.0  # seconds
+
         logger.info(f"[VTuberRelay] Initialized with URL: {ws_url}")
 
     @property
@@ -132,8 +136,18 @@ class VTuberRelayService:
 
         try:
             import websockets
+            # max_size 10MB: 긴 요약/보고서도 프레임 제한 없이 수신 가능
+            # ping_interval=None: 자동 ping 비활성화 (수동 heartbeat로 관리)
+            # ping_timeout=None: 수동 heartbeat로 관리
+            # close_timeout=5: 종료 시 5초 대기
             self._websocket = await asyncio.wait_for(
-                websockets.connect(self.ws_url),
+                websockets.connect(
+                    self.ws_url,
+                    max_size=10 * 1024 * 1024,
+                    ping_interval=None,  # 자동 ping 비활성화
+                    ping_timeout=None,   # 수동 heartbeat로 관리
+                    close_timeout=5      # 종료 시 5초 대기
+                ),
                 timeout=10.0
             )
             self._status = VTuberConnectionStatus.CONNECTED
@@ -148,21 +162,16 @@ class VTuberRelayService:
             return True
 
         except ImportError:
-            logger.error("[VTuberRelay] ❌ websockets library not installed!")
-            logger.error("[VTuberRelay] Run: pip install websockets")
+            logger.error("[VTuberRelay] 흥, websockets 라이브러리가 없군. pip install websockets로 칩을 보충해야 해.")
             self._status = VTuberConnectionStatus.ERROR
             return False
         except asyncio.TimeoutError:
-            logger.warning("[VTuberRelay] ❌ Connection timeout (10s)")
-            logger.warning("[VTuberRelay] Is Open-LLM-VTuber running on port 12393?")
+            logger.warning("[VTuberRelay] 후후, 딜러(아바타 서버)가 10초째 응답이 없어. 포트 12393에서 대기 중인지 확인해봐.")
             self._status = VTuberConnectionStatus.DISCONNECTED
             return False
         except Exception as e:
-            logger.debug(f"[VTuberRelay] 💤 VTuber 서버 대기 중... (연결 시도 중): {e}")
-            logger.debug(f"[VTuberRelay] Target: {self.ws_url}")
+            logger.warning(f"[VTuberRelay] 아바타 서버 연결 실패: {e} (포트 12393에서 Open-LLM-VTuber가 실행 중인지 확인 필요)")
             self._status = VTuberConnectionStatus.ERROR
-            #if self._on_error:
-            #   await self._on_error(e)
             return False
 
     async def disconnect(self) -> None:
@@ -178,10 +187,16 @@ class VTuberRelayService:
                 except asyncio.CancelledError:
                     pass
 
-        # Close WebSocket
+        # Close WebSocket with timeout
         if self._websocket:
             try:
-                await self._websocket.close()
+                # close_timeout은 connect 시 설정했지만, 명시적으로 대기 시간 제한
+                await asyncio.wait_for(
+                    self._websocket.close(),
+                    timeout=5.0
+                )
+            except asyncio.TimeoutError:
+                logger.warning("[VTuberRelay] WebSocket close timeout, forcing close")
             except Exception as e:
                 logger.debug(f"[VTuberRelay] Error closing websocket: {e}")
 
@@ -268,7 +283,7 @@ class VTuberRelayService:
             True if relayed successfully
         """
         if not self.is_connected:
-            logger.debug("[VTuberRelay] Not connected, skipping relay")
+            logger.debug("[VTuberRelay] 후후, 아바타와의 회선이 끊겨 있군. 전달은 다음 판으로 미루지.")
             return False
 
         # Detect emotion from text (simple heuristic)
@@ -320,13 +335,28 @@ class VTuberRelayService:
             await asyncio.sleep(self.reconnect_interval)
 
     async def _heartbeat_loop(self) -> None:
-        """Background task for heartbeat pings."""
+        """
+        Background task for heartbeat pings.
+        
+        VRAM 과부하 시 GPU 응답 지연을 고려하여 타임아웃을 설정하고,
+        실패 시 즉시 연결 끊김으로 처리하지 않고 재시도합니다.
+        """
         while self._is_running:
             if self.is_connected and self._websocket:
                 try:
-                    # Send ping
-                    await self._websocket.ping()
+                    # Send ping with timeout (VRAM 과부하 시 응답 지연 대응)
+                    await asyncio.wait_for(
+                        self._websocket.ping(),
+                        timeout=10.0  # 10초 타임아웃 (기본 20초보다 짧게)
+                    )
                     self._last_heartbeat = datetime.now()
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "[VTuberRelay] Heartbeat timeout (VRAM 과부하 가능성). "
+                        "연결 상태 확인 중..."
+                    )
+                    # 타임아웃 시 즉시 연결 끊김 처리하지 않고 상태 확인
+                    # 다음 heartbeat에서 재시도
                 except Exception as e:
                     logger.warning(f"[VTuberRelay] Heartbeat failed: {e}")
                     self._status = VTuberConnectionStatus.DISCONNECTED
@@ -358,55 +388,62 @@ class VTuberRelayService:
 
     def _split_into_sentences(self, text: str, max_length: int = 80) -> List[str]:
         """
-        Split text into sentences based on sentence-ending punctuation.
-        
+        Split text into sentences for sequential TTS delivery.
+
+        한국어 + 영문 구두점을 모두 인식한다:
+          - 마침표/물음표/느낌표 (.!? 및 fullwidth ．！？)
+          - 줄바꿈
+          - 한국어 종결 보조: 다/요/죠/야/지/네/걸/군 + 마침표 패턴은
+            기본 구두점 패턴에 이미 포함됨.
+
         Args:
             text: Text to split
             max_length: Maximum length for a sentence before additional splitting
-            
+
         Returns:
             List of sentence strings
         """
         if not text or not text.strip():
             return []
-        
-        # Normalize line breaks to \n
+
+        # Normalize line breaks
         text = text.replace('\r\n', '\n').replace('\r', '\n')
-        
-        # Split by sentence-ending punctuation (., !, ?) and line breaks
-        # Pattern: matches sentence-ending punctuation followed by optional whitespace, or line breaks
-        sentence_pattern = r'([.!?]+\s*|\n+)'
+
+        # Fullwidth → ASCII punctuation 정규화
+        text = text.replace('\uff0e', '.').replace('\uff01', '!').replace('\uff1f', '?')
+
+        # 한국어 이모지 태그 구분자 (✅ ⚠️ ❌ 등) 뒤에도 자연스러운 끊김 제공
+        text = re.sub(r'([✅⚠️❌])\s*', r'\1 ', text)
+
+        # Split pattern: 문장 끝 구두점 + 공백, 또는 줄바꿈
+        sentence_pattern = r'([.!?。！？]+\s*|\n+)'
         parts = re.split(sentence_pattern, text)
-        
-        sentences = []
+
+        sentences: List[str] = []
         current_sentence = ""
-        
+
         for part in parts:
             if not part:
                 continue
-            
+
             current_sentence += part
-            
-            # Check if this part is sentence-ending punctuation or contains line breaks
-            if re.match(r'^[.!?]+\s*$', part) or '\n' in part:
+
+            if re.match(r'^[.!?。！？]+\s*$', part) or '\n' in part:
                 sentence = current_sentence.strip()
                 if sentence:
-                    # Remove line breaks and extra whitespace
                     sentence = re.sub(r'\n+', ' ', sentence)
                     sentence = re.sub(r'\s+', ' ', sentence).strip()
-                    
+
                     if sentence:
-                        # If sentence is too long, split it further
                         if len(sentence) > max_length:
                             sentences.extend(self._split_long_sentence(sentence, max_length))
                         else:
                             sentences.append(sentence)
                 current_sentence = ""
-        
-        # Handle remaining text (if any)
+
+        # Remaining text
         remaining = current_sentence.strip()
         if remaining:
-            # Clean up remaining text
             remaining = re.sub(r'\n+', ' ', remaining)
             remaining = re.sub(r'\s+', ' ', remaining).strip()
             if remaining:
@@ -414,8 +451,7 @@ class VTuberRelayService:
                     sentences.extend(self._split_long_sentence(remaining, max_length))
                 else:
                     sentences.append(remaining)
-        
-        # Filter out empty sentences
+
         return [s for s in sentences if s.strip()]
     
     def _split_long_sentence(self, sentence: str, max_length: int = 80) -> List[str]:
@@ -478,72 +514,133 @@ class VTuberRelayService:
     async def _send_to_vtuber(self, message: VTuberMessage) -> bool:
         """
         Send a message to VTuber via WebSocket.
-        Splits long text to avoid WebSocket frame size limits.
+        카드를 한 장씩 돌리듯 문장 단위로 쪼개어 순차 전송한다.
+        ENABLE_EDGE_TTS=0 이면 speak 전송 no-op(True 반환, 텍스트만 반환).
         """
+        try:
+            from mellow_link.config.settings import get_settings
+            from mellow_link.core.null_providers import log_airgap_block
+            if not get_settings().allow_edge_tts():
+                log_airgap_block("VTuberRelayService._send_to_vtuber", "ENABLE_EDGE_TTS", "speak 전송 no-op, 텍스트만 반환")
+                return True
+        except Exception:
+            pass
         try:
             text = message.text.strip()
             if not text:
                 return False
 
-            # Split into chunks of max 150 characters to avoid "message too big" error
-            max_chunk_size = 150
+            # max_size를 10MB로 올렸으므로 chunk 상한도 여유 있게 설정
+            max_chunk_size = 200
             if len(text) <= max_chunk_size:
                 sentences = [text]
             else:
-                # Split by sentences first, then by size
                 sentences = self._split_into_sentences(text, max_length=max_chunk_size)
-            
-            if not sentences:
-                logger.warning("[VTuberRelay] No sentences to send after splitting")
-                return False
-            
-            # Limit to max 5 sentences to avoid overwhelming the server
-            if len(sentences) > 5:
-                logger.warning(f"[VTuberRelay] Too many sentences ({len(sentences)}), truncating to 5")
-                sentences = sentences[:5]
 
-            logger.info(f"[VTuberRelay] Sending {len(sentences)} chunks (total length: {len(message.text)})")
-            
-            # Send each sentence sequentially
+            if not sentences:
+                logger.warning("[VTuberRelay] 분할 후 전송할 문장 없음")
+                return False
+
+            # 최대 10문장까지 허용 (보고서/요약본 대응)
+            if len(sentences) > 10:
+                logger.warning(
+                    f"[VTuberRelay] 문장 {len(sentences)}개 → 10개로 축소"
+                )
+                sentences = sentences[:10]
+
+            logger.info(
+                f"[VTuberRelay] {len(sentences)}장의 카드 전송 시작 "
+                f"(전체 길이: {len(message.text)})"
+            )
+
+            # 문장별 순차 전송
             for i, sentence in enumerate(sentences):
                 if not self.is_connected or not self._websocket:
-                    logger.warning(f"[VTuberRelay] Connection lost while sending sentence {i+1}/{len(sentences)}")
+                    logger.warning(
+                        f"[VTuberRelay] 전송 중 연결 끊김 ({i+1}/{len(sentences)})"
+                    )
                     return False
-                
-                # Prepare JSON payload in speak format (Direct TTS without LLM)
-                # Include emotion, priority, and metadata for avatar service compatibility
+
                 payload = {
                     "type": "speak",
                     "text": sentence.strip(),
-                    "emotion": message.emotion,  # Preserve emotion detection
-                    "priority": message.priority,  # Preserve priority level
-                    "metadata": message.metadata  # Preserve session/folder context
+                    "emotion": message.emotion,
+                    "priority": message.priority,
+                    "metadata": message.metadata,
                 }
-                
+
                 try:
                     await self._websocket.send(json.dumps(payload))
-                    logger.debug(f"[VTuberRelay] Sent sentence {i+1}/{len(sentences)}: {sentence[:50]}...")
-                    
-                    # Wait between sentences to prevent server overload
+                    logger.debug(
+                        f"[VTuberRelay] [{i+1}/{len(sentences)}] {sentence[:50]}..."
+                    )
+
+                    # 문장 사이 호흡 (마지막 문장 뒤에는 대기 불필요)
                     if i < len(sentences) - 1:
-                        await asyncio.sleep(2.0)  # 2초 대기
-                        
+                        await asyncio.sleep(1.5)
+
                 except Exception as e:
-                    logger.error(f"[VTuberRelay] Error sending sentence {i+1}: {e}")
+                    logger.error(
+                        f"[VTuberRelay] 문장 {i+1} 전송 실패: {e}"
+                    )
                     self._status = VTuberConnectionStatus.DISCONNECTED
                     return False
-            
-            # Callback after all sentences are sent
+
             if self._on_message_sent:
                 await self._on_message_sent(message)
-            
-            logger.debug(f"[VTuberRelay] Successfully sent all {len(sentences)} sentences")
+
+            logger.debug(
+                f"[VTuberRelay] {len(sentences)}장 전송 완료"
+            )
+
+            # 10초 후 자막 자동 클리어 예약
+            self._schedule_subtitle_clear()
+
             return True
 
         except Exception as e:
-            logger.error(f"[VTuberRelay] Send error: {e}")
+            logger.error(f"[VTuberRelay] 전송 오류: {e}")
             self._status = VTuberConnectionStatus.DISCONNECTED
             return False
+
+    # ── Subtitle Auto-Clear (10초 타이머) ──
+
+    def _schedule_subtitle_clear(self) -> None:
+        """
+        마지막 전송 시점으로부터 10초 후에 빈 프레임을 보내 자막을 지운다.
+        새 메시지가 들어오면 기존 타이머를 취소하고 다시 10초를 세기 시작한다.
+        """
+        # 기존 타이머 취소 (중복 방지)
+        if self._clear_timer_task and not self._clear_timer_task.done():
+            self._clear_timer_task.cancel()
+
+        self._clear_timer_task = asyncio.ensure_future(
+            self._subtitle_clear_coroutine()
+        )
+
+    async def _subtitle_clear_coroutine(self) -> None:
+        """10초 대기 후 빈 speak 프레임을 전송하여 자막/InputBox를 클리어."""
+        try:
+            await asyncio.sleep(self._subtitle_clear_delay)
+
+            if not self.is_connected or not self._websocket:
+                return
+
+            clear_payload = {
+                "type": "speak",
+                "text": "",
+                "emotion": "neutral",
+                "priority": 0,
+                "metadata": {"source": "subtitle_auto_clear"},
+            }
+            await self._websocket.send(json.dumps(clear_payload))
+            logger.debug("[VTuberRelay] 자막 자동 클리어 전송 (10초 경과)")
+
+        except asyncio.CancelledError:
+            # 새 메시지가 들어와서 타이머가 취소됨 — 정상 동작
+            pass
+        except Exception as e:
+            logger.debug(f"[VTuberRelay] 자막 클리어 전송 스킵: {e}")
 
     # Callback setters
     def on_status_change(self, callback: Callable) -> None:

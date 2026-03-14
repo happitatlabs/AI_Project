@@ -1,0 +1,1066 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width:device-width, initial-scale=1">
+    <title>Operator Console: State-Centric View | Mellow-Link</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            --chain-pending: #475569;
+            --chain-active: #3B82F6;
+            --chain-success: #10B981;
+            --chain-warning: #F59E0B;
+            --chain-error: #EF4444;
+        }
+        .chain-node.pending { border-color: var(--chain-pending); color: #64748b; }
+        .chain-node.active { border-color: var(--chain-active); box-shadow: 0 0 0 1px var(--chain-active); }
+        .chain-node.success { border-color: var(--chain-success); color: #34d399; }
+        .chain-node.warning { border-color: var(--chain-warning); color: #fbbf24; }
+        .chain-node.error { border-color: var(--chain-error); color: #f87171; }
+        .chain-node.pulse { animation: pulse 1.5s ease-in-out infinite; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.85; } }
+        .custom-scrollbar::-webkit-scrollbar { width: 3px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.05); border-radius: 10px; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .chat-sidebar { width: 320px; min-width: 320px; flex-shrink: 0; display: flex; flex-direction: column; transition: width 0.2s ease, min-width 0.2s ease; overflow: hidden; background: #11111a; border-radius: 1rem; border: 1px solid rgba(255,255,255,0.05); }
+        .chat-sidebar.chat-sidebar--collapsed { width: 48px; min-width: 48px; }
+        .chat-sidebar.chat-sidebar--collapsed .chat-sidebar__body { display: none !important; }
+        .chat-sidebar__strip { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.75rem; cursor: pointer; background: #16161f; border-bottom: 1px solid rgba(255,255,255,0.05); min-height: 120px; writing-mode: vertical-rl; text-orientation: mixed; letter-spacing: 0.05em; color: #64748b; font-size: 10px; font-weight: 600; text-transform: uppercase; }
+        .chat-sidebar__strip:hover { background: #1c1c28; color: #94a3b8; }
+        .chat-sidebar:not(.chat-sidebar--collapsed) .chat-sidebar__strip { writing-mode: horizontal-tb; flex-direction: row; justify-content: space-between; min-height: auto; padding: 0.5rem 0.75rem; cursor: default; }
+        .chat-sidebar:not(.chat-sidebar--collapsed) .chat-sidebar__strip:hover { background: #16161f; }
+        .chat-sidebar:not(.chat-sidebar--collapsed) .chat-sidebar__strip .chat-sidebar__strip-label { writing-mode: horizontal-tb; }
+        .chat-sidebar__body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+        .chat-sidebar__main { min-width: 0; overflow: hidden; overflow-x: hidden; display: flex; flex-direction: column; }
+    </style>
+</head>
+<body class="min-h-screen bg-[#0a0a0f] text-slate-300 font-sans p-4 selection:bg-red-500/30 flex flex-col overflow-y-auto">
+    <!-- Header -->
+    <header class="flex items-center justify-between mb-4 bg-[#16161f]/50 p-3 rounded-xl border border-white/5 backdrop-blur-md shrink-0">
+        <div class="flex items-center gap-6">
+            <h1 class="text-xl font-bold bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">
+                Operator Console: State-Centric View
+            </h1>
+            <div class="flex bg-[#0f0f15] rounded-lg p-1 border border-white/5">
+                <a id="linkDashboard" href="/dev-dashboard" class="px-4 py-1 rounded-md hover:bg-white/5 text-sm transition-colors text-slate-500">Dashboard</a>
+                <a id="linkDev" href="/dev-console" class="px-4 py-1 rounded-md hover:bg-white/5 text-sm transition-colors text-slate-500">Dev</a>
+                <button type="button" class="px-4 py-1 rounded-md bg-blue-600 text-white text-sm font-medium shadow-lg shadow-blue-900/20">Operator</button>
+                <a id="linkUser" href="/user-console" class="px-4 py-1 rounded-md hover:bg-white/5 text-sm transition-colors text-slate-500">User</a>
+            </div>
+        </div>
+        <div class="flex items-center gap-2">
+            <button type="button" id="btnSettings" class="p-2 hover:bg-white/5 rounded-lg transition-colors border border-white/5" title="설정">
+                <svg class="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Connect bar -->
+    <div id="connectBar" class="flex flex-wrap items-center gap-4 mb-4 shrink-0">
+        <select id="recentRuns" class="bg-[#16161f] border border-white/10 rounded-lg px-3 py-2 text-sm w-52 focus:ring-1 focus:ring-blue-500 text-slate-300">
+            <option value="">최근 run (20개)</option>
+        </select>
+        <input type="text" id="runIdInput" placeholder="run_id 또는 URL에 ?run_id=..." class="bg-[#16161f] border border-white/10 rounded-lg px-3 py-2 text-sm w-64 focus:ring-1 focus:ring-blue-500 text-slate-300 placeholder-slate-500" />
+        <button type="button" id="btnConnect" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium text-white">Connect</button>
+    </div>
+
+    <div id="noRun" class="text-slate-500 text-center py-12 text-sm rounded-xl border border-white/5 bg-[#11111a]">run_id를 입력하고 Connect를 누르거나, URL에 ?run_id=... 로 열어주세요.</div>
+
+    <!-- Main content (when connected) -->
+    <div id="operatorView" class="hidden flex flex-col flex-1 min-h-0 overflow-y-auto custom-scrollbar pb-14">
+        <!-- Status Bar -->
+        <div class="flex flex-wrap items-center gap-4 mb-4 text-xs font-mono shrink-0">
+            <div class="flex items-center gap-2 px-3 py-1.5 bg-[#16161f] rounded-lg border border-white/5">
+                <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                <span class="text-slate-500 uppercase tracking-wider">Run ID:</span>
+                <span id="statusRunId" class="text-blue-400">-</span>
+            </div>
+            <div id="statusBadge" class="flex items-center gap-2 px-3 py-1.5 bg-[#251b14] border border-orange-500/20 rounded-lg text-orange-400 animate-pulse">
+                <div class="w-1.5 h-1.5 rounded-full bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.6)]"></div>
+                <span id="statusLabel">IDLE</span>
+            </div>
+            <div class="px-3 py-1.5 bg-[#16161f] rounded-lg border border-white/5 text-slate-400">
+                Step <span id="statusStep" class="text-white">0</span>/<span id="statusTotal">0</span>
+            </div>
+            <div class="px-3 py-1.5 bg-[#16161f] rounded-lg border border-white/5 text-slate-400">
+                ETA: <span id="statusEta" class="text-white">-</span>
+            </div>
+            <div class="flex items-center gap-1 px-3 py-1.5 bg-[#16161f] rounded-lg border border-white/5 text-slate-400">
+                Mode: <span id="statusMode" class="text-blue-400">-</span>
+            </div>
+            <div id="statusEvHc" class="flex items-center gap-1 px-3 py-1.5 bg-green-500/10 border border-green-500/20 rounded-lg text-green-400 hidden">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                <span>EV_HC ON</span>
+            </div>
+            <div class="ml-auto flex items-center gap-4 text-slate-500">
+                <span class="flex items-center gap-1"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/></svg> Run Controls</span>
+            </div>
+        </div>
+
+        <!-- Console Main: Chat Sidebar + Main Content -->
+        <div class="console-main-wrap flex flex-1 min-h-0 overflow-hidden gap-4">
+            <aside id="chatSidebar" class="chat-sidebar chat-sidebar--collapsed" data-collapsed="true" title="Chat / 상담">
+                <div class="chat-sidebar__strip" id="chatSidebarStrip" role="button" tabindex="0" title="Chat / 상담" aria-label="Chat 패널 열기">
+                    <span id="chatSidebarBadge" class="hidden" aria-hidden="true"></span>
+                    <svg class="w-5 h-5 text-slate-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                    <span class="chat-sidebar__strip-label">Chat</span>
+                    <button type="button" id="chatSidebarToggle" class="shrink-0 p-1 rounded hover:bg-white/10 text-slate-500" aria-label="Chat 패널 접기/펼치기" aria-expanded="false">&#8250;</button>
+                </div>
+                <div class="chat-sidebar__body flex flex-col flex-1 min-h-0 overflow-y-auto custom-scrollbar gap-4 pb-12">
+            <!-- Left: Progress + Mini Chain + Mini Chat -->
+            <section class="flex flex-col gap-4 overflow-y-auto custom-scrollbar shrink-0">
+                <!-- Progress Widget -->
+                <div class="bg-[#11111a] rounded-2xl border border-white/5 p-4 shadow-xl shrink-0">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-sm font-semibold flex items-center gap-2">Status <div id="progressDot" class="w-2 h-2 rounded-full bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.4)]"></div></h2>
+                        <svg class="w-3.5 h-3.5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/></svg>
+                    </div>
+                    <div class="flex flex-col items-center justify-center py-4 relative">
+                        <svg class="w-32 h-32 transform -rotate-90" id="progressCircle">
+                            <circle cx="64" cy="64" r="58" stroke="currentColor" stroke-width="8" fill="transparent" class="text-slate-800" />
+                            <circle id="progressArc" cx="64" cy="64" r="58" stroke="currentColor" stroke-width="8" fill="transparent" stroke-dasharray="364" stroke-dashoffset="364" class="text-teal-500 shadow-[0_0_15px_rgba(20,184,166,0.3)] transition-all duration-1000" stroke-linecap="round" />
+                        </svg>
+                        <div class="absolute inset-0 flex flex-col items-center justify-center pt-2 pointer-events-none">
+                            <span id="progressPct" class="text-2xl font-bold text-white">0%</span>
+                            <span class="text-[10px] text-slate-500 font-medium">Complete</span>
+                        </div>
+                        <div class="mt-4 w-full px-2">
+                            <div class="flex justify-between text-[11px] mb-2">
+                                <span class="text-slate-500">Tasks Done:</span>
+                                <span id="progressTasks" class="text-white">0 / 0</span>
+                            </div>
+                            <div class="space-y-1">
+                                <div class="text-[11px] flex items-baseline gap-2">
+                                    <span class="text-slate-500 shrink-0">Current:</span>
+                                    <span id="progressCurrent" class="text-blue-400 font-medium">-</span>
+                                </div>
+                                <div class="text-[11px] flex items-baseline gap-2">
+                                    <span class="text-slate-500 shrink-0">Next:</span>
+                                    <span id="progressNext" class="text-slate-400">-</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Mini State Chain Detail -->
+                <div class="bg-[#11111a] rounded-2xl border border-white/5 p-4 shadow-xl shrink-0">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-xs font-semibold text-slate-400">State Chain</span>
+                        <svg class="w-3.5 h-3.5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </div>
+                    <div id="miniChainCard" class="bg-[#1c1c28] rounded-xl p-3 border border-white/5">
+                        <h3 id="miniChainTitle" class="text-sm font-bold text-blue-400 mb-0.5 tracking-wide uppercase">-</h3>
+                        <p id="miniChainSub" class="text-[10px] font-mono text-slate-500 mb-4">-</p>
+                        <div class="flex gap-2">
+                            <button type="button" class="flex-1 py-1.5 bg-slate-800/50 rounded-lg text-[10px] font-semibold text-slate-300 border border-white/5 hover:bg-slate-700 transition-colors">Preview Code</button>
+                            <button type="button" class="flex-1 py-1.5 bg-emerald-600/80 rounded-lg text-[10px] font-semibold text-white shadow-lg shadow-emerald-900/20 flex items-center justify-center gap-1 hover:bg-emerald-500">
+                                <svg class="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg> Approve
+                            </button>
+                        </div>
+                    </div>
+                    <div class="mt-3 relative">
+                        <input type="text" placeholder="ext search..." class="w-full bg-[#0a0a0f] border border-white/5 rounded-lg pl-8 py-1.5 text-[10px] focus:outline-none focus:border-blue-500/50 text-slate-300 placeholder-slate-500" />
+                        <svg class="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                    </div>
+                </div>
+
+                <!-- Plan card (계획 카드 + 진행하기) -->
+                <div id="planCardContainer" class="hidden shrink-0 mb-3"></div>
+                <!-- Mini Chat -->
+                <div class="bg-[#11111a] rounded-2xl border border-white/5 p-4 flex-1 min-h-[140px] flex flex-col">
+                    <span class="text-[10px] font-bold text-slate-600 uppercase tracking-widest block mb-3">Chat / Command...</span>
+                    <div class="flex gap-1 mb-3 flex-wrap">
+                        <button type="button" class="cmd-btn px-2 py-1 bg-[#1c1c28] border border-white/5 rounded-md text-[9px] font-mono text-slate-500 hover:text-slate-300">/pause</button>
+                        <button type="button" class="cmd-btn px-2 py-1 bg-[#1c1c28] border border-white/5 rounded-md text-[9px] font-mono text-slate-500 hover:text-slate-300">/retry</button>
+                        <button type="button" class="cmd-btn px-2 py-1 bg-[#1c1c28] border border-white/5 rounded-md text-[9px] font-mono text-slate-500 hover:text-slate-300">/force_fast</button>
+                    </div>
+                    <div class="relative mt-auto">
+                        <input type="text" class="w-full bg-[#0a0a0f] rounded-lg border border-white/5 py-2 pl-3 pr-10 text-[11px] text-slate-300 placeholder-slate-500" placeholder="Command..." />
+                        <button type="button" class="absolute right-1 top-1/2 -translate-y-1/2 p-1.5 bg-blue-600 rounded-md shadow-lg shadow-blue-900/30 text-white hover:bg-blue-500 transition-colors">
+                            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                        </button>
+                    </div>
+                </div>
+            </section>
+                </div>
+            </aside>
+            <main class="chat-sidebar__main flex-1 min-w-0 overflow-hidden">
+        <div class="grid grid-cols-12 gap-4 min-h-0">
+            <!-- Center: Large State Chain + Logs + Control Buttons -->
+            <div class="col-span-6 flex flex-col gap-4 overflow-hidden mb-12 min-h-0">
+                <!-- Large State Chain Flow -->
+                <section class="bg-[#11111a] rounded-2xl border border-white/5 p-6 flex-[1.5] relative overflow-hidden flex flex-col shadow-2xl min-h-0">
+                    <h2 class="text-sm font-semibold mb-4 flex items-center justify-between shrink-0">
+                        State Chain
+                        <svg class="w-3.5 h-3.5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </h2>
+                    <div class="flex-1 relative flex flex-col justify-center min-h-0 overflow-auto">
+                        <svg class="absolute inset-0 w-full h-full pointer-events-none opacity-20 min-w-[400px] min-h-[280px]">
+                            <path d="M120,60 H220" stroke="currentColor" stroke-width="1" stroke-dasharray="4" class="text-blue-500" />
+                            <path d="M300,60 C350,60 380,100 420,100" stroke="currentColor" stroke-width="1" stroke-dasharray="4" class="text-blue-500" />
+                            <path d="M120,130 H220" stroke="currentColor" stroke-width="1" stroke-dasharray="4" class="text-blue-500" />
+                            <path d="M120,200 C180,200 220,160 250,160" stroke="currentColor" stroke-width="1" stroke-dasharray="4" class="text-red-500" />
+                        </svg>
+                        <div class="relative z-10 flex flex-col gap-6 py-4">
+                            <!-- Row 1 -->
+                            <div class="flex justify-around items-center flex-wrap gap-2">
+                                <div class="flex flex-col items-center gap-1">
+                                    <div id="nodeSolve" class="chain-node px-3 py-1.5 bg-blue-900/10 border border-blue-500/40 rounded-lg text-[10px] text-blue-400 flex items-center gap-2">SOLVE Routing</div>
+                                    <span class="text-[9px] text-slate-600 font-mono">-</span>
+                                </div>
+                                <div class="px-3 py-1.5 bg-[#1c1c28] border border-white/5 rounded-lg text-[10px] text-slate-500">MODE DECISION</div>
+                                <div id="nodeCurrent" class="px-6 py-3 bg-[#1c1c28] border border-white/5 rounded-xl text-xs font-bold text-slate-400 flex flex-col items-center">
+                                    <div class="flex items-center gap-2 mb-1"><span class="text-[10px]">CURRENT</span></div>
+                                    <span class="text-[10px] font-normal">-</span>
+                                </div>
+                            </div>
+                            <!-- Row 2 -->
+                            <div class="flex justify-around items-center flex-wrap gap-2">
+                                <div class="flex flex-col items-center gap-1">
+                                    <div id="nodePlan" class="chain-node px-3 py-1.5 bg-[#1c1c28] border border-white/5 rounded-lg text-[10px] text-slate-500 flex items-center gap-2">PLAN</div>
+                                    <span class="text-[9px] text-slate-600 font-mono">-</span>
+                                </div>
+                                <div id="nodeSandbox" class="chain-node px-3 py-1.5 bg-[#1c1c28] border border-white/5 rounded-lg text-[10px] text-slate-500">SANDBOX PASS</div>
+                                <div id="nodeImplement" class="px-6 py-2.5 bg-[#1c1c28] border border-white/5 rounded-xl text-[11px] font-bold text-slate-500 flex items-center gap-2">IMPLEMENT</div>
+                            </div>
+                            <!-- Row 3 Bottleneck -->
+                            <div class="flex justify-center items-center gap-8 flex-wrap">
+                                <div id="bottleneckBadge" class="hidden px-4 py-2 bg-red-900/20 border border-red-500/50 rounded-full text-[10px] font-bold text-red-500 shadow-[0_0_20px_rgba(239,68,68,0.2)] animate-pulse uppercase tracking-widest">BOTTLENECK</div>
+                                <div id="nodeTest" class="px-6 py-2 bg-[#1c1c28] border border-white/5 rounded-lg text-[11px] font-medium text-slate-600">TEST</div>
+                                <div id="nodeComplete" class="px-6 py-2 bg-[#1c1c28] border border-white/5 rounded-lg text-[11px] font-medium text-slate-600 opacity-60">COMPLETE</div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Logs Section -->
+                <section class="bg-[#11111a] rounded-2xl border border-white/5 flex-1 overflow-hidden flex flex-col min-h-0">
+                    <div class="px-4 pt-3 border-b border-white/5 flex items-center justify-between shrink-0">
+                        <div class="flex gap-6">
+                            <button type="button" class="log-tab pb-3 text-xs font-medium text-white border-b-2 border-blue-500" data-tab="logs">Logs</button>
+                            <button type="button" class="log-tab pb-3 text-xs font-medium text-slate-500 hover:text-slate-300" data-tab="events">Events</button>
+                            <button type="button" class="log-tab pb-3 text-xs font-medium text-slate-500 hover:text-slate-300" data-tab="metrics">Metrics</button>
+                            <button type="button" class="log-tab pb-3 text-xs font-medium text-slate-500 hover:text-slate-300" data-tab="toolcalls">Tool Calls</button>
+                            <button type="button" class="log-tab pb-3 text-xs font-medium text-slate-500 hover:text-slate-300" data-tab="raw">Raw Data</button>
+                        </div>
+                        <svg class="w-3.5 h-3.5 mb-3 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/></svg>
+                    </div>
+                    <div id="logsPane" class="log-pane flex-1 p-4 font-mono text-[11px] overflow-y-auto custom-scrollbar bg-[#0d0d14] min-h-0">
+                        <div id="logsContent" class="space-y-1.5"></div>
+                    </div>
+                    <div id="eventsPane" class="log-pane hidden flex-1 p-4 font-mono text-[11px] overflow-y-auto custom-scrollbar bg-[#0d0d14] min-h-0">
+                        <table class="w-full text-left text-[11px]"><thead><tr class="text-slate-500"><th class="pb-2 pr-4">TIME</th><th class="pb-2 pr-4">EVENT</th><th class="pb-2">DETAIL</th></tr></thead><tbody id="eventsBody"></tbody></table>
+                    </div>
+                    <div id="metricsPane" class="log-pane hidden flex-1 p-4 overflow-y-auto custom-scrollbar bg-[#0d0d14] min-h-0"><div id="metricsContent" class="text-xs text-slate-400">메트릭 없음</div></div>
+                    <div id="toolcallsPane" class="log-pane hidden flex-1 p-4 overflow-y-auto custom-scrollbar bg-[#0d0d14] min-h-0"><div id="toolcallsContent" class="text-xs text-slate-400">도구 호출 목록</div></div>
+                    <div id="rawPane" class="log-pane hidden flex-1 p-4 overflow-y-auto custom-scrollbar bg-[#0d0d14] min-h-0"><pre id="rawContent" class="text-[11px] text-slate-400 whitespace-pre-wrap"></pre></div>
+                    <div class="px-4 py-2 border-t border-white/5 bg-[#0a0a0f] flex items-center justify-between text-[10px] text-slate-500 shrink-0">
+                        <span class="font-mono">Run ID: <span id="footerRunId" class="text-slate-400 italic">-</span></span>
+                        <span id="footerTime" class="flex items-center gap-1 tracking-widest">-</span>
+                    </div>
+                </section>
+
+                <!-- Control Buttons -->
+                <div class="flex gap-4 shrink-0 h-16">
+                    <button type="button" id="btnPause" class="flex-1 bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/40 rounded-xl flex items-center justify-center gap-3 transition-all group">
+                        <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-lg shadow-blue-900/30 group-hover:scale-105 transition-transform">
+                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                        </div>
+                        <span class="text-lg font-bold text-blue-400 tracking-tight">Pause</span>
+                    </button>
+                    <button type="button" id="btnRetry" class="flex-1 bg-yellow-600/10 hover:bg-yellow-600/20 border border-yellow-500/40 rounded-xl flex items-center justify-center gap-3 transition-all group">
+                        <div class="w-10 h-10 bg-yellow-600 rounded-lg flex items-center justify-center text-white shadow-lg shadow-yellow-900/30 group-hover:scale-105 transition-transform">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                        </div>
+                        <span class="text-lg font-bold text-yellow-400 tracking-tight">Retry</span>
+                    </button>
+                    <button type="button" id="btnAbort" class="flex-1 bg-red-600/10 hover:bg-red-600/20 border border-red-500/40 rounded-xl flex items-center justify-center gap-3 transition-all group">
+                        <div class="w-10 h-10 bg-red-600 rounded-lg flex items-center justify-center text-white shadow-lg shadow-red-900/30 group-hover:scale-105 transition-transform">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </div>
+                        <span class="text-lg font-bold text-red-500 tracking-tight">Abort</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Right: Risk & To-Do -->
+            <section class="col-span-3 flex flex-col gap-4 overflow-y-auto custom-scrollbar pb-12 min-h-0">
+                <!-- Risk & Alerts -->
+                <div class="bg-[#11111a] rounded-2xl border border-white/5 p-4 shadow-xl shrink-0">
+                    <h2 class="text-xs font-semibold text-slate-500 uppercase mb-4 tracking-widest">Risk & Alerts</h2>
+                    <div id="riskLevel" class="flex items-center gap-2 mb-4 text-slate-500 bg-[#16161f] p-2 rounded-lg border border-white/5">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        <span class="text-lg font-bold tracking-tight">None</span>
+                    </div>
+                    <div id="riskList" class="space-y-3">
+                        <div class="text-[11px] text-slate-500">리스크 없음</div>
+                    </div>
+                </div>
+
+                <!-- To-Do List -->
+                <div class="bg-[#11111a] rounded-2xl border border-white/5 p-4 flex-1 shadow-xl flex flex-col min-h-0">
+                    <div class="flex items-center justify-between mb-4 shrink-0">
+                        <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-widest">To-Do</h2>
+                        <svg class="w-3.5 h-3.5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/></svg>
+                    </div>
+                    <div class="flex justify-between items-center mb-4 shrink-0">
+                        <span id="todoSummary" class="text-[11px] font-bold text-white">0 / 0 Done</span>
+                        <div class="flex items-center gap-2">
+                            <div class="w-24 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                <div id="todoProgressBar" class="h-full bg-blue-500 transition-all duration-500" style="width:0%"></div>
+                            </div>
+                            <span id="todoFraction" class="text-[10px] text-slate-500">0/0</span>
+                            <svg class="w-3 h-3 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                        </div>
+                    </div>
+                    <div id="todoList" class="space-y-2.5 flex-1 overflow-y-auto custom-scrollbar pr-1 min-h-0">
+                        <div class="text-[11px] text-slate-500">Run 연결 후 할 일 목록이 표시됩니다.</div>
+                    </div>
+                    <div class="mt-6 pt-4 border-t border-white/5 shrink-0">
+                        <span class="text-[10px] font-bold text-slate-600 uppercase mb-3 block">Action Buttons</span>
+                        <div class="grid grid-cols-3 gap-2">
+                            <button type="button" class="op-pause p-3 bg-blue-900/40 border border-blue-500/40 rounded-xl text-blue-400 flex flex-col items-center gap-1 hover:bg-blue-900/60 transition-colors">
+                                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                                <span class="text-[9px] font-bold">Pause</span>
+                            </button>
+                            <button type="button" class="op-retry p-3 bg-yellow-900/40 border border-yellow-500/40 rounded-xl text-yellow-500 flex flex-col items-center gap-1 hover:bg-yellow-900/60 transition-colors">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                                <span class="text-[9px] font-bold">Retry</span>
+                            </button>
+                            <button type="button" class="op-abort p-3 bg-red-900/40 border border-red-500/40 rounded-xl text-red-500 flex flex-col items-center gap-1 hover:bg-red-900/60 transition-colors">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                <span class="text-[9px] font-bold">Abort</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+            </main>
+        </div>
+    </div>
+
+    <div class="fixed bottom-0 left-0 right-0 h-10 shrink-0" aria-hidden="true"></div>
+
+    <script>
+        (function () {
+            var key = 'mellow_operator_chat_collapsed';
+            var sidebar = document.getElementById('chatSidebar');
+            var toggleBtn = document.getElementById('chatSidebarToggle');
+            var strip = document.getElementById('chatSidebarStrip');
+            if (!sidebar || !toggleBtn || !strip) return;
+            function setCollapsed(collapsed) {
+                sidebar.setAttribute('data-collapsed', collapsed ? 'true' : 'false');
+                sidebar.classList.toggle('chat-sidebar--collapsed', collapsed);
+                toggleBtn.textContent = collapsed ? '\u203A' : '\u2039';
+                toggleBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+                try { localStorage.setItem(key, collapsed ? '1' : '0'); } catch (e) {}
+            }
+            var stored = null;
+            try { stored = localStorage.getItem(key); } catch (e) {}
+            var initialCollapsed = stored !== null ? stored === '1' : true;
+            setCollapsed(initialCollapsed);
+            toggleBtn.addEventListener('click', function () { setCollapsed(!sidebar.classList.contains('chat-sidebar--collapsed')); });
+            strip.addEventListener('click', function (e) {
+                if (sidebar.classList.contains('chat-sidebar--collapsed') && e.target !== toggleBtn) setCollapsed(false);
+            });
+            strip.addEventListener('keydown', function (e) {
+                if ((e.key === 'Enter' || e.key === ' ') && sidebar.classList.contains('chat-sidebar--collapsed')) { e.preventDefault(); setCollapsed(false); }
+            });
+        })();
+        const API = window.location.origin;
+        const __nativeFetch = window.fetch.bind(window);
+        window.fetch = function (input, init) {
+            init = init || {};
+            const headers = new Headers(init.headers || {});
+            const token = localStorage.getItem('authToken');
+            if (token && !headers.has('Authorization')) headers.set('Authorization', 'Bearer ' + token);
+            init.headers = headers;
+            return __nativeFetch(input, init);
+        };
+        const NODES = ['MODE', 'PLAN', 'TOOL', 'SANITIZER', 'POLICY', 'OUTPUT', 'KPI'];
+        const TOOL_LATENCY_WARN_MS = Math.max(100, parseInt(new URLSearchParams(window.location.search).get('latency_warn_ms') || '500', 10) || 500);
+
+        let state = {
+            status: 'idle',
+            mode: '',
+            chainNodes: Object.fromEntries(NODES.map(n => [n, 'pending'])),
+            chainBottleneck: null,
+            escalation: null,
+            todos: [],
+            progress: { done: 0, total: 0 },
+            risk: [],
+            activity: [],
+            lastUpdate: null,
+            health: null,
+            decision: null,
+            currentTodo: null,
+            events: [],
+            runId: null,
+        };
+        let eventSource = null;
+        let lastEventId = null;
+        let lastProcessedEventId = 0;
+        let reconnectTimeoutId = null;
+        const SSE_RECONNECT_DELAY_MS = 3000;
+
+        function closeSSE() {
+            if (reconnectTimeoutId) { clearTimeout(reconnectTimeoutId); reconnectTimeoutId = null; }
+            if (eventSource) { eventSource.close(); eventSource = null; }
+        }
+        window.addEventListener('beforeunload', closeSSE);
+
+        function updateViewLinks() {
+            const params = new URLSearchParams(window.location.search);
+            const runId = state.runId || params.get('run_id') || '';
+            const q = new URLSearchParams();
+            if (runId) q.set('run_id', runId);
+            const qs = q.toString() ? ('?' + q.toString()) : '';
+            const dash = document.getElementById('linkDashboard');
+            const dev = document.getElementById('linkDev');
+            const us = document.getElementById('linkUser');
+            if (dash) dash.href = '/dev-dashboard' + qs;
+            if (dev) dev.href = '/dev-console' + qs;
+            if (us) us.href = '/user-console' + qs;
+        }
+
+        async function sendControlAction(action) {
+            if (!state.runId) return;
+            try {
+                const r = await fetch(API + '/runs/' + encodeURIComponent(state.runId) + '/control', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: action })
+                });
+                if (!r.ok) {
+                    const err = await r.text();
+                    throw new Error(err || ('Control action failed: ' + action));
+                }
+                const data = await r.json();
+                const nowTs = Date.now() / 1000;
+                state.events = state.events.concat({
+                    ts: nowTs,
+                    type: 'operator_action',
+                    payload: { action: action, accepted: !!data.accepted, status: data.status || '' }
+                });
+                state.lastUpdate = nowTs;
+                if (action === 'retry' && data.new_run_id) {
+                    useRun(data.new_run_id);
+                    return;
+                }
+                renderAll();
+            } catch (e) {
+                console.warn('Control action failed', e);
+            }
+        }
+
+        function pushActivity(list, item) {
+            const next = [item, ...list];
+            return next.slice(0, 24);
+        }
+
+        function reduceEvent(ev, s) {
+            const p = ev.payload || {};
+            s.lastUpdate = ev.ts != null ? ev.ts : Date.now() / 1000;
+            switch (ev.type) {
+                case 'run_started':
+                    s.status = 'running';
+                    s.mode = p.mode || '';
+                    if (p.user_input) s.launcherUserInput = p.user_input;
+                    s.chainNodes = { ...s.chainNodes, MODE: 'active' };
+                    s.activity = pushActivity(s.activity, { ts: ev.ts, text: 'Run started', type: 'info' });
+                    break;
+                case 'mode_decision':
+                    s.mode = p.selected_mode || s.mode;
+                    s.chainNodes = { ...s.chainNodes, MODE: 'success' };
+                    s.decision = p;
+                    if (p.escalated) s.escalation = { from: p.initial_mode, to: p.selected_mode, reason: p.escalation_reason || '' };
+                    s.activity = pushActivity(s.activity, { ts: ev.ts, text: 'Mode: ' + (p.selected_mode || '') + (p.escalated ? ' (escalated)' : ''), type: 'info' });
+                    break;
+                case 'plan_created':
+                    s.chainNodes = { ...s.chainNodes, PLAN: 'success' };
+                    s.todos = p.todos || [];
+                    s.progress = { done: 0, total: (p.todos || []).length };
+                    s.activity = pushActivity(s.activity, { ts: ev.ts, text: 'Plan: ' + (p.todos || []).length + ' steps', type: 'info' });
+                    break;
+                case 'todo_started':
+                    s.currentTodo = p.todo_id || p.title;
+                    s.activity = pushActivity(s.activity, { ts: ev.ts, text: 'Todo: ' + (p.title || p.todo_id), type: 'info' });
+                    break;
+                case 'todo_done':
+                    const doneCount = s.todos.filter(t => (t.status || '').toString().toLowerCase() === 'completed').length + 1;
+                    s.progress = { ...s.progress, done: Math.min(doneCount, s.progress.total || 1) };
+                    s.activity = pushActivity(s.activity, { ts: ev.ts, text: 'Done: ' + (p.title || p.todo_id), type: 'success' });
+                    break;
+                case 'tool_started':
+                    s.chainNodes = { ...s.chainNodes, TOOL: 'active' };
+                    s.activity = pushActivity(s.activity, { ts: ev.ts, text: 'Tool: ' + (p.tool_name || ''), type: 'info' });
+                    break;
+                case 'tool_done':
+                    s.chainNodes = { ...s.chainNodes, TOOL: p.success !== false ? 'success' : 'error' };
+                    const dur = p.duration_ms;
+                    if (dur != null && dur > TOOL_LATENCY_WARN_MS) {
+                        s.chainBottleneck = 'Tool latency ' + Math.round(dur) + 'ms';
+                        s.chainNodes = { ...s.chainNodes, TOOL: 'warning' };
+                    }
+                    if (p.success === false) s.risk = [...s.risk, 'Tool error: ' + (p.tool_name || '')];
+                    s.activity = pushActivity(s.activity, { ts: ev.ts, text: (p.tool_name || '') + ' ' + (p.success ? 'OK' : 'ERR') + (dur != null ? ' ' + Math.round(dur) + 'ms' : ''), type: p.success ? 'success' : 'error' });
+                    break;
+                case 'sanitizer_result':
+                    s.chainNodes = { ...s.chainNodes, SANITIZER: (String(p.kind || '').indexOf('blocked') >= 0 || String(p.kind || '').indexOf('removed') >= 0) ? 'warning' : 'success' };
+                    break;
+                case 'run_finished':
+                    s.status = p.success !== false ? 'finished' : 'error';
+                    s.chainNodes = { ...s.chainNodes, POLICY: 'success', OUTPUT: 'success', KPI: (p.success !== false ? 'success' : 'error') };
+                    s.activity = pushActivity(s.activity, { ts: ev.ts, text: 'Run ' + (p.success !== false ? 'finished' : 'failed'), type: p.success !== false ? 'success' : 'error' });
+                    break;
+                case 'error':
+                    s.status = 'error';
+                    s.chainNodes = { ...s.chainNodes, KPI: 'error' };
+                    s.risk = [...s.risk, p.message || 'Error'];
+                    s.activity = pushActivity(s.activity, { ts: ev.ts, text: 'Error: ' + (p.message || '').slice(0, 80), type: 'error' });
+                    break;
+                default:
+                    break;
+            }
+            return s;
+        }
+
+        function applyDevSnapshot(dev) {
+            if (!dev) return;
+            state.health = dev.health || null;
+            state.decision = dev.decision || null;
+            if (dev.decision && dev.decision.escalated) {
+                state.escalation = { from: dev.decision.initial_mode, to: dev.decision.selected_mode, reason: dev.decision.escalation_reason || '' };
+            }
+            if ((dev.health || {}).warnings && dev.health.warnings.length)
+                state.risk = [...state.risk, ...dev.health.warnings];
+            state.events = dev.events || [];
+            let s = state;
+            state.events.forEach(ev => { s = reduceEvent(ev, s); });
+            state = s;
+            if (dev.status === 'completed') state.status = 'finished';
+            if (dev.status === 'failed') state.status = 'error';
+            if (dev.todos && dev.todos.length) state.todos = dev.todos;
+            if (state.events.length) {
+                const last = state.events[state.events.length - 1];
+                if (last.id != null) { lastEventId = last.id; lastProcessedEventId = last.id; }
+            }
+        }
+
+        function loadRunSnapshot(runId) {
+            if (!runId) return Promise.resolve();
+            return fetch(API + '/runs/' + encodeURIComponent(runId))
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (snap) {
+                    if (!snap) return;
+                    state.todos = snap.todos || [];
+                    var st = (snap.status || '').toLowerCase();
+                    if (st === 'completed') state.status = 'finished';
+                    else if (st === 'failed') state.status = 'error';
+                    else if (st === 'running') state.status = 'running';
+                    if (snap.todos_view && snap.todos_view.length > 0) {
+                        var done = snap.todos_view.filter(function (v) { return v.status === 'completed'; }).length;
+                        state.progress = { done: done, total: snap.todos_view.length };
+                    } else if (state.todos.length) {
+                        var doneCount = state.todos.filter(function (t) { return (t.status || '').toString().toLowerCase() === 'completed'; }).length;
+                        state.progress = { done: doneCount, total: state.todos.length };
+                    }
+                    state.currentTodo = snap.current_todo_id || state.currentTodo;
+                    renderAll();
+                })
+                .catch(function (e) { console.warn('loadRunSnapshot failed', e); });
+        }
+
+        function useRun(runId) {
+            closeSSE();
+            lastEventId = null;
+            lastProcessedEventId = 0;
+            state = {
+                status: 'idle',
+                mode: '',
+                chainNodes: Object.fromEntries(NODES.map(n => [n, 'pending'])),
+                chainBottleneck: null,
+                escalation: null,
+                todos: [],
+                progress: { done: 0, total: 0 },
+                risk: [],
+                activity: [],
+                lastUpdate: null,
+                health: null,
+                decision: null,
+                currentTodo: null,
+                events: [],
+                runId: runId,
+                launcherUserInput: state.launcherUserInput || '',
+            };
+            loadRunSnapshot(runId).catch(function () {}).then(function () {
+                document.getElementById('noRun').classList.add('hidden');
+                document.getElementById('operatorView').classList.remove('hidden');
+                updateViewLinks();
+                fetch(API + '/runs/' + encodeURIComponent(runId) + '/dev')
+                    .then(function (r) { return r.ok ? r.json() : null; })
+                    .then(function (dev) {
+                        if (dev) applyDevSnapshot(dev);
+                        renderAll();
+                        openSSE(runId);
+                    })
+                    .catch(function (e) { console.warn('Dev fetch failed', e); renderAll(); openSSE(runId); });
+            });
+        }
+
+        function openSSE(runId) {
+            if (state.runId !== runId) return;
+            closeSSE();
+            const token = localStorage.getItem('authToken') || '';
+            const params = new URLSearchParams();
+            if (lastEventId != null) params.set('last_event_id', lastEventId);
+            if (token) params.set('access_token', token);
+            const url = API + '/runs/' + encodeURIComponent(runId) + '/events' + (params.toString() ? ('?' + params.toString()) : '');
+            eventSource = new EventSource(url);
+            eventSource.onmessage = function (e) {
+                try {
+                    const ev = JSON.parse(e.data);
+                    if (ev.type === 'timeout') return;
+                    if (ev.id != null && ev.id <= lastProcessedEventId) return;
+                    if (ev.id != null) lastEventId = ev.id;
+                    state = reduceEvent(ev, state);
+                    state.events = state.events.concat(ev);
+                    if (ev.id != null) lastProcessedEventId = ev.id;
+                    renderAll();
+                } catch (err) { console.warn('SSE parse error', err); }
+            };
+            eventSource.onerror = function () {
+                if (eventSource && eventSource.readyState === EventSource.CLOSED) return;
+                if (reconnectTimeoutId) return;
+                if (!state.runId || state.runId !== runId) return;
+                if (state.status === 'finished' || state.status === 'error') {
+                    closeSSE();
+                    renderAll();
+                    return;
+                }
+                reconnectTimeoutId = setTimeout(function () {
+                    reconnectTimeoutId = null;
+                    if (state.runId !== runId) return;
+                    if (state.status === 'finished' || state.status === 'error') return;
+                    loadRunSnapshot(runId).catch(function () {}).then(function () { openSSE(runId); });
+                }, SSE_RECONNECT_DELAY_MS);
+            };
+        }
+
+        function renderStatusBar() {
+            const runIdEl = document.getElementById('statusRunId');
+            const labelEl = document.getElementById('statusLabel');
+            const stepEl = document.getElementById('statusStep');
+            const totalEl = document.getElementById('statusTotal');
+            const modeEl = document.getElementById('statusMode');
+            const etaEl = document.getElementById('statusEta');
+            const badge = document.getElementById('statusBadge');
+            if (runIdEl) runIdEl.textContent = (state.runId || '-').slice(0, 28);
+            const labels = { running: 'PROCESSING', finished: 'DONE', error: 'ERROR', idle: 'IDLE' };
+            if (labelEl) labelEl.textContent = labels[state.status] || state.status.toUpperCase();
+            if (badge) {
+                badge.classList.remove('bg-[#251b14]', 'border-orange-500/20', 'text-orange-400', 'animate-pulse', 'bg-green-500/10', 'border-green-500/20', 'text-green-400', 'bg-red-500/10', 'border-red-500/20', 'text-red-400', 'bg-[#16161f]', 'border-white/5', 'text-slate-500');
+                if (state.status === 'running') badge.classList.add('bg-[#251b14]', 'border-orange-500/20', 'text-orange-400', 'animate-pulse');
+                else if (state.status === 'finished') badge.classList.add('bg-green-500/10', 'border-green-500/20', 'text-green-400');
+                else if (state.status === 'error') badge.classList.add('bg-red-500/10', 'border-red-500/20', 'text-red-400');
+                else badge.classList.add('bg-[#16161f]', 'border-white/5', 'text-slate-500');
+            }
+            const total = state.progress.total || 0;
+            const done = state.progress.done ?? 0;
+            if (stepEl) stepEl.textContent = String(done);
+            if (totalEl) totalEl.textContent = String(total);
+            if (modeEl) modeEl.textContent = state.mode || '-';
+            if (etaEl) etaEl.textContent = total ? '~' + Math.max(0, total - done) + 's' : '-';
+            const evHc = document.getElementById('statusEvHc');
+            if (evHc) evHc.classList.toggle('hidden', !((state.decision && state.decision.escalated) || (state.health && state.health.score != null)));
+        }
+
+        function renderProgress() {
+            const total = state.progress.total || 0;
+            const done = state.progress.done ?? 0;
+            const pct = total ? Math.round((done / total) * 100) : 0;
+            const arc = document.getElementById('progressArc');
+            if (arc) arc.setAttribute('stroke-dashoffset', String(364 * (1 - pct / 100)));
+            const pctEl = document.getElementById('progressPct');
+            if (pctEl) pctEl.textContent = pct + '%';
+            const tasksEl = document.getElementById('progressTasks');
+            if (tasksEl) tasksEl.textContent = done + ' / ' + total;
+            const cur = state.currentTodo || (state.todos && state.todos[done]);
+            const nextTodo = state.todos && state.todos[done];
+            const nextTitle = nextTodo && (nextTodo.title || nextTodo.todo_id);
+            const curEl = document.getElementById('progressCurrent');
+            const nextEl = document.getElementById('progressNext');
+            if (curEl) curEl.textContent = (cur && (cur.title || cur.todo_id)) || '-';
+            if (nextEl) nextEl.textContent = nextTitle || (state.todos && state.todos[done + 1] && (state.todos[done + 1].title || state.todos[done + 1].todo_id)) || '-';
+            const dot = document.getElementById('progressDot');
+            if (dot) dot.className = 'w-2 h-2 rounded-full ' + (state.status === 'running' ? 'bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.4)]' : state.status === 'finished' ? 'bg-green-500' : state.status === 'error' ? 'bg-red-500' : 'bg-slate-600');
+        }
+
+        function renderMiniChain() {
+            const titleEl = document.getElementById('miniChainTitle');
+            const subEl = document.getElementById('miniChainSub');
+            const activeNode = NODES.find(n => (state.chainNodes[n] || '') === 'active') || (state.currentTodo && (state.currentTodo.title || state.currentTodo.todo_id)) || 'CURRENT';
+            if (titleEl) titleEl.textContent = typeof activeNode === 'string' && activeNode.length <= 12 ? activeNode : 'STRUCTURE';
+            if (subEl) subEl.textContent = (state.currentTodo && (state.currentTodo.title || state.currentTodo.todo_id)) || state.mode || '-';
+        }
+
+        function renderLargeChain() {
+            const nodeSolve = document.getElementById('nodeSolve');
+            const nodePlan = document.getElementById('nodePlan');
+            const nodeSandbox = document.getElementById('nodeSandbox');
+            const nodeImplement = document.getElementById('nodeImplement');
+            const nodeCurrent = document.getElementById('nodeCurrent');
+            const nodeTest = document.getElementById('nodeTest');
+            const nodeComplete = document.getElementById('nodeComplete');
+            const bottleneckBadge = document.getElementById('bottleneckBadge');
+            const cn = state.chainNodes;
+            const updateNode = (el, status, successClass, activeClass) => {
+                if (!el) return;
+                el.className = el.className.replace(/\s*chain-node\s*/g, ' ').replace(/\s*bg-[^\s]+/g, '').replace(/\s*border-[^\s]+/g, '').replace(/\s*text-[^\s]+/g, '');
+                el.classList.add('chain-node', status, 'px-3', 'py-1.5', 'rounded-lg', 'text-[10px]', 'flex', 'items-center', 'gap-2');
+                if (status === 'success') el.classList.add('bg-emerald-500/10', 'border-emerald-500/40', 'text-emerald-400');
+                else if (status === 'active') el.classList.add('pulse', 'bg-blue-900/10', 'border-blue-500/40', 'text-blue-400');
+                else el.classList.add('bg-[#1c1c28]', 'border-white/5', 'text-slate-500');
+            };
+            if (nodeSolve) {
+                nodeSolve.className = 'chain-node ' + (cn.MODE || 'pending') + ' px-3 py-1.5 rounded-lg text-[10px] flex items-center gap-2 ' + (cn.MODE === 'success' ? 'bg-blue-900/10 border border-blue-500/40 text-blue-400' : 'bg-[#1c1c28] border border-white/5 text-slate-500');
+                if (cn.MODE === 'active') nodeSolve.classList.add('pulse');
+            }
+            if (nodePlan) {
+                nodePlan.className = 'chain-node ' + (cn.PLAN || 'pending') + ' px-3 py-1.5 rounded-lg text-[10px] flex items-center gap-2 ' + (cn.PLAN === 'success' ? 'bg-emerald-500/10 border border-emerald-500/40 text-emerald-400' : 'bg-[#1c1c28] border border-white/5 text-slate-500');
+            }
+            if (nodeSandbox) {
+                nodeSandbox.className = 'chain-node ' + (cn.SANITIZER || 'pending') + ' px-3 py-1.5 rounded-lg text-[10px] ' + (cn.SANITIZER === 'success' ? 'bg-emerald-500/10 border border-emerald-500/40 text-emerald-400' : 'bg-[#1c1c28] border border-white/5 text-slate-500');
+            }
+            const activeKey = NODES.find(n => state.chainNodes[n] === 'active');
+            const currentLabel = activeKey || state.currentTodo && (state.currentTodo.title || state.currentTodo.todo_id) || 'CURRENT';
+            if (nodeCurrent) {
+                nodeCurrent.innerHTML = state.status === 'running' ? '<div class="flex items-center gap-2 mb-1"><div class="w-2.5 h-2.5 rounded-full border-2 border-white/40 border-t-white animate-spin"></div><span class="text-[10px]">' + (currentLabel.length > 12 ? currentLabel.slice(0, 12) + '…' : currentLabel) + '</span><span class="text-[9px] opacity-70 ml-2">-</span></div><span class="text-[10px] font-normal opacity-90">' + (state.mode || '-') + '</span>' : '<div class="flex items-center gap-2 mb-1"><span class="text-[10px]">' + currentLabel + '</span></div><span class="text-[10px] font-normal">' + (state.mode || '-') + '</span>';
+                nodeCurrent.className = 'px-6 py-3 rounded-xl text-xs font-bold flex flex-col items-center ' + (state.status === 'running' ? 'bg-blue-600 text-white shadow-[0_0_30px_rgba(37,99,235,0.3)] border border-blue-400/50' : 'bg-[#1c1c28] border border-white/5 text-slate-400');
+            }
+            if (nodeImplement) nodeImplement.className = 'px-6 py-2.5 rounded-xl text-[11px] font-bold flex items-center gap-2 ' + (cn.TOOL === 'success' ? 'bg-[#1c1c28] border border-yellow-500/30 text-slate-300' : 'bg-[#1c1c28] border border-white/5 text-slate-500');
+            if (nodeTest) nodeTest.className = 'px-6 py-2 rounded-lg text-[11px] font-medium ' + (cn.POLICY === 'success' ? 'bg-[#1c1c28] border border-white/5 text-slate-400' : 'bg-[#1c1c28] border border-white/5 text-slate-600');
+            if (nodeComplete) nodeComplete.className = 'px-6 py-2 rounded-lg text-[11px] font-medium ' + (cn.KPI === 'success' ? 'bg-[#1c1c28] border border-white/5 text-slate-400' : 'bg-[#1c1c28] border border-white/5 text-slate-600 opacity-60');
+            if (bottleneckBadge) {
+                if (state.chainBottleneck) { bottleneckBadge.classList.remove('hidden'); bottleneckBadge.title = state.chainBottleneck; }
+                else bottleneckBadge.classList.add('hidden');
+            }
+        }
+
+        function renderLogs() {
+            const el = document.getElementById('logsContent');
+            if (!el) return;
+            const events = state.events || [];
+            const typeColors = { mode_decision: 'text-blue-400', tool_started: 'text-yellow-500', tool_done: 'text-green-500', run_finished: 'text-green-500', error: 'text-red-400', plan_created: 'text-blue-400' };
+            el.innerHTML = events.length ? events.slice(-30).map(ev => {
+                const timeStr = ev.ts != null ? new Date(ev.ts * 1000).toLocaleTimeString() : '-';
+                const typeLabel = (ev.type || '').toUpperCase().replace(/_/g, ' ');
+                const color = typeColors[ev.type] || 'text-slate-400';
+                let detail = '';
+                if (ev.payload) {
+                    if (ev.type === 'tool_started' || ev.type === 'tool_done') detail = ev.payload.tool_name || '';
+                    else detail = JSON.stringify(ev.payload).slice(0, 60);
+                }
+                const isError = ev.type === 'error' || (ev.payload && ev.payload.message);
+                const rowClass = isError ? 'flex gap-4 bg-red-900/10 p-1 -mx-1 rounded' : 'flex gap-4';
+                return '<div class="' + rowClass + '"><span class="text-slate-600 tracking-tighter shrink-0">' + timeStr + '</span><span class="' + color + ' font-bold shrink-0 uppercase">' + typeLabel + '</span><span class="text-slate-400">' + (detail || (ev.payload && ev.payload.message) || '') + '</span></div>';
+            }).join('') : '<div class="text-slate-500">이벤트 없음</div>';
+        }
+
+        function renderEventsTable() {
+            const tbody = document.getElementById('eventsBody');
+            if (!tbody) return;
+            const events = state.events || [];
+            tbody.innerHTML = events.map(ev => {
+                const timeStr = ev.ts != null ? new Date(ev.ts * 1000).toLocaleTimeString() : '-';
+                const detail = ev.payload ? JSON.stringify(ev.payload).slice(0, 100) : '';
+                return '<tr class="border-b border-white/5"><td class="py-1 pr-4 text-slate-600">' + timeStr + '</td><td class="py-1 pr-4 text-slate-300">' + (ev.type || '') + '</td><td class="py-1 text-slate-400">' + detail + '</td></tr>';
+            }).join('');
+        }
+
+        function renderMetrics() {
+            const el = document.getElementById('metricsContent');
+            if (!el) return;
+            const events = state.events || [];
+            const toolStarted = events.filter(function (e) { return e.type === 'tool_started'; });
+            const toolDone = events.filter(function (e) { return e.type === 'tool_done'; });
+            const doneSuccess = toolDone.filter(function (e) { return (e.payload && e.payload.success) === true; });
+            const durations = toolDone.map(function (e) { return e.payload && e.payload.duration_ms; }).filter(function (n) { return typeof n === 'number'; });
+            const avgDuration = durations.length ? durations.reduce(function (a, b) { return a + b; }, 0) / durations.length : null;
+            const runStartedEv = events.find(function (e) { return e.type === 'run_started'; });
+            const runFinishedEv = events.findLast ? events.findLast(function (e) { return e.type === 'run_finished'; }) : events.filter(function (e) { return e.type === 'run_finished'; }).pop();
+            const totalRunSec = (runStartedEv && runFinishedEv && runStartedEv.ts != null && runFinishedEv.ts != null) ? (runFinishedEv.ts - runStartedEv.ts) : null;
+            const todoDoneCount = events.filter(function (e) { return e.type === 'todo_done'; }).length;
+            if (!events.length) {
+                el.innerHTML = '<div class="text-slate-500">메트릭 데이터가 없습니다.</div>';
+                return;
+            }
+            const rows = [
+                { label: '총 도구 호출 수', value: toolStarted.length },
+                { label: '도구 성공률', value: toolDone.length ? (Math.round((doneSuccess.length / toolDone.length) * 100) + '%') : '-' },
+                { label: '평균 도구 응답 시간', value: avgDuration != null ? (Math.round(avgDuration) + ' ms') : '-' },
+                { label: '총 실행 시간', value: totalRunSec != null ? (Math.round(totalRunSec) + ' s') : '-' },
+                { label: 'Turn 수', value: todoDoneCount },
+            ];
+            el.innerHTML = '<div class="grid grid-cols-1 gap-3 text-xs">' + rows.map(function (r) {
+                return '<div class="flex justify-between items-center py-1.5 border-b border-white/5"><span class="text-slate-500">' + r.label + '</span><span class="font-mono text-slate-300">' + String(r.value) + '</span></div>';
+            }).join('') + '</div>';
+        }
+
+        function renderToolCalls() {
+            const el = document.getElementById('toolcallsContent');
+            if (!el) return;
+            const events = state.events || [];
+            var unpairedStarted = [];
+            var pairs = [];
+            events.forEach(function (ev) {
+                if (ev.type === 'tool_started') {
+                    unpairedStarted.push({ ev: ev, payload: ev.payload || {} });
+                } else if (ev.type === 'tool_done') {
+                    var p = ev.payload || {};
+                    var name = p.tool_name;
+                    var idx = -1;
+                    for (var i = unpairedStarted.length - 1; i >= 0; i--) {
+                        if ((unpairedStarted[i].payload.tool_name || '') === name) { idx = i; break; }
+                    }
+                    var st = idx >= 0 ? unpairedStarted.splice(idx, 1)[0] : null;
+                    pairs.push({ tool_name: name || '-', args: (st && st.payload.args_summary) || {}, success: (p.success !== false), duration_ms: p.duration_ms, observation_preview: p.observation_preview || '', ts: st ? st.ev.ts : ev.ts });
+                }
+            });
+            unpairedStarted.forEach(function (st) {
+                pairs.push({ tool_name: (st.payload.tool_name || '-'), args: st.payload.args_summary || {}, success: false, duration_ms: null, observation_preview: '(실행 중)', ts: st.ev.ts });
+            });
+            pairs.sort(function (a, b) { return (a.ts || 0) - (b.ts || 0); });
+            if (!pairs.length) {
+                el.innerHTML = '<div class="text-slate-500">도구 호출 목록이 여기 표시됩니다.</div>';
+                return;
+            }
+            el.innerHTML = '<div class="space-y-3">' + pairs.map(function (p) {
+                var argsStr = typeof p.args === 'object' && Object.keys(p.args || {}).length ? JSON.stringify(p.args).slice(0, 120) : '-';
+                var obsStr = (p.observation_preview || '').slice(0, 200).replace(/</g, '&lt;');
+                var statusCls = p.success ? 'text-green-400' : 'text-red-400';
+                return '<div class="p-3 rounded-lg border border-white/5 bg-[#16161f]/50">' +
+                    '<div class="flex justify-between items-center mb-1"><span class="font-mono text-blue-400">' + (p.tool_name || '').replace(/</g, '&lt;') + '</span><span class="text-[10px] ' + statusCls + '">' + (p.success ? 'OK' : 'FAIL') + (p.duration_ms != null ? ' · ' + Math.round(p.duration_ms) + ' ms' : '') + '</span></div>' +
+                    '<div class="text-[10px] text-slate-500 mb-1">Input: ' + (argsStr || '-').replace(/</g, '&lt;') + '</div>' +
+                    (obsStr ? '<div class="text-[10px] text-slate-400 font-mono break-words">' + obsStr + '</div>' : '') + '</div>';
+            }).join('') + '</div>';
+        }
+
+        function renderRaw() {
+            const el = document.getElementById('rawContent');
+            if (!el) return;
+            el.textContent = JSON.stringify({ runId: state.runId, status: state.status, mode: state.mode, decision: state.decision, progress: state.progress, todos: state.todos, risk: state.risk, events: state.events, health: state.health }, null, 2);
+        }
+
+        function renderFooter() {
+            const runEl = document.getElementById('footerRunId');
+            const timeEl = document.getElementById('footerTime');
+            if (runEl) runEl.textContent = (state.runId || '-').slice(0, 24);
+            if (timeEl) timeEl.textContent = state.lastUpdate ? new Date(state.lastUpdate * 1000).toLocaleTimeString() : '-';
+        }
+
+        function renderRisk() {
+            const levelEl = document.getElementById('riskLevel');
+            const listEl = document.getElementById('riskList');
+            const risk = state.risk || [];
+            if (levelEl) {
+                levelEl.className = 'flex items-center gap-2 mb-4 p-2 rounded-lg border ';
+                levelEl.innerHTML = '';
+                if (risk.length) {
+                    levelEl.classList.add(risk.some(r => /error|fail|block/i.test(r)) ? 'text-red-500 bg-red-500/10 border-red-500/20' : 'text-orange-400 bg-orange-500/10 border-orange-500/20');
+                    levelEl.innerHTML = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><span class="text-lg font-bold tracking-tight">' + (risk.some(r => /error|fail/i.test(r)) ? 'High' : 'Medium') + '</span>';
+                } else {
+                    levelEl.classList.add('text-slate-500', 'bg-[#16161f]', 'border-white/5');
+                    levelEl.innerHTML = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><span class="text-lg font-bold tracking-tight">None</span>';
+                }
+            }
+            if (listEl) {
+                if (!risk.length) listEl.innerHTML = '<div class="text-[11px] text-slate-500">리스크 없음</div>';
+                else listEl.innerHTML = risk.map(r => '<div class="flex items-center gap-3 text-[11px] font-medium text-slate-400 bg-[#16161f] p-2 rounded-lg border border-white/5"><svg class="w-3.5 h-3.5 ' + (/error|fail/i.test(r) ? 'text-red-400' : 'text-orange-400') + '" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>' + r + '</div>').join('');
+            }
+        }
+
+        function renderTodo() {
+            const summaryEl = document.getElementById('todoSummary');
+            const fractionEl = document.getElementById('todoFraction');
+            const barEl = document.getElementById('todoProgressBar');
+            const listEl = document.getElementById('todoList');
+            const todos = state.todos || [];
+            const total = state.progress.total || 0;
+            const done = state.progress.done ?? 0;
+            const pct = total ? Math.round((done / total) * 100) : 0;
+            if (summaryEl) summaryEl.textContent = done + ' / ' + total + ' Done';
+            if (fractionEl) fractionEl.textContent = done + '/' + total;
+            if (barEl) barEl.style.width = pct + '%';
+            if (!todos.length) { listEl.innerHTML = '<div class="text-[11px] text-slate-500">Run 연결 후 할 일 목록이 표시됩니다.</div>'; return; }
+            listEl.innerHTML = todos.map((t, i) => {
+                const isDone = (t.status || '').toString().toLowerCase() === 'completed';
+                const isActive = !isDone && (i === done);
+                const boxClass = isActive ? 'bg-blue-600/10 border-blue-500/30' : 'bg-[#16161f] border-white/5';
+                return '<div class="flex items-center gap-3 p-2.5 rounded-xl border transition-all ' + boxClass + '">' +
+                    (isDone ? '<svg class="w-3.5 h-3.5 text-emerald-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>' : '<div class="w-3.5 h-3.5 rounded-full border-2 shrink-0 ' + (isActive ? 'border-blue-400' : 'border-slate-700') + '"></div>') +
+                    '<span class="text-[11px] font-medium ' + (isDone ? 'text-slate-500 line-through' : 'text-slate-300') + '"><span class="font-bold mr-1">T' + (i + 1) + '</span> ' + (t.title || t.todo_id || '') + '</span>' +
+                    (isActive ? '<span class="ml-auto text-[8px] bg-yellow-500/10 text-yellow-500 px-1.5 py-0.5 rounded border border-yellow-500/20 font-bold uppercase animate-pulse">In Progress</span>' : '') +
+                    '</div>';
+            }).join('');
+        }
+
+        function renderPlanCard() {
+            const container = document.getElementById('planCardContainer');
+            if (!container) return;
+            const todos = state.todos || [];
+            const userInput = (state.launcherUserInput || '').trim();
+            if (todos.length === 0 || !userInput) {
+                container.classList.add('hidden');
+                container.innerHTML = '';
+                return;
+            }
+            container.classList.remove('hidden');
+            const listHtml = todos.map(function (t) {
+                const title = (t.title || t.todo_id || t.id || '').toString().replace(/</g, '&lt;');
+                return '<li class="flex items-center gap-2 text-[11px] text-slate-300">○ ' + title + '</li>';
+            }).join('');
+            const runId = state.runId || '';
+            container.innerHTML = '<div class="plan-approval-card rounded-xl border border-blue-500/30 bg-blue-900/10 p-3 shadow-lg">' +
+                '<div class="text-[10px] font-semibold text-blue-400 mb-2">📋 계획</div>' +
+                '<ul class="space-y-0.5 list-none pl-0 mb-3">' + listHtml + '</ul>' +
+                '<button type="button" id="planExecuteBtn" class="w-full px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-medium transition-colors">진행하기</button>' +
+                '</div>';
+            const btn = document.getElementById('planExecuteBtn');
+            if (btn) {
+                btn.onclick = function () {
+                    if (btn.disabled) return;
+                    btn.disabled = true;
+                    btn.textContent = '실행 중...';
+                    fetch(API + '/runs', { method: 'POST' })
+                        .then(function (r) { return r.json(); })
+                        .then(function (data) {
+                            var newRunId = data.run_id;
+                            if (!newRunId) throw new Error('No run_id');
+                            return fetch(API + '/runs/' + encodeURIComponent(newRunId) + '/start', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    user_input: userInput,
+                                    mode: state.mode || 'fast',
+                                    session_id: runId || null,
+                                    plan_approved: true
+                                }),
+                            }).then(function (res) { if (!res.ok) throw new Error(res.statusText); return newRunId; });
+                        })
+                        .then(function (newRunId) {
+                            if (document.getElementById('runIdInput')) document.getElementById('runIdInput').value = newRunId;
+                            var params = new URLSearchParams(window.location.search);
+                            params.set('run_id', newRunId);
+                            window.history.replaceState({}, '', window.location.pathname + '?' + params.toString());
+                            useRun(newRunId);
+                        })
+                        .catch(function (e) { console.warn('Plan execute failed', e); btn.disabled = false; btn.textContent = '진행하기'; });
+                };
+            }
+        }
+
+        function renderAll() {
+            renderStatusBar();
+            renderProgress();
+            renderMiniChain();
+            renderLargeChain();
+            renderLogs();
+            renderEventsTable();
+            renderMetrics();
+            renderToolCalls();
+            renderRaw();
+            renderFooter();
+            renderRisk();
+            renderTodo();
+            renderPlanCard();
+        }
+
+        document.getElementById('btnConnect').addEventListener('click', () => {
+            const runId = (document.getElementById('runIdInput').value || '').trim();
+            if (runId) useRun(runId);
+        });
+        document.getElementById('recentRuns').addEventListener('change', function () {
+            const runId = (this.value || '').trim();
+            if (!runId) return;
+            document.getElementById('runIdInput').value = runId;
+            useRun(runId);
+        });
+        ['btnPause', 'btnRetry', 'btnAbort'].forEach(id => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const action = id === 'btnPause' ? 'pause' : id === 'btnRetry' ? 'retry' : 'abort';
+            el.addEventListener('click', () => sendControlAction(action));
+        });
+        document.querySelectorAll('.op-pause').forEach(el => el.addEventListener('click', () => sendControlAction('pause')));
+        document.querySelectorAll('.op-retry').forEach(el => el.addEventListener('click', () => sendControlAction('retry')));
+        document.querySelectorAll('.op-abort').forEach(el => el.addEventListener('click', () => sendControlAction('abort')));
+        async function sendMode(mode) {
+            if (!state.runId) return;
+            try {
+                const r = await fetch(API + '/runs/' + encodeURIComponent(state.runId) + '/mode', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode: mode })
+                });
+                if (r.ok) {
+                    const data = await r.json();
+                    state.lastUpdate = Date.now() / 1000;
+                    renderAll();
+                }
+            } catch (e) { console.warn('sendMode failed', e); }
+        }
+        document.querySelectorAll('.cmd-btn').forEach(el => {
+            el.addEventListener('click', () => {
+                const cmd = (el.textContent || '').trim();
+                if (cmd === '/pause') sendControlAction('pause');
+                if (cmd === '/retry') sendControlAction('retry');
+                if (cmd === '/force_fast') sendMode('fast');
+            });
+        });
+
+        document.querySelectorAll('.log-tab').forEach(btn => {
+            btn.addEventListener('click', function () {
+                const tab = this.dataset.tab;
+                document.querySelectorAll('.log-tab').forEach(b => { b.classList.remove('text-white', 'border-b-2', 'border-blue-500'); b.classList.add('text-slate-500'); });
+                this.classList.add('text-white', 'border-b-2', 'border-blue-500');
+                this.classList.remove('text-slate-500');
+                document.querySelectorAll('.log-pane').forEach(p => { p.classList.add('hidden'); p.classList.remove('flex'); });
+                const paneId = tab === 'logs' ? 'logsPane' : tab === 'events' ? 'eventsPane' : tab === 'metrics' ? 'metricsPane' : tab === 'toolcalls' ? 'toolcallsPane' : 'rawPane';
+                const pane = document.getElementById(paneId);
+                if (pane) { pane.classList.remove('hidden'); pane.classList.add('flex'); }
+            });
+        });
+
+        function loadRecentRuns() {
+            fetch(API + '/runs?limit=20')
+                .then(r => r.json())
+                .then(data => {
+                    const sel = document.getElementById('recentRuns');
+                    if (!sel) return;
+                    sel.innerHTML = '<option value="">최근 run (20개)</option>';
+                    (data.runs || []).forEach(r => {
+                        const opt = document.createElement('option');
+                        opt.value = r.run_id || r.id || '';
+                        opt.textContent = (r.run_id || r.id || '').slice(0, 36) + (r.status ? ' [' + r.status + ']' : '');
+                        sel.appendChild(opt);
+                    });
+                })
+                .catch(() => {});
+        }
+
+        updateViewLinks();
+        loadRecentRuns();
+        const params = new URLSearchParams(window.location.search);
+        const runIdParam = params.get('run_id');
+        if (runIdParam) {
+            document.getElementById('runIdInput').value = runIdParam;
+            useRun(runIdParam);
+        }
+    </script>
+</body>
+</html>

@@ -1,106 +1,187 @@
 // =========================
-// Global State Variables
+// 유일한 상태 관리자 — 다른 스크립트는 State API로만 접근
 // =========================
 
-// Authentication
-let AUTH_TOKEN = localStorage.getItem('auth_token') || null; //✅ [P0] 인증 토큰
-let CURRENT_USER = null; //✅ [P0] 현재 사용자 정보
-let IS_GUEST_MODE = false; //✅ [P0] 게스트 모드 상태
+window.State = (function () {
+  var API_BASE = window.location.origin;
 
-// Session & Folder
-let CURRENT_SESSION_ID = null; //✅ [P0] 현재 세션 ID
-let CURRENT_FOLDER_ID = null; //✅ [P0] 현재 폴더 ID
-let CURRENT_FOLDER = null; //✅ [P0] 현재 폴더 정보
-let TEMP_SESSION_ID = null; //✅ [P0] 임시 세션 ID
-let FOLDERS = []; //✅ [P0] 폴더 목록
+  // answerVersions: 새로고침 복원
+  var answerVersionsRaw = {};
+  try {
+    var raw = sessionStorage.getItem('mellow_answerVersions');
+    if (raw) {
+      var parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') answerVersionsRaw = parsed;
+    }
+  } catch (_) { /* ignore */ }
 
-// UI State
-let SIDEBAR_COLLAPSED = false; //✅ [P0] 사이드바 상태
-let CURRENT_MODE = "auto"; //✅ [P0] 현재 모드
+  window.addEventListener('beforeunload', function () {
+    try {
+      if (answerVersionsRaw && typeof answerVersionsRaw === 'object')
+        sessionStorage.setItem('mellow_answerVersions', JSON.stringify(answerVersionsRaw));
+    } catch (_) { /* ignore */ }
+  });
 
-// Generation State
-let abortController = null;  //✅ [P0] 중단 컨트롤러 (Managed by api.js)
-let isGenerating = false; //✅ [P0] 생성 중복 클릭 방지
-let isRegenerating = false; //✅ [P0] Regenerate 중복 클릭 방지
-let requestStartTime = 0; //✅ [P0] 전송 시작 시간 기록용 (서버가 시간 안 줄 경우 대비)
+  var data = {
+    AUTH_TOKEN: localStorage.getItem('auth_token') || null,
+    CURRENT_USER: null,
+    IS_GUEST_MODE: false,
+    isAdmin: false,
+    IS_ADMIN: false,
+    CURRENT_SESSION_ID: null,
+    CURRENT_FOLDER_ID: null,
+    CURRENT_FOLDER: null,
+    TEMP_SESSION_ID: null,
+    FOLDERS: [],
+    SIDEBAR_COLLAPSED: false,
+    CURRENT_MODE: 'auto',
+    abortController: null,
+    isGenerating: false,
+    isRegenerating: false,
+    requestStartTime: 0,
+    answerArchive: {},
+    answerVersions: answerVersionsRaw,
+    loopDetectionBuffer: '',
+    loopDetectionThreshold: 3,
+    isEditMode: false,
+    editWarningBar: null,
+    VRAM_STATUS: { used: 0, total: 0, percent: 0, lastUpdate: null },
+    VRAM_POLL_INTERVAL: null,
+    IMAGE_GENERATION_PENDING: false,
+    MELLOW_LINK_EXPANDED: true,
+    AVATAR_STATUS: { connected: false, port_active: false, relay_connected: false, last_check: null },
+    SECRETARY_FOLDER_ID: null,
+    CURRENT_FOLDER_SETTINGS_ID: null
+  };
 
-// Edit State
-let EDIT_STATE = { active: false, targetMessageId: null, originalText: "" }; //✅ [P0] 편집 상태
-let isEditMode = false; //✅ [P0] 편집 모드 상태
-let editWarningBar = null; //✅ [P0] 편집 경고 바
-
-// Answer Management
-let answerArchive = {};  // ✅ [P0] 답변 아카이브 { messageId: { content, metadata, timestamp } }
-let answerVersions = {}; //✅ [P0] 답변 버전 관리 { originMid: { index: 0, items: [...], prompt: "원본 user 질문" } }
-
-// Loop Detection
-let loopDetectionBuffer = ""; //✅ [P0] 반복 감지 버퍼
-let loopDetectionThreshold = 50; //✅ [P0] 반복 감지 임계값
-
-// state.js
-window.AUTH_TOKEN = localStorage.getItem('auth_token') || null; //✅ [P0] 인증 토큰 저장
-window.CURRENT_USER = null; //✅ [P0] 현재 사용자 정보
-window.CURRENT_SESSION_ID = null; //✅ [P0] 현재 세션 ID
-window.CURRENT_FOLDER_ID = null; //✅ [P0] 현재 폴더 ID
-window.CURRENT_FOLDER = null; //✅ [P0] 현재 폴더 정보
-window.TEMP_SESSION_ID = null; //✅ [P0] 임시 세션 ID
-window.FOLDERS = []; //✅ [P0] 폴더 목록
-window.IS_GUEST_MODE = false; //✅ [P0] 게스트 모드 상태
-window.SIDEBAR_COLLAPSED = false; //✅ [P0] 사이드바 상태
-window.CURRENT_MODE = "auto"; //✅ [P0] 현재 모드
-window.abortController = null; //✅ [P0] 중단 컨트롤러
-window.isGenerating = false; //✅ [P0] 생성 중복 클릭 방지
-window.isRegenerating = false; //✅ [P0] Regenerate 중복 클릭 방지
-window.requestStartTime = 0; //✅ [P0] 요청 시작 시간 추적
-window.answerArchive = {}; //✅ [P0] 답변 아카이브
-window.answerVersions = {}; //✅ [P0] 답변 버전 관리
-window.loopDetectionBuffer = ""; //✅ [P0] 반복 감지 버퍼
-window.loopDetectionThreshold = 3; //✅ [P0] 반복 감지 임계값 (동일 문구 3회 반복 시 중단)
-// ✅ [강제 초기화] EDIT_CONTEXT 완전 구조 보장
-if (!window.EDIT_CONTEXT || typeof window.EDIT_CONTEXT !== 'object') {
-  window.EDIT_CONTEXT = {};
-}
-window.EDIT_CONTEXT = Object.assign({
+  var EDIT_CONTEXT = Object.assign({
     active: false,
-    originMessageId: null,     // 수정 대상(유저 메시지 id)
-    originText: "",            // 수정 시작 시 원문
-    draftBeforeEdit: "",       // 수정 시작 직전 입력창에 쓰던 내용(원복용)
-    // ✅ [복원 기능] 백업 스냅샷 (편집 확정 후 복원용)
-    backupMessages: [],        // 삭제된 메시지 백업 (서버 형식 그대로)
-    backupSessionId: null,     // 백업 시점 세션 ID
-    backupFolderId: null,      // 백업 시점 폴더 ID
-    backupCreatedAt: null,     // 백업 생성 시각
-    canRestore: false          // 복원 가능 여부
-  }, window.EDIT_CONTEXT || {});
-window.isEditMode = false; //✅ [P0] 편집 모드 상태
-window.editWarningBar = null; //✅ [P0] 편집 경고 바
-window.API_BASE = window.location.origin; //✅ [P0] API 기본 URL
+    originMessageId: null,
+    originText: '',
+    draftBeforeEdit: '',
+    backupMessages: [],
+    backupSessionId: null,
+    backupFolderId: null,
+    backupCreatedAt: null,
+    canRestore: false
+  }, {});
 
-// =========================
-// VRAM Monitoring State
-// =========================
-window.VRAM_STATUS = {
-    used: 0,
-    total: 0,
-    percent: 0,
-    lastUpdate: null
-};
-window.VRAM_POLL_INTERVAL = null; // 5초 간격 폴링 타이머
+  // —— Getters (ref 반환: FOLDERS, answerVersions, answerArchive, EDIT_CONTEXT, VRAM_STATUS, AVATAR_STATUS) ——
+  function getApiBase() { return API_BASE; }
+  function setApiBase(v) { API_BASE = v; }
+  function getAuthToken() { return data.AUTH_TOKEN; }
+  function setAuthToken(v) {
+    data.AUTH_TOKEN = v;
+    if (v != null) localStorage.setItem('auth_token', v);
+    else localStorage.removeItem('auth_token');
+  }
+  function getCurrentUser() { return data.CURRENT_USER; }
+  function setCurrentUser(v) { data.CURRENT_USER = v; }
+  function getIsGuestMode() { return data.IS_GUEST_MODE; }
+  function setIsGuestMode(v) { data.IS_GUEST_MODE = v; }
+  function getIsAdmin() { return data.isAdmin; }
+  function setIsAdmin(v) { data.isAdmin = v; data.IS_ADMIN = v; }
+  function getCurrentSessionId() { return data.CURRENT_SESSION_ID; }
+  function setCurrentSessionId(v) { data.CURRENT_SESSION_ID = v; }
+  function getCurrentFolderId() { return data.CURRENT_FOLDER_ID; }
+  function setCurrentFolderId(v) { data.CURRENT_FOLDER_ID = v; }
+  function getCurrentFolder() { return data.CURRENT_FOLDER; }
+  function setCurrentFolder(v) { data.CURRENT_FOLDER = v; }
+  function getTempSessionId() { return data.TEMP_SESSION_ID; }
+  function setTempSessionId(v) { data.TEMP_SESSION_ID = v; }
+  function getFolders() { return data.FOLDERS; }
+  function setFolders(v) { data.FOLDERS = v; }
+  function getSidebarCollapsed() { return data.SIDEBAR_COLLAPSED; }
+  function setSidebarCollapsed(v) { data.SIDEBAR_COLLAPSED = v; }
+  function getCurrentMode() { return data.CURRENT_MODE; }
+  function setCurrentMode(v) { data.CURRENT_MODE = v; }
+  function getAbortController() { return data.abortController; }
+  function setAbortController(v) { data.abortController = v; }
+  function getIsGenerating() { return data.isGenerating; }
+  function setIsGenerating(v) { data.isGenerating = v; }
+  function getIsRegenerating() { return data.isRegenerating; }
+  function setIsRegenerating(v) { data.isRegenerating = v; }
+  function getRequestStartTime() { return data.requestStartTime; }
+  function setRequestStartTime(v) { data.requestStartTime = v; }
+  function getAnswerVersions() { return data.answerVersions; }
+  function getAnswerArchive() { return data.answerArchive; }
+  function getEditContext() { return EDIT_CONTEXT; }
+  function getLoopDetectionBuffer() { return data.loopDetectionBuffer; }
+  function setLoopDetectionBuffer(v) { data.loopDetectionBuffer = v; }
+  function getLoopDetectionThreshold() { return data.loopDetectionThreshold; }
+  function setLoopDetectionThreshold(v) { data.loopDetectionThreshold = v; }
+  function getIsEditMode() { return data.isEditMode; }
+  function setIsEditMode(v) { data.isEditMode = v; }
+  function getEditWarningBar() { return data.editWarningBar; }
+  function setEditWarningBar(v) { data.editWarningBar = v; }
+  function getVRAMStatus() { return data.VRAM_STATUS; }
+  function getVRAMPollInterval() { return data.VRAM_POLL_INTERVAL; }
+  function setVRAMPollInterval(v) { data.VRAM_POLL_INTERVAL = v; }
+  function getImageGenerationPending() { return data.IMAGE_GENERATION_PENDING; }
+  function setImageGenerationPending(v) { data.IMAGE_GENERATION_PENDING = v; }
+  function getMellowLinkExpanded() { return data.MELLOW_LINK_EXPANDED; }
+  function setMellowLinkExpanded(v) { data.MELLOW_LINK_EXPANDED = v; }
+  function getAvatarStatus() { return data.AVATAR_STATUS; }
+  function getSecretaryFolderId() { return data.SECRETARY_FOLDER_ID; }
+  function setSecretaryFolderId(v) { data.SECRETARY_FOLDER_ID = v; }
+  function getCurrentFolderSettingsId() { return data.CURRENT_FOLDER_SETTINGS_ID; }
+  function setCurrentFolderSettingsId(v) { data.CURRENT_FOLDER_SETTINGS_ID = v; }
 
-// =========================
-// Image Generation State
-// =========================
-window.IMAGE_GENERATION_PENDING = false; // 이미지 생성 대기 상태
-
-// =========================
-// Mellow-Link State
-// =========================
-window.MELLOW_LINK_EXPANDED = true; // Mellow-Link section expanded state
-window.AVATAR_STATUS = {
-    connected: false,
-    port_active: false,
-    relay_connected: false,
-    last_check: null
-};
-window.SECRETARY_FOLDER_ID = null; // Secretary folder ID for admin users
-window.IS_ADMIN = false; // Admin status
+  return {
+    getApiBase: getApiBase,
+    setApiBase: setApiBase,
+    getAuthToken: getAuthToken,
+    setAuthToken: setAuthToken,
+    getCurrentUser: getCurrentUser,
+    setCurrentUser: setCurrentUser,
+    getIsGuestMode: getIsGuestMode,
+    setIsGuestMode: setIsGuestMode,
+    getIsAdmin: getIsAdmin,
+    setIsAdmin: setIsAdmin,
+    getCurrentSessionId: getCurrentSessionId,
+    setCurrentSessionId: setCurrentSessionId,
+    getCurrentFolderId: getCurrentFolderId,
+    setCurrentFolderId: setCurrentFolderId,
+    getCurrentFolder: getCurrentFolder,
+    setCurrentFolder: setCurrentFolder,
+    getTempSessionId: getTempSessionId,
+    setTempSessionId: setTempSessionId,
+    getFolders: getFolders,
+    setFolders: setFolders,
+    getSidebarCollapsed: getSidebarCollapsed,
+    setSidebarCollapsed: setSidebarCollapsed,
+    getCurrentMode: getCurrentMode,
+    setCurrentMode: setCurrentMode,
+    getAbortController: getAbortController,
+    setAbortController: setAbortController,
+    getIsGenerating: getIsGenerating,
+    setIsGenerating: setIsGenerating,
+    getIsRegenerating: getIsRegenerating,
+    setIsRegenerating: setIsRegenerating,
+    getRequestStartTime: getRequestStartTime,
+    setRequestStartTime: setRequestStartTime,
+    getAnswerVersions: getAnswerVersions,
+    getAnswerArchive: getAnswerArchive,
+    getEditContext: getEditContext,
+    getLoopDetectionBuffer: getLoopDetectionBuffer,
+    setLoopDetectionBuffer: setLoopDetectionBuffer,
+    getLoopDetectionThreshold: getLoopDetectionThreshold,
+    setLoopDetectionThreshold: setLoopDetectionThreshold,
+    getIsEditMode: getIsEditMode,
+    setIsEditMode: setIsEditMode,
+    getEditWarningBar: getEditWarningBar,
+    setEditWarningBar: setEditWarningBar,
+    getVRAMStatus: getVRAMStatus,
+    getVRAMPollInterval: getVRAMPollInterval,
+    setVRAMPollInterval: setVRAMPollInterval,
+    getImageGenerationPending: getImageGenerationPending,
+    setImageGenerationPending: setImageGenerationPending,
+    getMellowLinkExpanded: getMellowLinkExpanded,
+    setMellowLinkExpanded: setMellowLinkExpanded,
+    getAvatarStatus: getAvatarStatus,
+    getSecretaryFolderId: getSecretaryFolderId,
+    setSecretaryFolderId: setSecretaryFolderId,
+    getCurrentFolderSettingsId: getCurrentFolderSettingsId,
+    setCurrentFolderSettingsId: setCurrentFolderSettingsId
+  };
+})();

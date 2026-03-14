@@ -16,103 +16,31 @@ Connection:
 
 import asyncio
 import aiohttp
+import copy
 import json
 import logging
 import uuid
 import time
-from mellow_link.core.schemas import ImageRequest
-from mellow_link.config.settings import settings    
-from typing import Optional, Dict, Any, List, Callable, Awaitable, Union
-from dataclasses import dataclass, field
-from enum import Enum, auto
 from pathlib import Path
-from datetime import datetime, date
-import random
+from typing import Optional, Dict, Any, List, Callable
+
+from mellow_link.core.schemas import ImageRequest
+
+from .image_schemas import (
+    ImageGenerationError,
+    ImageResult,
+    ImageStatus,
+    MAGIC_HEIGHT,
+    MAGIC_WIDTH,
+    ProgressCallback,
+)
+from .image_workflow import (
+    build_prompt,
+    inject_prompts_into_workflow,
+    override_resolution,
+)
 
 logger = logging.getLogger(__name__)
-
-
-# =============================================================================
-# Enums and Data Classes
-# =============================================================================
-
-class ImageStatus(Enum):
-    """Image service status."""
-
-    DISCONNECTED = auto()  # Not connected to ComfyUI
-    CONNECTED = auto()     # Connected, ready for requests
-    GENERATING = auto()    # Currently generating image
-    QUEUED = auto()        # Request in ComfyUI queue
-    ERROR = auto()         # Error state
-
-
-@dataclass
-class ImageRequest:
-    """
-    Request structure for image generation.
-
-    Attributes:
-        prompt: Positive prompt for generation
-        negative_prompt: Negative prompt (what to avoid)
-        workflow: ComfyUI workflow name or dict
-        width: Output image width
-        height: Output image height
-        steps: Number of diffusion steps
-        cfg_scale: Classifier-free guidance scale
-        seed: Random seed (-1 for random)
-        batch_size: Number of images to generate
-    """
-
-    prompt: str
-    negative_prompt: str = ""
-    workflow: str = "default"
-    width: int = 512
-    height: int = 512
-    steps: int = 20
-    cfg_scale: float = 7.0
-    seed: int = -1
-    batch_size: int = 1
-    sampler_name: str = "euler"
-    scheduler: str = "normal"
-    denoise: float = 1.0
-    model: str = ""  # Checkpoint model name
-    extra_params: Dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class ImageResult:
-    """
-    Result structure from image generation.
-
-    Attributes:
-        images: List of generated image paths
-        prompt_id: ComfyUI prompt ID
-        generation_time_ms: Total generation time
-        seed_used: Actual seed used (if random)
-        workflow_used: Workflow that was executed
-    """
-
-    images: List[Path]
-    prompt_id: str
-    generation_time_ms: float = 0.0
-    seed_used: int = 0
-    workflow_used: str = ""
-    node_outputs: Dict[str, Any] = field(default_factory=dict)
-
-
-class ImageGenerationError(Exception):
-    """Exception for image generation failures."""
-    pass
-
-
-# =============================================================================
-# Progress Callback Types
-# =============================================================================
-
-ProgressCallback = Union[
-    Callable[[float, str], None],
-    Callable[[float, str], Awaitable[None]]
-]
 
 
 # =============================================================================
@@ -165,7 +93,7 @@ class ImageService:
         self.host = host
         self.port = port
         self.timeout = timeout
-        self.output_dir = output_dir or Path("./outputs/images")
+        self.output_dir = (output_dir or Path("./outputs/images")).resolve()
 
         self._status: ImageStatus = ImageStatus.DISCONNECTED
         self._base_url: str = f"http://{host}:{port}"
@@ -481,29 +409,39 @@ class ImageService:
 
     # ==================== Image Generation ====================
 
+    async def generate_image(
+        self,
+        request: ImageRequest,
+        on_progress: Optional[ProgressCallback] = None,
+    ) -> str:
+        """
+        TUI/외부 호출을 위한 호환 API. get_media_ai() 위임.
+        ENABLE_MEDIA_AI=0이면 RuntimeError.
+        """
+        result = await self.generate(request, on_progress=on_progress)
+        if not getattr(result, "images", None):
+            raise ImageGenerationError("No images generated")
+        return str(Path(result.images[0]).resolve())
+
     async def generate(self, request: ImageRequest, on_progress: Optional[ProgressCallback] = None) -> ImageResult:
         """
-        [디버깅 모드] 에러가 발생하면 무조건 터미널에 내용을 출력합니다.
+        이미지 생성 실행. get_media_ai().generate_image()로 위임.
+        ENABLE_MEDIA_AI=0이면 RuntimeError.
         """
-        import traceback # 범인 추적용 도구
-        
-        # [안전 장치] 임포트가 꼬였을까 봐 여기서 다시 한번 확실하게 부름
-        from datetime import datetime
-        import random
+        from mellow_link.adapters.media.factory import get_media_ai
+        return await get_media_ai().generate_image(request, on_progress=on_progress)
 
-        # [해결책] 요청이 없으면(None) 무조건 'flux_dev_api.json'을 쓴다! (강제 고정)
-        workflow_file = request.workflow or "flux_dev_api.json"
-
-        print("\n" + "="*50)
-        print(">>> [DEBUG] generate 함수 진입 성공!")
-        print(f">>> [DEBUG] 요청 받은 워크플로우: {getattr(request, 'workflow', '없음')}")
-        logger.info(f">>> [DEBUG] 최종 결정된 워크플로우: {workflow_file}")  # <-- 여기가 None이 나오면 안 돼!
-        print("="*50 + "\n")
+    async def _execute_generation(self, request: ImageRequest, on_progress: Optional[ProgressCallback] = None) -> ImageResult:
+        """
+        ComfyUI 실제 생성 로직. 어댑터(ComfyMediaAIAdapter)에서만 호출.
+        호출 전 connect() 완료된 상태여야 함.
+        """
+        workflow_file = getattr(request, "workflow", None) or "flux_dev_api.json"
+        logger.info("[ImageService] _execute_generation() start (workflow=%s)", workflow_file)
 
         try:
-            # 1. 워크플로우 강제 지정 (여기가 핵심이야!)
-            # 요청이 없으면 무조건 'flux_dev_api.json'을 쓰도록 못 박아버려.
-            if not request.workflow:
+            # 1) 워크플로우 결정
+            if not getattr(request, "workflow", None):
                 workflow_file = "flux_dev_api.json"
             else:
                 workflow_file = request.workflow
@@ -522,78 +460,35 @@ class ImageService:
             prompt = None
 
             if workflow_file:
-                print(f">>> [DEBUG] 파일 모드 진입: {workflow_file}")
-                
-                # 경로 생성
+                logger.info("[ImageService] workflow file mode: %s", workflow_file)
+
                 workflow_path = Path("mellow_link/data/workflows") / workflow_file
-                print(f">>> [DEBUG] 파일 경로 확인: {workflow_path}")
-                # [확인용 로그] 터미널에 주소가 어떻게 찍히는지 보자.
-                print(f">>> [DEBUG] 수정된 경로: {workflow_path.absolute()}")
+                logger.info("[ImageService] workflow path: %s", str(workflow_path.absolute()))
                 if not workflow_path.exists():
-                    print(f">>> [ERROR] 파일이 없습니다!")
                     raise FileNotFoundError(f"Workflow file not found: {workflow_path}")
-                
-                # 로드 (deep copy로 원본 보호)
-                import copy
+
                 workflow_name = await self.load_workflow(workflow_path)
                 prompt = copy.deepcopy(self._workflows[workflow_name])
-                
-                # 프롬프트 내용 치환
-                print(">>> [DEBUG] 프롬프트 치환 시작")
-                negative_text = getattr(request, 'negative_prompt', '') or ''
 
-                for key, value in prompt.items():
-                    if "inputs" not in value:
-                        continue
+                try:
+                    override_resolution(prompt)
+                except Exception:
+                    pass
 
-                    class_type = value.get("class_type", "")
-                    meta_title = value.get("_meta", {}).get("title", "")
+                logger.debug("[ImageService] prompt injection start")
+                inject_prompts_into_workflow(prompt, request)
 
-                    # ====== Flux 스타일: CLIPTextEncodeFlux ======
-                    if class_type == "CLIPTextEncodeFlux":
-                        if "Positive" in meta_title:
-                            # Positive 프롬프트 주입
-                            value["inputs"]["clip_l"] = request.prompt
-                            value["inputs"]["t5xxl"] = request.prompt
-                            print(f">>> [DEBUG] Flux Positive 주입: {request.prompt[:50]}...")
-                        elif "Negative" in meta_title:
-                            # Negative 프롬프트 주입
-                            value["inputs"]["clip_l"] = negative_text
-                            value["inputs"]["t5xxl"] = negative_text
-                            print(f">>> [DEBUG] Flux Negative 주입: {negative_text[:50] if negative_text else '(empty)'}...")
-
-                    # ====== SD 스타일: CLIPTextEncode (호환성 유지) ======
-                    elif class_type == "CLIPTextEncode":
-                        if "Positive" in meta_title or meta_title == "CLIP Text Encode (Prompt)":
-                            value["inputs"]["text"] = request.prompt
-                            print(f">>> [DEBUG] SD Positive 주입: {request.prompt[:50]}...")
-                        elif "Negative" in meta_title:
-                            value["inputs"]["text"] = negative_text
-                            print(f">>> [DEBUG] SD Negative 주입: {negative_text[:50] if negative_text else '(empty)'}...")
-
-                    # ====== 시드 치환 ======
-                    if class_type == "KSampler":
-                        if request.seed == -1:
-                            seed_val = random.randint(0, 2**32 - 1)
-                            value["inputs"]["seed"] = seed_val
-                            print(f">>> [DEBUG] 랜덤 시드 생성: {seed_val}")
-                        else:
-                            value["inputs"]["seed"] = request.seed
-            
-            # ----------------------------------------------------------------
-            # 2. 코드 모드 (Fallback)
-            # ----------------------------------------------------------------
             else:
-                print(">>> [DEBUG] 코드 생성 모드 진입 (_build_prompt)")
-                prompt = self._build_prompt(request)
+                logger.info("[ImageService] fallback code prompt mode (build_prompt)")
+                prompt = build_prompt(request)
 
             # ----------------------------------------------------------------
             # 3. 실행 요청
             # ----------------------------------------------------------------
-            print(">>> [DEBUG] ComfyUI에 큐 전송 시도...")
+            logger.info("[ImageService] queueing prompt to ComfyUI...")
             prompt_id = await self._queue_prompt(prompt)
             self._current_prompt_id = prompt_id
-            print(f">>> [DEBUG] 큐 전송 성공! ID: {prompt_id}")
+            logger.info("[ImageService] queued prompt_id=%s", prompt_id)
 
             # 대기
             await asyncio.wait_for(self._execution_complete.wait(), timeout=self.timeout)
@@ -617,15 +512,8 @@ class ImageService:
             return result
 
         except Exception as e:
-            # 여기가 핵심이야! 에러가 나면 여기서 다 토해냄
-            print("\n" + "!"*50)
-            print("!!! [CRITICAL ERROR] 함수 실행 중 사망 !!!")
-            print(f"!!! 에러 타입: {type(e).__name__}")
-            print(f"!!! 에러 메시지: {str(e)}")
-            print("!!! 상세 추적(Traceback):")
-            traceback.print_exc()
-            print("!"*50 + "\n")
-            raise e # 500 에러를 던지지만, 위에서 로그는 이미 찍혔음
+            logger.exception("[ImageService] generate() failed: %s", e)
+            raise  # upstream에서 처리
 
         finally:
             self._current_prompt_id = None
@@ -1151,86 +1039,6 @@ class ImageService:
                 raise ImageGenerationError(f"Upload failed: {resp.status}")
             result = await resp.json()
             return result.get("name", "")
-
-    def _build_prompt(self, request: ImageRequest) -> Dict[str, Any]:
-        """
-        Build ComfyUI prompt from request.
-
-        Creates a basic txt2img workflow.
-
-        Args:
-            request: ImageRequest to convert
-
-        Returns:
-            ComfyUI-compatible prompt dict
-        """
-        # Generate seed if random
-        seed = request.seed
-        if seed < 0:
-            seed = random.randint(0, 2**32 - 1)
-
-        # Basic txt2img workflow
-        prompt = {
-            "3": {
-                "class_type": "KSampler",
-                "inputs": {
-                    "seed": seed,
-                    "steps": request.steps,
-                    "cfg": request.cfg_scale,
-                    "sampler_name": request.sampler_name,
-                    "scheduler": request.scheduler,
-                    "denoise": request.denoise,
-                    "model": ["4", 0],
-                    "positive": ["6", 0],
-                    "negative": ["7", 0],
-                    "latent_image": ["5", 0]
-                }
-            },
-            "4": {
-                "class_type": "CheckpointLoaderSimple",
-                "inputs": {
-                    "ckpt_name": request.model or "flux1-dev-fp8.safetensors"
-                }
-            },
-            "5": {
-                "class_type": "EmptyLatentImage",
-                "inputs": {
-                    "width": request.width,
-                    "height": request.height,
-                    "batch_size": request.batch_size
-                }
-            },
-            "6": {
-                "class_type": "CLIPTextEncode",
-                "inputs": {
-                    "text": request.prompt,
-                    "clip": ["4", 1]
-                }
-            },
-            "7": {
-                "class_type": "CLIPTextEncode",
-                "inputs": {
-                    "text": request.negative_prompt or "",
-                    "clip": ["4", 1]
-                }
-            },
-            "8": {
-                "class_type": "VAEDecode",
-                "inputs": {
-                    "samples": ["3", 0],
-                    "vae": ["4", 2]
-                }
-            },
-            "9": {
-                "class_type": "SaveImage",
-                "inputs": {
-                    "filename_prefix": f"mellow_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-                    "images": ["8", 0]
-                }
-            }
-        }
-
-        return prompt
 
     async def execute(self, request_data: Dict[str, Any]) -> ImageResult:
         """
