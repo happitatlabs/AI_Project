@@ -32,10 +32,12 @@ def get_module_registry() -> ModuleRegistry:
     from .sql_analytics.manifest import register_module as register_sql_analytics
     from .research_assistant.manifest import register_module as register_research_assistant
     from .ai_workflow_console.manifest import register_module as register_ai_workflow_console
+    from .rebuild_assistant.manifest import register_module as register_rebuild_assistant
 
     register_sql_analytics(registry)
     register_research_assistant(registry)
     register_ai_workflow_console(registry)
+    register_rebuild_assistant(registry)
 
     _registry = registry
     return registry

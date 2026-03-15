@@ -92,7 +92,7 @@
             events: [],
             activity: [],
             summary: '',
-            eventSource: null,
+            pollTimer: null,
             lastEventId: null,
         };
 
@@ -192,39 +192,52 @@
             if (state.events.length) state.lastEventId = state.events[state.events.length - 1].id;
             const finished = state.events.find(function (ev) { return ev.type === 'run_finished'; });
             state.summary = finished && finished.payload ? (finished.payload.summary || '') : '';
+            if (finished && state.snapshot) {
+                state.snapshot.status = finished.payload && finished.payload.success === false ? 'failed' : 'completed';
+                if (finished.payload && finished.payload.summary) {
+                    state.snapshot.summary = finished.payload.summary;
+                }
+            }
             renderSnapshot();
+            return !!finished;
         }
 
-        function closeStream() {
-            if (state.eventSource) {
-                state.eventSource.close();
-                state.eventSource = null;
+        function stopPolling() {
+            if (state.pollTimer) {
+                clearTimeout(state.pollTimer);
+                state.pollTimer = null;
             }
         }
 
-        function openStream(runId) {
-            closeStream();
-            const token = localStorage.getItem('authToken') || localStorage.getItem('auth_token') || '';
-            const params = new URLSearchParams();
-            if (state.lastEventId != null) params.set('last_event_id', state.lastEventId);
-            if (token) params.set('access_token', token);
-            const qs = params.toString() ? ('?' + params.toString()) : '';
-            const es = new EventSource(API + '/runs/' + encodeURIComponent(runId) + '/events' + qs);
-            es.onmessage = function (event) {
-                const payload = JSON.parse(event.data);
-                if (payload.type === 'timeout') return;
-                state.events.push(payload);
-                state.lastEventId = payload.id != null ? payload.id : state.lastEventId;
-                if (payload.type === 'run_finished' && payload.payload) state.summary = payload.payload.summary || state.summary;
-                loadSnapshot(runId).catch(console.warn);
-                if (payload.type === 'run_finished' || payload.type === 'error') closeStream();
-            };
-            es.onerror = function () {
-                if (state.snapshot && (state.snapshot.status === 'completed' || state.snapshot.status === 'failed')) {
-                    closeStream();
+        async function pollEvents(runId) {
+            try {
+                const params = new URLSearchParams();
+                params.set('format', 'json');
+                if (state.lastEventId != null) params.set('last_event_id', state.lastEventId);
+                const res = await fetch(API + '/runs/' + encodeURIComponent(runId) + '/events?' + params.toString(), {
+                    headers: authHeaders()
+                });
+                if (!res.ok) throw new Error('poll failed');
+                const data = await res.json();
+                const newEvents = Array.isArray(data.events) ? data.events : [];
+                if (newEvents.length) {
+                    newEvents.forEach(function (payload) {
+                        state.events.push(payload);
+                        state.lastEventId = payload.id != null ? payload.id : state.lastEventId;
+                        if (payload.type === 'run_finished' && payload.payload) {
+                            state.summary = payload.payload.summary || state.summary;
+                        }
+                    });
+                    await loadSnapshot(runId);
                 }
-            };
-            state.eventSource = es;
+                if (state.snapshot && (state.snapshot.status === 'completed' || state.snapshot.status === 'failed')) {
+                    stopPolling();
+                    return;
+                }
+            } catch (error) {
+                console.warn(error);
+            }
+            state.pollTimer = setTimeout(function () { pollEvents(runId); }, 1000);
         }
 
         async function useRun(runId) {
@@ -232,9 +245,16 @@
             state.events = [];
             state.summary = '';
             state.lastEventId = null;
+            stopPolling();
             await loadSnapshot(runId);
-            await loadEvents(runId);
-            if (state.snapshot && state.snapshot.status === 'running') openStream(runId);
+            const hasFinishedEvent = await loadEvents(runId);
+            if (hasFinishedEvent) {
+                await loadSnapshot(runId);
+                return;
+            }
+            if (state.snapshot && state.snapshot.status === 'running') {
+                state.pollTimer = setTimeout(function () { pollEvents(runId); }, 1000);
+            }
         }
 
         async function loadRecentRuns() {
@@ -262,7 +282,7 @@
             document.getElementById('runIdInput').value = runId;
             useRun(runId).catch(console.warn);
         });
-        window.addEventListener('beforeunload', closeStream);
+        window.addEventListener('beforeunload', stopPolling);
 
         loadRecentRuns().catch(console.warn);
         const params = new URLSearchParams(window.location.search);

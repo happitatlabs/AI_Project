@@ -214,33 +214,37 @@ async def startup() -> None:
     except Exception as e:
         logger.warning(f"[Startup] LLM Service connection failed: {e}")
 
-    # 5. Initialize Image Service
-    logger.info(f"[Startup] Connecting to ComfyUI at {settings.comfyui_url}...")
-    app_state.image_service = create_image_service(
-        host=settings.comfyui_host,
-        port=settings.comfyui_port,
-        timeout=settings.comfyui_timeout,
-        output_dir=settings.image_output_dir
-    )
-    try:
-        await app_state.image_service.connect()
-        logger.info("[Startup] Image Service connected")
-    except Exception as e:
-        logger.warning(f"[Startup] Image Service connection failed: {e}")
+    # 5. Initialize Image / Video Service
+    app_state.image_service = None
+    app_state.video_service = None
+    if settings.allow_media_ai():
+        logger.info(f"[Startup] Connecting to ComfyUI at {settings.comfyui_url}...")
+        app_state.image_service = create_image_service(
+            host=settings.comfyui_host,
+            port=settings.comfyui_port,
+            timeout=settings.comfyui_timeout,
+            output_dir=settings.image_output_dir
+        )
+        try:
+            await app_state.image_service.connect()
+            logger.info("[Startup] Image Service connected")
+        except Exception as e:
+            logger.warning(f"[Startup] Image Service connection failed: {e}")
 
-    # 5.5 Initialize Video Service
-    logger.info(f"[Startup] Initializing Video Service at {settings.comfyui_url}...")
-    app_state.video_service = create_video_service(
-        host=settings.comfyui_host,
-        port=settings.comfyui_port,
-        timeout=max(900.0, settings.comfyui_timeout),
-        output_dir=getattr(settings, "video_output_dir", settings.output_dir / "videos"),
-    )
-    try:
-        await app_state.video_service.connect()
-        logger.info("[Startup] Video Service connected")
-    except Exception as e:
-        logger.warning(f"[Startup] Video Service connection failed: {e}")
+        logger.info(f"[Startup] Initializing Video Service at {settings.comfyui_url}...")
+        app_state.video_service = create_video_service(
+            host=settings.comfyui_host,
+            port=settings.comfyui_port,
+            timeout=max(900.0, settings.comfyui_timeout),
+            output_dir=getattr(settings, "video_output_dir", settings.output_dir / "videos"),
+        )
+        try:
+            await app_state.video_service.connect()
+            logger.info("[Startup] Video Service connected")
+        except Exception as e:
+            logger.warning(f"[Startup] Video Service connection failed: {e}")
+    else:
+        logger.info("[Startup] Media AI disabled (ENABLE_MEDIA_AI=0): skipping ComfyUI image/video services")
 
     # 6. Initialize Document Service
     logger.info("[Startup] Initializing Document Service...")
@@ -343,7 +347,10 @@ async def startup() -> None:
     logger.info("=" * 60)
     logger.info("Mellow-Link Ready!")
     logger.info(f"  Ollama:   {settings.ollama_url}")
-    logger.info(f"  ComfyUI:  {settings.comfyui_url}")
+    if settings.allow_media_ai():
+        logger.info(f"  ComfyUI:  {settings.comfyui_url}")
+    else:
+        logger.info("  ComfyUI:  DISABLED (ENABLE_MEDIA_AI=0)")
     if settings.vtuber_relay_enabled == 1:
         logger.info(f"  VTuber:   {settings.avatar_ws_url}")
     else:
