@@ -297,6 +297,11 @@ MODULE_TODO_VIEW_REGISTRY = {
         {"id": "V2", "title": "처리", "raw_todo_ids": ["R3"]},
         {"id": "V3", "title": "완료", "raw_todo_ids": ["R4"]},
     ],
+    "rebuild_assistant": [
+        {"id": "V1", "title": "준비", "raw_todo_ids": ["B1", "B2"]},
+        {"id": "V2", "title": "처리", "raw_todo_ids": ["B3", "B4"]},
+        {"id": "V3", "title": "완료", "raw_todo_ids": ["B5"]},
+    ],
 }
 
 

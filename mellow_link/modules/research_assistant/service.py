@@ -102,12 +102,21 @@ class ResearchAssistantService:
         if not text:
             return ""
         text = re.sub(r"\r\n?", "\n", text)
+        text = re.sub(r"```(?:[\w-]+)?", "", text)
+        text = text.replace("```", "")
+        text = text.replace("[REDACTED_PATH]", "")
+        text = re.sub(r"\*\*(.*?)\*\*", r"\1", text)
+        text = re.sub(r"__(.*?)__", r"\1", text)
+        text = text.replace("`", "")
         text = re.sub(r"\n{3,}", "\n\n", text)
         text = re.sub(
             r"(?i)\b(research run completed|run completed|analysis completed|문서 기반 리서치 실행이 완료되었습니다\.?)\b",
             "",
             text,
         )
+        text = re.sub(r"\s*->\s*", " -> ", text)
+        text = re.sub(r"[ \t]{2,}", " ", text)
+        text = re.sub(r" ?\n ?", "\n", text)
         return text.strip()
 
     def _extract_sentences(self, text: str) -> List[str]:
@@ -189,7 +198,7 @@ class ResearchAssistantService:
                     if later_norm in ("한 줄 결론", "결론", "핵심 요약", "요약", "주요 쟁점", "쟁점", "다음 액션", "권장 조치", "추천 액션", "후속 조치"):
                         break
                     if later:
-                        items.append(later)
+                        items.extend(self._expand_compound_items(later))
                 return items
         return []
 
@@ -229,11 +238,13 @@ class ResearchAssistantService:
         def section(title: str, items: List[str]) -> str:
             lines = [title]
             for item in items:
-                lines.append(f"- {item}")
+                cleaned = self._sanitize_display_text(item)
+                if cleaned:
+                    lines.append(f"- {cleaned}")
             return "\n".join(lines)
 
         return "\n\n".join([
-            section("한 줄 결론", [conclusion]),
+            section("한 줄 결론", [self._sanitize_display_text(conclusion)]),
             section("핵심 요약", summary_items[:3]),
             section("주요 쟁점", issue_items[:3]),
             section("다음 액션", action_items[:3]),
@@ -250,5 +261,37 @@ class ResearchAssistantService:
             if key in seen:
                 continue
             seen.add(key)
-            results.append(normalized[:260])
+            cleaned = self._sanitize_display_text(normalized)
+            if cleaned:
+                results.append(cleaned[:260])
         return results
+
+    def _expand_compound_items(self, text: str) -> List[str]:
+        normalized = self._sanitize_display_text(text)
+        if not normalized:
+            return []
+        parts = re.split(r"\s+-\s+(?=[^-\s])", normalized)
+        expanded: List[str] = []
+        for part in parts:
+            candidate = part.strip(" -•\t")
+            if not candidate:
+                continue
+            expanded.append(candidate)
+        return expanded or [normalized]
+
+    def _sanitize_display_text(self, text: str) -> str:
+        cleaned = (text or "").strip()
+        if not cleaned:
+            return ""
+        cleaned = cleaned.replace("[REDACTED_PATH]", "")
+        cleaned = re.sub(r"\*\*(.*?)\*\*", r"\1", cleaned)
+        cleaned = re.sub(r"__(.*?)__", r"\1", cleaned)
+        cleaned = cleaned.replace("`", "")
+        cleaned = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", cleaned)
+        cleaned = re.sub(r"\s*\[[A-Z_]+]\s*", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        cleaned = re.sub(r"\s+([,.;:])", r"\1", cleaned)
+        cleaned = re.sub(r"\(\s+", "(", cleaned)
+        cleaned = re.sub(r"\s+\)", ")", cleaned)
+        cleaned = cleaned.strip(" -•\t")
+        return cleaned
