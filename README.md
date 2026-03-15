@@ -14,6 +14,7 @@ Mellow-Link는 공통 실행 엔진 위에 유스케이스 모듈을 얹는 로�
 - 실행 모듈
   - `sql_analytics`
   - `research_assistant`
+  - `rebuild_assistant`
   - `ai_workflow_console`
 
 ## 제품 동선
@@ -70,6 +71,8 @@ Mellow-Link는 공통 실행 엔진 위에 유스케이스 모듈을 얹는 로�
   - 자연어 질문을 SQL 분석 run으로 변환
 - [mellow_link/modules/research_assistant](/D:/AI_Project/mellow_link/modules/research_assistant)
   - 문서 업로드 후 문서 기반 분석 run 생성
+- [mellow_link/modules/rebuild_assistant](/D:/AI_Project/mellow_link/modules/rebuild_assistant)
+  - 레거시 기능을 분석해 재구성 전략과 구조화 초안 생성
 - [mellow_link/modules/ai_workflow_console](/D:/AI_Project/mellow_link/modules/ai_workflow_console)
   - 생성/워크플로우 실행 관리용 시작점
 
@@ -137,6 +140,8 @@ Mellow-Link는 공통 실행 엔진 위에 유스케이스 모듈을 얹는 로�
   - 자연어 질문 -> SQL 분석 run 생성 -> `/user-console` 결과 확인
 - `research_assistant`
   - 문서 업로드 -> 분석 run 생성 -> `/user-console` 결과 확인
+- `rebuild_assistant`
+  - 레거시 파일/입력 자산 -> 재구성 run 생성 -> `/user-console` 결과 확인
 
 최근 정리된 점:
 
@@ -144,6 +149,7 @@ Mellow-Link는 공통 실행 엔진 위에 유스케이스 모듈을 얹는 로�
 - 사용자용 진행률을 모듈별 raw todo에서 정규화된 3단계로 통일
 - `research_assistant`는 범용 tool loop 대신 direct research inference 경로 사용
 - research retry는 같은 lifecycle 안에서 재시도하고, 종료 후에만 모델 unload
+- `rebuild_assistant`는 `status_permissions` / `search_filters` / `save_validation` feature mode를 분리해 구조화 결과를 생성
 
 ## 빠른 시작
 

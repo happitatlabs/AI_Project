@@ -12,7 +12,7 @@
             <div>
                 <p class="text-xs uppercase tracking-[0.25em] text-fuchsia-300/80">Dev Console</p>
                 <h1 class="text-3xl font-semibold mt-2">특정 run 디버깅 뷰</h1>
-                <p class="text-slate-400 mt-2">raw event log, step trace, prompt/response, tool usage, error detail만 다룹니다. 다중 run 비교는 dev-dashboard에서 처리합니다.</p>
+                <p class="text-slate-400 mt-2">특정 run의 디버그 정보만 다룹니다. 비교와 운영 제어는 다른 화면에서 처리합니다.</p>
             </div>
             <nav class="flex flex-wrap gap-2 text-sm">
                 <a href="/dev-dashboard" class="px-4 py-2 rounded-full border border-white/10 hover:bg-white/5">Dashboard</a>
@@ -36,7 +36,7 @@
         </div>
 
         <main id="consoleView" class="hidden space-y-6">
-            <section class="grid xl:grid-cols-[0.95fr_1.05fr] gap-6">
+            <section class="grid xl:grid-cols-[0.8fr_0.6fr_0.6fr] gap-6">
                 <div class="rounded-3xl border border-white/10 bg-slate-900/60 p-6">
                     <div class="flex items-start justify-between gap-4">
                         <div>
@@ -67,6 +67,24 @@
                 </div>
 
                 <div class="rounded-3xl border border-white/10 bg-slate-900/60 p-6">
+                    <h2 class="text-lg font-medium mb-4">Debug Summary</h2>
+                    <div class="space-y-3 text-sm">
+                        <div class="rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-3 flex items-center justify-between gap-4">
+                            <span class="text-slate-400">Event Count</span>
+                            <span id="eventCountLabel" class="text-slate-200">-</span>
+                        </div>
+                        <div class="rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-3 flex items-center justify-between gap-4">
+                            <span class="text-slate-400">Tool Events</span>
+                            <span id="toolCountLabel" class="text-slate-200">-</span>
+                        </div>
+                        <div class="rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-3 flex items-center justify-between gap-4">
+                            <span class="text-slate-400">Prompt / Response</span>
+                            <span id="promptCountLabel" class="text-slate-200">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="rounded-3xl border border-white/10 bg-slate-900/60 p-6">
                     <h2 class="text-lg font-medium mb-4">Error Detail</h2>
                     <div id="errorBox" class="rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-4 text-sm text-slate-300 whitespace-pre-wrap break-words min-h-[13rem]">
                         에러가 없습니다.
@@ -76,14 +94,14 @@
 
             <section class="grid xl:grid-cols-2 gap-6">
                 <div class="rounded-3xl border border-white/10 bg-slate-900/60 p-6">
-                    <h2 class="text-lg font-medium mb-4">Step Trace</h2>
+                    <h2 id="stepTraceTitle" class="text-lg font-medium mb-4">Step Trace</h2>
                     <div id="stepTrace" class="space-y-3">
                         <div class="text-sm text-slate-500">step trace가 없습니다.</div>
                     </div>
                 </div>
 
                 <div class="rounded-3xl border border-white/10 bg-slate-900/60 p-6">
-                    <h2 class="text-lg font-medium mb-4">Tool Usage</h2>
+                    <h2 id="toolUsageTitle" class="text-lg font-medium mb-4">Tool Usage</h2>
                     <div id="toolUsage" class="space-y-3">
                         <div class="text-sm text-slate-500">tool usage가 없습니다.</div>
                     </div>
@@ -182,6 +200,7 @@
                     );
                 }
             }
+            document.getElementById('stepTraceTitle').textContent = 'Step Trace (' + items.length + ')';
             document.getElementById('stepTrace').innerHTML = items.length
                 ? items.join('')
                 : '<div class="text-sm text-slate-500">step trace가 없습니다.</div>';
@@ -203,6 +222,7 @@
                     );
                 }
             }
+            document.getElementById('toolUsageTitle').textContent = 'Tool Usage (' + items.length + ')';
             document.getElementById('toolUsage').innerHTML = items.length
                 ? items.join('')
                 : '<div class="text-sm text-slate-500">tool usage가 없습니다.</div>';
@@ -226,6 +246,8 @@
                     );
                 }
             }
+            const promptBtn = document.querySelector('.tab-btn[data-tab="prompts"]');
+            if (promptBtn) promptBtn.textContent = 'Prompt / Response (' + items.length + ')';
             document.getElementById('promptResponseList').innerHTML = items.length
                 ? items.join('')
                 : '<div class="text-sm text-slate-500">prompt/response 이벤트가 없습니다.</div>';
@@ -249,6 +271,12 @@
             if (!snapshot) return;
             document.getElementById('emptyState').classList.add('hidden');
             document.getElementById('consoleView').classList.remove('hidden');
+            document.getElementById('eventCountLabel').textContent = String(events.length);
+            document.getElementById('toolCountLabel').textContent = String(events.filter(function (ev) { return ev.type === 'tool_started' || ev.type === 'tool_done' || ev.type === 'operator_action'; }).length);
+            document.getElementById('promptCountLabel').textContent = String(events.filter(function (ev) {
+                const payload = ev.payload || {};
+                return Boolean(payload.prompt || payload.response || payload.messages || payload.tool_call);
+            }).length);
             renderHeader(snapshot);
             document.getElementById('errorBox').textContent = findError(events, snapshot);
             renderStepTrace(events);

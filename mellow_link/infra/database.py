@@ -1,8 +1,7 @@
 # database.py — The "Universal Adapter" Version
 from datetime import datetime, timedelta, date
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Float, Date, UniqueConstraint
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship, Session
+from sqlalchemy.orm import sessionmaker, relationship, Session, declarative_base
 from pathlib import Path
 import os
 import enum
@@ -30,8 +29,16 @@ _MELLOW_LINK_DIR = Path(__file__).parent.parent
 _FORCED_DATA_DIR = _MELLOW_LINK_DIR / "data"
 _FORCED_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
+def _normalize_sqlite_path(path: Path) -> str:
+    """Return a Windows-safe absolute path for sqlite URLs."""
+    resolved = str(path.resolve())
+    if os.name == "nt" and resolved.startswith("\\\\?\\"):
+        return resolved[4:]
+    return resolved
+
+
 DB_PATH = _FORCED_DATA_DIR / "aventurine_v3.db"
-DATABASE_URL = f"sqlite:///{DB_PATH}"
+DATABASE_URL = f"sqlite:///{_normalize_sqlite_path(DB_PATH)}"
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
