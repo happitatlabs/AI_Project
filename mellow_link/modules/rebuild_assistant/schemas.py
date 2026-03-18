@@ -29,6 +29,52 @@ class LayeredListResult(BaseModel):
     frontend: list[str] = Field(default_factory=list)
 
 
+class StatusPermissionsRules(BaseModel):
+    entities: list[str] = Field(default_factory=list)
+    roles: list[str] = Field(default_factory=list)
+    statuses: list[str] = Field(default_factory=list)
+    actions: list[str] = Field(default_factory=list)
+    role_action_matrix: list[dict] = Field(default_factory=list)
+    status_action_matrix: list[dict] = Field(default_factory=list)
+    transition_rules: list[dict] = Field(default_factory=list)
+    ui_visibility_rules: list[str] = Field(default_factory=list)
+    policy_hints: list[str] = Field(default_factory=list)
+
+
+class SearchFilterRules(BaseModel):
+    entities: list[str] = Field(default_factory=list)
+    filter_fields: list[dict] = Field(default_factory=list)
+    query_params: list[str] = Field(default_factory=list)
+    sort_rules: list[dict] = Field(default_factory=list)
+    paging_rules: list[dict] = Field(default_factory=list)
+    query_binding_rules: list[str] = Field(default_factory=list)
+    default_filters: list[str] = Field(default_factory=list)
+    result_shape_hints: list[str] = Field(default_factory=list)
+
+
+class SaveValidationRules(BaseModel):
+    entities: list[str] = Field(default_factory=list)
+    required_fields: list[str] = Field(default_factory=list)
+    field_validation_rules: list[str] = Field(default_factory=list)
+    duplicate_check_rules: list[str] = Field(default_factory=list)
+    save_guard_rules: list[str] = Field(default_factory=list)
+    exception_rules: list[str] = Field(default_factory=list)
+    command_boundary_hints: list[str] = Field(default_factory=list)
+
+
+class ExtractedRulesEnvelope(BaseModel):
+    status_permissions: StatusPermissionsRules = Field(default_factory=StatusPermissionsRules)
+    search_filters: SearchFilterRules = Field(default_factory=SearchFilterRules)
+    save_validation: SaveValidationRules = Field(default_factory=SaveValidationRules)
+
+
+class CompanyRuleProfile(BaseModel):
+    profile_name: str = "default_placeholder"
+    enabled: bool = False
+    rule_sources: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
 class StructuredRebuildResult(BaseModel):
     one_line_conclusion: str = ""
     analysis_summary: list[str] = Field(default_factory=list)
@@ -36,6 +82,7 @@ class StructuredRebuildResult(BaseModel):
     layer_reconstruction: LayeredListResult = Field(default_factory=LayeredListResult)
     recomposition_draft: LayeredListResult = Field(default_factory=LayeredListResult)
     risks: list[str] = Field(default_factory=list)
+    extracted_rules: ExtractedRulesEnvelope = Field(default_factory=ExtractedRulesEnvelope)
     confidence: float = 0.0
     missing_context: list[str] = Field(default_factory=list)
 

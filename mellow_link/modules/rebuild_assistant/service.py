@@ -3,7 +3,15 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from .schemas import LayeredListResult, RebuildAssetsPayload, StructuredRebuildResult
+from .schemas import (
+    ExtractedRulesEnvelope,
+    LayeredListResult,
+    RebuildAssetsPayload,
+    SaveValidationRules,
+    SearchFilterRules,
+    StatusPermissionsRules,
+    StructuredRebuildResult,
+)
 
 
 @dataclass
@@ -357,6 +365,250 @@ class RebuildAssistantService:
             risks.append("입력 자산이 제한적이므로 제안은 설계 초안 수준이며 추가 파일 확인이 필요합니다.")
         return risks[:4]
 
+    def extract_rules(self, prepared: PreparedRebuildInput) -> ExtractedRulesEnvelope:
+        primary = prepared.signals.primary_feature_mode
+        secondary = prepared.signals.secondary_feature_mode
+        envelope = ExtractedRulesEnvelope()
+        if primary == "status_permissions":
+            envelope.status_permissions = self.extract_status_permissions_rules(prepared)
+        elif primary == "search_filters":
+            envelope.search_filters = self.extract_search_filter_rules(prepared)
+        elif primary == "save_validation":
+            envelope.save_validation = self.extract_save_validation_rules(prepared)
+
+        if secondary == "status_permissions" and primary != "status_permissions":
+            envelope.status_permissions = self.extract_status_permissions_rules(prepared, supplemental=True)
+        elif secondary == "search_filters" and primary != "search_filters":
+            envelope.search_filters = self.extract_search_filter_rules(prepared, supplemental=True)
+        elif secondary == "save_validation" and primary != "save_validation":
+            envelope.save_validation = self.extract_save_validation_rules(prepared, supplemental=True)
+        return envelope
+
+    def extract_status_permissions_rules(
+        self,
+        prepared: PreparedRebuildInput,
+        supplemental: bool = False,
+    ) -> StatusPermissionsRules:
+        text = prepared.legacy_bundle
+        roles = [role.upper() for role in self._extract_unique_matches(text, r"\b(admin|manager|user|operator|guest|owner|reviewer|approver)\b")]
+        statuses = [status.upper() for status in self._extract_unique_matches(text, r"\b(pending|approved|rejected|draft|submitted|active|inactive|closed|cancelled)\b")]
+        actions = self._extract_unique_matches(text, r"\b(approve|reject|resubmit|cancel|submit|close|reopen)\b")
+        entities = self._rule_entities(prepared)
+
+        role_action_matrix: list[dict] = []
+        for role in roles:
+            allowed_actions = [action for action in actions if re.search(rf"{role}.*{action}|{action}.*{role}", text, flags=re.IGNORECASE)]
+            if allowed_actions:
+                role_action_matrix.append({"role": role, "allowed_actions": self._dedupe_list(allowed_actions)})
+
+        status_action_matrix: list[dict] = []
+        for status in statuses:
+            visible_actions = [action for action in actions if re.search(rf"{status}.*{action}|{action}.*{status}", text, flags=re.IGNORECASE)]
+            if visible_actions:
+                status_action_matrix.append({"status": status, "visible_actions": self._dedupe_list(visible_actions)})
+
+        transition_rules: list[dict] = []
+        for status in statuses:
+            for action in actions:
+                if not re.search(rf"{status}.*{action}|{action}.*{status}", text, flags=re.IGNORECASE):
+                    continue
+                condition = self._transition_condition_hint(text, roles, status, action)
+                transition_rules.append(
+                    {
+                        "from_status": status,
+                        "action": action,
+                        "to_status": self._infer_target_status(action, statuses),
+                        "condition": condition,
+                    }
+                )
+
+        ui_visibility_rules: list[str] = []
+        if actions and statuses:
+            for action in actions[:3]:
+                related_statuses = [
+                    status for status in statuses if re.search(rf"{status}.*{action}|{action}.*{status}", text, flags=re.IGNORECASE)
+                ]
+                related_roles = [
+                    role for role in roles if re.search(rf"{role}.*{action}|{action}.*{role}", text, flags=re.IGNORECASE)
+                ]
+                if related_statuses or related_roles:
+                    role_fragment = f" and role is {' or '.join(related_roles)}" if related_roles else ""
+                    status_fragment = f"when status is {' or '.join(related_statuses)}" if related_statuses else "when action state is satisfied"
+                    ui_visibility_rules.append(f"show {action} button only {status_fragment}{role_fragment}".strip())
+        if not ui_visibility_rules and re.search(r"<c:if|<c:choose|if\s*\(", text, flags=re.IGNORECASE):
+            ui_visibility_rules.append("conditional action visibility is embedded in JSP or server-side branches")
+
+        policy_hints: list[str] = []
+        if roles or actions or statuses:
+            policy_hints.append("extract role/action visibility into policy service")
+        if transition_rules:
+            policy_hints.append("extract state transition checks into transition policy")
+        if re.search(r"<c:if|<c:choose|if\s*\(", text, flags=re.IGNORECASE):
+            policy_hints.append("move conditional button rendering rules out of the view layer")
+
+        if supplemental:
+            role_action_matrix = role_action_matrix[:1]
+            status_action_matrix = status_action_matrix[:1]
+            transition_rules = transition_rules[:1]
+            ui_visibility_rules = ui_visibility_rules[:1]
+            policy_hints = policy_hints[:1]
+
+        return StatusPermissionsRules(
+            entities=entities,
+            roles=roles,
+            statuses=statuses,
+            actions=actions,
+            role_action_matrix=role_action_matrix,
+            status_action_matrix=status_action_matrix,
+            transition_rules=self._dedupe_dicts(transition_rules),
+            ui_visibility_rules=self._dedupe_list(ui_visibility_rules),
+            policy_hints=self._dedupe_list(policy_hints),
+        )
+
+    def extract_search_filter_rules(
+        self,
+        prepared: PreparedRebuildInput,
+        supplemental: bool = False,
+    ) -> SearchFilterRules:
+        text = prepared.legacy_bundle
+        entities = self._rule_entities(prepared)
+        query_params = self._extract_unique_matches(
+            text,
+            r"request\.getParameter\(\"([^\"]+)\"\)|@RequestParam\(\"([^\"]+)\"\)|\b(keyword|status|page|sort|dateFrom|dateTo|category|region|includeClosed|filter)\b",
+        )
+
+        filter_fields: list[dict] = []
+        for name in query_params:
+            field_type = self._infer_filter_field_type(name)
+            filter_fields.append({"name": name, "type": field_type, "required": False})
+
+        sort_rules: list[dict] = []
+        sql_text = prepared.assets.sql_queries or text
+        order_match = re.search(r"order\s+by\s+([a-z0-9_\.]+)(?:\s+(asc|desc))?", sql_text, flags=re.IGNORECASE)
+        if order_match:
+            sort_rules.append(
+                {
+                    "field": order_match.group(1).split(".")[-1],
+                    "direction": (order_match.group(2) or "asc").lower(),
+                    "default": True,
+                }
+            )
+
+        paging_rules: list[dict] = []
+        if re.search(r"\blimit\b", sql_text, flags=re.IGNORECASE):
+            paging_rules.append({"param": "limit", "style": "limit", "default": False})
+        if re.search(r"\boffset\b", sql_text, flags=re.IGNORECASE):
+            paging_rules.append({"param": "offset", "style": "offset", "default": False})
+        if any(param.lower() == "page" for param in query_params):
+            paging_rules.append({"param": "page", "style": "page", "default": False})
+
+        query_binding_rules: list[str] = []
+        if query_params:
+            query_binding_rules.append(f"use bound params for {', '.join(query_params[:4])} filters")
+        if re.search(r"\bwhere\b", sql_text, flags=re.IGNORECASE):
+            query_binding_rules.append("avoid string concatenation in WHERE clause")
+        if re.search(r"\blike\b", sql_text, flags=re.IGNORECASE):
+            query_binding_rules.append("parameterize LIKE predicates instead of inline SQL composition")
+
+        default_filters: list[str] = []
+        if any(param.lower() == "status" for param in query_params):
+            default_filters.append("preserve default status filter behavior from the legacy search form")
+        if re.search(r"includeClosed|closed", text, flags=re.IGNORECASE):
+            default_filters.append("exclude CLOSED unless includeClosed is explicitly enabled")
+
+        result_shape_hints: list[str] = []
+        columns = self._extract_select_columns(sql_text)
+        if columns:
+            result_shape_hints.append(f"list result with {', '.join(columns[:4])}")
+        elif re.search(r"\b(table|grid|list|results?)\b", text, flags=re.IGNORECASE):
+            result_shape_hints.append("list result shape is rendered as a table/grid in the legacy view")
+
+        if supplemental:
+            filter_fields = filter_fields[:2]
+            sort_rules = sort_rules[:1]
+            paging_rules = paging_rules[:1]
+            query_binding_rules = query_binding_rules[:1]
+            default_filters = default_filters[:1]
+            result_shape_hints = result_shape_hints[:1]
+
+        return SearchFilterRules(
+            entities=entities,
+            filter_fields=filter_fields,
+            query_params=query_params,
+            sort_rules=sort_rules,
+            paging_rules=paging_rules,
+            query_binding_rules=self._dedupe_list(query_binding_rules),
+            default_filters=self._dedupe_list(default_filters),
+            result_shape_hints=self._dedupe_list(result_shape_hints),
+        )
+
+    def extract_save_validation_rules(
+        self,
+        prepared: PreparedRebuildInput,
+        supplemental: bool = False,
+    ) -> SaveValidationRules:
+        text = prepared.legacy_bundle
+        entities = self._rule_entities(prepared)
+        required_fields = self._extract_unique_matches(
+            text,
+            r"if\s*\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*==\s*null|([a-zA-Z_][a-zA-Z0-9_]*)\.isBlank\(\)|required\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+        )
+        field_validation_rules: list[str] = []
+        for field in required_fields:
+            field_validation_rules.append(f"{field} must not be empty")
+        if re.search(r"validate|validator", text, flags=re.IGNORECASE):
+            field_validation_rules.append("legacy save flow includes validator-style checks before persistence")
+
+        duplicate_check_rules: list[str] = []
+        duplicate_fields = self._extract_unique_matches(text, r"existsBy([A-Z][a-zA-Z0-9_]*)|duplicate\s+([a-zA-Z_][a-zA-Z0-9_]*)")
+        for field in duplicate_fields:
+            normalized = re.sub(r"([a-z])([A-Z])", r"\1 \2", field).replace("_", " ").lower()
+            duplicate_check_rules.append(f"prevent duplicate records by {normalized}")
+        if not duplicate_check_rules and re.search(r"\b(duplicate|exists|already exists|unique|중복)\b", text, flags=re.IGNORECASE):
+            duplicate_check_rules.append("prevent duplicate records before save")
+
+        save_guard_rules: list[str] = []
+        if re.search(r"\b(forbidden|cannot save|blocked|guard)\b", text, flags=re.IGNORECASE):
+            save_guard_rules.append("apply pre-save guard before persistence")
+        if re.search(r"\b(save|insert|update|submit|persist)\b", text, flags=re.IGNORECASE) and (
+            required_fields or duplicate_check_rules or re.search(r"throw\s+new", text, flags=re.IGNORECASE)
+        ):
+            save_guard_rules.append("run validation and duplicate guards before persistence")
+        if re.search(r"\b(role|admin|manager)\b", text, flags=re.IGNORECASE) and re.search(r"\b(save|insert|update|submit)\b", text, flags=re.IGNORECASE):
+            save_guard_rules.append("enforce role-based save restrictions before save")
+        if re.search(r"\b(status|state|pending|approved|closed|draft)\b", text, flags=re.IGNORECASE) and re.search(r"\b(save|update|submit)\b", text, flags=re.IGNORECASE):
+            save_guard_rules.append("enforce status-change restrictions before save")
+
+        exception_rules = self._extract_unique_matches(
+            text,
+            r"throw\s+new\s+([A-Za-z]+Exception)|\b(IllegalStateException|ValidationException|SecurityException|IllegalArgumentException)\b",
+        )
+        exception_rules = [f"raise {rule}" for rule in exception_rules]
+
+        command_boundary_hints: list[str] = []
+        if required_fields or duplicate_check_rules or save_guard_rules:
+            command_boundary_hints.append("split validation from persistence")
+            command_boundary_hints.append("use command DTO and validator")
+        if exception_rules:
+            command_boundary_hints.append("normalize save-time exceptions into explicit validation results")
+
+        if supplemental:
+            field_validation_rules = field_validation_rules[:2]
+            duplicate_check_rules = duplicate_check_rules[:1]
+            save_guard_rules = save_guard_rules[:1]
+            exception_rules = exception_rules[:1]
+            command_boundary_hints = command_boundary_hints[:1]
+
+        return SaveValidationRules(
+            entities=entities,
+            required_fields=required_fields,
+            field_validation_rules=self._dedupe_list(field_validation_rules),
+            duplicate_check_rules=self._dedupe_list(duplicate_check_rules),
+            save_guard_rules=self._dedupe_list(save_guard_rules),
+            exception_rules=self._dedupe_list(exception_rules),
+            command_boundary_hints=self._dedupe_list(command_boundary_hints),
+        )
+
     def estimate_confidence(self, prepared: PreparedRebuildInput) -> float:
         score = 0.1
         score += min(0.18, len(prepared.assets.source_code) / 6000)
@@ -387,6 +639,7 @@ class RebuildAssistantService:
 
     def build_result(self, prepared: PreparedRebuildInput) -> StructuredRebuildResult:
         confidence = self.estimate_confidence(prepared)
+        extracted_rules = self.extract_rules(prepared)
         return StructuredRebuildResult(
             one_line_conclusion=self._build_conclusion(prepared, confidence),
             analysis_summary=self.analyze_assets(prepared),
@@ -394,6 +647,7 @@ class RebuildAssistantService:
             layer_reconstruction=self.build_layer_reconstruction(prepared),
             recomposition_draft=self.build_recomposition_draft(prepared),
             risks=self.build_risks(prepared),
+            extracted_rules=extracted_rules,
             confidence=confidence,
             missing_context=list(prepared.missing_context),
         )
@@ -505,6 +759,64 @@ class RebuildAssistantService:
 
     def _primary_concept(self, prepared: PreparedRebuildInput) -> str:
         return prepared.signals.concepts[0] if prepared.signals.concepts else "legacy"
+
+    def _rule_entities(self, prepared: PreparedRebuildInput) -> list[str]:
+        resource = self._singular_resource(self._resource_name(prepared))
+        if resource:
+            return [resource]
+        concept = self._primary_concept(prepared)
+        normalized = re.sub(r"[^a-z0-9]+", "_", concept.lower()).strip("_")
+        return [normalized or "legacy_feature"]
+
+    def _transition_condition_hint(self, text: str, roles: list[str], status: str, action: str) -> str:
+        matched_roles = [role for role in roles if re.search(rf"{role}.*{action}|{action}.*{role}", text, flags=re.IGNORECASE)]
+        if matched_roles:
+            return " or ".join(role.lower() for role in matched_roles)
+        if re.search(r"<c:if|<c:choose|if\s*\(", text, flags=re.IGNORECASE):
+            return "legacy conditional branch"
+        return f"status is {status}"
+
+    def _infer_target_status(self, action: str, statuses: list[str]) -> str:
+        mapping = {
+            "approve": "APPROVED",
+            "reject": "REJECTED",
+            "resubmit": "PENDING",
+            "submit": "SUBMITTED",
+            "close": "CLOSED",
+            "reopen": "PENDING",
+            "cancel": "CANCELLED",
+        }
+        candidate = mapping.get(action.lower())
+        if candidate and candidate in statuses:
+            return candidate
+        return candidate or "UNKNOWN"
+
+    def _infer_filter_field_type(self, name: str) -> str:
+        lowered = name.lower()
+        if lowered in {"includeclosed", "enabled", "active", "visible"}:
+            return "checkbox"
+        if "date" in lowered:
+            return "date"
+        if lowered in {"page", "limit", "offset"}:
+            return "number"
+        return "text"
+
+    def _extract_select_columns(self, sql_text: str) -> list[str]:
+        if not sql_text:
+            return []
+        match = re.search(r"select\s+(.*?)\s+from\s", sql_text, flags=re.IGNORECASE | re.DOTALL)
+        if not match:
+            return []
+        segment = match.group(1)
+        if "*" in segment:
+            return []
+        columns: list[str] = []
+        for raw in segment.split(","):
+            token = raw.strip().split()[-1].split(".")[-1]
+            token = token.strip("`\"")
+            if token:
+                columns.append(token.lower())
+        return self._dedupe_list(columns)
 
     def _score_feature_modes(
         self,
@@ -728,3 +1040,41 @@ class RebuildAssistantService:
 
     def _match_count(self, text: str, pattern: str) -> int:
         return len(re.findall(pattern, text, flags=re.IGNORECASE))
+
+    def _extract_unique_matches(self, text: str, pattern: str) -> list[str]:
+        matches = re.findall(pattern, text, flags=re.IGNORECASE)
+        results: list[str] = []
+        for match in matches:
+            if isinstance(match, tuple):
+                for item in match:
+                    cleaned = (item or "").strip()
+                    if cleaned:
+                        results.append(cleaned)
+                        break
+            else:
+                cleaned = (match or "").strip()
+                if cleaned:
+                    results.append(cleaned)
+        return self._dedupe_list(results)
+
+    def _dedupe_list(self, items: list[str]) -> list[str]:
+        seen: set[str] = set()
+        output: list[str] = []
+        for item in items:
+            key = item.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            output.append(item)
+        return output
+
+    def _dedupe_dicts(self, items: list[dict]) -> list[dict]:
+        seen: set[str] = set()
+        output: list[dict] = []
+        for item in items:
+            key = repr(sorted(item.items()))
+            if key in seen:
+                continue
+            seen.add(key)
+            output.append(item)
+        return output

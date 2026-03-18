@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
+from mellow_chat_runtime import app_state
 from mellow_chat_runtime.runtime.adapter import RuntimeAdapter
 from mellow_chat_runtime.runtime.schemas import StatusHealth, StatusResponse, StatusRuntime, TurnMeta, TurnPayload, TurnRequest, TurnResponse, TurnState
 
@@ -15,16 +16,39 @@ class LLMOnlyAdapter(RuntimeAdapter):
 
     async def turn(self, req: TurnRequest, trace_id: Optional[str] = None) -> TurnResponse:
         trace_id = trace_id or f"trc_{uuid.uuid4().hex[:8]}"
+        effective_tier = app_state.resolve_effective_tier(req.context.model_tier_requested if req.context else None)
+        mode = app_state.tier_to_mode(effective_tier)
         text = req.input.text
         if self._llm is not None:
-            result = await self._llm.generate(prompt=text, mode="fast")
+            result = await self._llm.generate(prompt=text, mode=mode)
             text = result.content
+        state_version = await app_state.next_state_version(req.session_id)
+        await app_state.record_runtime_success(runtime_impl="llm-only")
         return TurnResponse(
-            turn=TurnPayload(id=f"turn_{uuid.uuid4().hex[:8]}", speech=text, passage=None),
-            state=TurnState(session_id=req.session_id, system_state="IDLE", model_tier_effective="free"),
+            turn=TurnPayload(
+                id=f"turn_{uuid.uuid4().hex[:8]}",
+                speech=text,
+                passage=None,
+                ooc=None,
+                clarify=None,
+            ),
+            state=TurnState(
+                session_id=req.session_id,
+                state_version=state_version,
+                system_state="IDLE",
+                model_tier_effective=effective_tier,
+            ),
             meta=TurnMeta(trace_id=trace_id, runtime_impl="llm-only", latency_ms=0.0),
         )
 
     async def status(self) -> StatusResponse:
         uptime = (datetime.utcnow() - self._started).total_seconds()
-        return StatusResponse(runtime=StatusRuntime(impl="llm-only", version="0.1", uptime_sec=uptime), health=StatusHealth(system_state="IDLE"))
+        snapshot = await app_state.get_runtime_health_snapshot()
+        return StatusResponse(
+            runtime=StatusRuntime(impl="llm-only", version="0.1", uptime_sec=uptime),
+            health=StatusHealth(
+                system_state="IDLE",
+                last_error=snapshot["last_error"],
+                degraded=bool(snapshot["degraded"]),
+            ),
+        )

@@ -207,7 +207,7 @@ class ExperienceHelper:
 
             experience_id = await self._archiver.archive(task_data)
             if experience_id:
-                logger.debug(f"[AgentBrain] Experience archived: {experience_id}")
+                logger.info("[ExperienceHelper] experience_archived experience_id=%s", experience_id)
 
                 # BENCH_PROFILE 모드에서는 인사이트 생성 비활성화
                 try:
@@ -241,7 +241,7 @@ class ExperienceHelper:
 
         except Exception as e:
             # 아카이빙 실패는 로그만 남기고 메인 플로우는 계속 진행
-            logger.warning(f"[AgentBrain] Failed to archive experience: {e}")
+            logger.warning("[ExperienceHelper] archive_experience_failed error=%s", e)
 
     async def _trigger_analysis(self) -> None:
         """

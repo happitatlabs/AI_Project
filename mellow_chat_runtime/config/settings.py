@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     api_host: str = Field(default="127.0.0.1")
     api_port: int = Field(default=8010)
     api_debug: bool = Field(default=False)
+    runtime_impl: str = Field(default="engine-backed")
 
     ollama_host: str = Field(default="localhost")
     ollama_port: int = Field(default=11434)

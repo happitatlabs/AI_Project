@@ -2,23 +2,19 @@
 Services Module - Mellow-Link
 
 중요:
-  이 패키지는 일부 서비스(예: auth/crypto/RAG/DB)가 옵션 의존성(bcrypt 등)을 가질 수 있다.
-  따라서 __init__.py에서 "모든 서비스"를 즉시 import 하면,
-  ImageService/VideoService만 필요한 환경에서도 불필요한 ImportError가 발생한다.
+  이 패키지는 서비스별로 서로 다른 옵션 의존성을 가진다.
+  따라서 __init__.py에서 서비스를 즉시 import 하지 않고,
+  필요한 시점에만 지연 import 한다.
 
 정책:
-  - ImageService / VideoService는 항상 즉시 import (TUI 핵심 경로)
-  - 그 외 서비스는 attribute access 시점에만 지연 import (PEP 562)
+  - media 계열(ImageService / VideoService)도 lazy import
+  - 나머지 옵션 서비스도 attribute access 시점에만 지연 import (PEP 562)
 """
 
 from __future__ import annotations
 
 from importlib import import_module
 from typing import Any, Dict, Tuple
-
-# --- Always-available core services (TUI needs only these) ---
-from .image_service import ImageService, create_image_service
-from .video_service import VideoService, create_video_service
 
 __all__ = [
     "ImageService",
@@ -29,6 +25,11 @@ __all__ = [
 
 # --- Optional services (lazy) ---
 _OPTIONAL_EXPORTS: Dict[str, Tuple[str, str]] = {
+    # Media
+    "ImageService": ("mellow_link.media.services.image_service", "ImageService"),
+    "create_image_service": ("mellow_link.media.services.image_service", "create_image_service"),
+    "VideoService": ("mellow_link.media.services.video_service", "VideoService"),
+    "create_video_service": ("mellow_link.media.services.video_service", "create_video_service"),
     # LLM
     "LLMService": (".llm_service", "LLMService"),
     "create_llm_service": (".llm_service", "create_llm_service"),
@@ -54,6 +55,14 @@ _OPTIONAL_EXPORTS: Dict[str, Tuple[str, str]] = {
     "set_rag_service": (".rag_service", "set_rag_service"),
 }
 
+_LEGACY_SUBMODULES: Dict[str, str] = {
+    "image_service": ".image_service",
+    "video_service": ".video_service",
+    "image_workflow": ".image_workflow",
+    "image_schemas": ".image_schemas",
+    "video_processor": ".video_processor",
+}
+
 
 def __getattr__(name: str) -> Any:
     """
@@ -63,6 +72,9 @@ def __getattr__(name: str) -> Any:
     """
     target = _OPTIONAL_EXPORTS.get(name)
     if not target:
+        module_name = _LEGACY_SUBMODULES.get(name)
+        if module_name:
+            return import_module(module_name, __name__)
         raise AttributeError(name)
     module_name, attr_name = target
     try:

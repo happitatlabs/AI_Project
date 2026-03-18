@@ -14,6 +14,7 @@ MANIFEST = ModuleManifest(
     run_kind="workflow_run",
     start_path="/modules/ai_workflow_console",
     icon="WF",
+    visible_in_ui=False,
 )
 
 

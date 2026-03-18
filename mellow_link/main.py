@@ -59,11 +59,16 @@ from mellow_link.infra import (
 
 from mellow_link.services import (
     LLMService, create_llm_service,
-    ImageService, create_image_service,
-    VideoService, create_video_service,
     DocumentService, DocumentRequest, DocumentType, create_document_service,
     VTuberRelayService, create_vtuber_relay, get_vtuber_relay, set_vtuber_relay,
     RAGService, RAGSearchResult, create_rag_service, get_rag_service, set_rag_service,
+)
+from mellow_link.media import (
+    initialize_media_services,
+    register_media_services,
+    shutdown_media_services,
+    include_media_router,
+    media_runtime_lines,
 )
 
 from mellow_link.utils import (
@@ -215,36 +220,7 @@ async def startup() -> None:
         logger.warning(f"[Startup] LLM Service connection failed: {e}")
 
     # 5. Initialize Image / Video Service
-    app_state.image_service = None
-    app_state.video_service = None
-    if settings.allow_media_ai():
-        logger.info(f"[Startup] Connecting to ComfyUI at {settings.comfyui_url}...")
-        app_state.image_service = create_image_service(
-            host=settings.comfyui_host,
-            port=settings.comfyui_port,
-            timeout=settings.comfyui_timeout,
-            output_dir=settings.image_output_dir
-        )
-        try:
-            await app_state.image_service.connect()
-            logger.info("[Startup] Image Service connected")
-        except Exception as e:
-            logger.warning(f"[Startup] Image Service connection failed: {e}")
-
-        logger.info(f"[Startup] Initializing Video Service at {settings.comfyui_url}...")
-        app_state.video_service = create_video_service(
-            host=settings.comfyui_host,
-            port=settings.comfyui_port,
-            timeout=max(900.0, settings.comfyui_timeout),
-            output_dir=getattr(settings, "video_output_dir", settings.output_dir / "videos"),
-        )
-        try:
-            await app_state.video_service.connect()
-            logger.info("[Startup] Video Service connected")
-        except Exception as e:
-            logger.warning(f"[Startup] Video Service connection failed: {e}")
-    else:
-        logger.info("[Startup] Media AI disabled (ENABLE_MEDIA_AI=0): skipping ComfyUI image/video services")
+    await initialize_media_services(settings)
 
     # 6. Initialize Document Service
     logger.info("[Startup] Initializing Document Service...")
@@ -317,9 +293,7 @@ async def startup() -> None:
     app_state.orchestrator.register_service("llm", app_state.llm_service)
     app_state.orchestrator.register_service("chat", app_state.llm_service)
     app_state.orchestrator.register_service("text", app_state.llm_service)
-    app_state.orchestrator.register_service("image", app_state.image_service)
-    app_state.orchestrator.register_service("comfyui", app_state.image_service)
-    app_state.orchestrator.register_service("video", app_state.video_service)
+    register_media_services()
     app_state.orchestrator.register_service("document", app_state.doc_service)
 
     # 9. Initialize VTuber Relay Service
@@ -347,10 +321,8 @@ async def startup() -> None:
     logger.info("=" * 60)
     logger.info("Mellow-Link Ready!")
     logger.info(f"  Ollama:   {settings.ollama_url}")
-    if settings.allow_media_ai():
-        logger.info(f"  ComfyUI:  {settings.comfyui_url}")
-    else:
-        logger.info("  ComfyUI:  DISABLED (ENABLE_MEDIA_AI=0)")
+    for line in media_runtime_lines(settings):
+        logger.info(line)
     if settings.vtuber_relay_enabled == 1:
         logger.info(f"  VTuber:   {settings.avatar_ws_url}")
     else:
@@ -520,13 +492,8 @@ async def shutdown() -> None:
         await app_state.llm_service.disconnect()
         logger.info("[Shutdown] LLM Service disconnected")
 
-    if app_state.image_service:
-        await app_state.image_service.disconnect()
-        logger.info("[Shutdown] Image Service disconnected")
-
-    if app_state.video_service:
-        await app_state.video_service.disconnect()
-        logger.info("[Shutdown] Video Service disconnected")
+    for service_name in await shutdown_media_services():
+        logger.info("[Shutdown] %s disconnected", service_name)
 
     if app_state.doc_service:
         await app_state.doc_service.shutdown()
@@ -652,6 +619,7 @@ if FASTAPI_AVAILABLE:
     app.include_router(folders_router)
     app.include_router(chat_router)
     app.include_router(generation_router)
+    include_media_router(app, app_state.settings or get_settings())
     app.include_router(system_router)
     app.include_router(avatar_router)
     app.include_router(admin_router)
