@@ -13,7 +13,7 @@ from mellow_chat_runtime.core.domain_lookup_store import get_domain_store
 from mellow_chat_runtime.core.orchestrator import Orchestrator
 from mellow_chat_runtime.infra.database import init_db
 from mellow_chat_runtime.routers.chat import router as chat_router
-from mellow_chat_runtime.routers.runtime import router as runtime_router
+from mellow_chat_runtime.routers.runtime import install_runtime_exception_handlers, router as runtime_router
 from mellow_chat_runtime.services.llm_service import create_llm_service
 
 logger = logging.getLogger(__name__)
@@ -68,6 +68,7 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+install_runtime_exception_handlers(app)
 
 app.add_middleware(
     CORSMiddleware,

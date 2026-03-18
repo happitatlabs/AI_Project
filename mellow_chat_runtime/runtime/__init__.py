@@ -5,6 +5,7 @@ from mellow_chat_runtime.runtime.schemas import (
     ErrorBody,
     ErrorDetail,
     StatusResponse,
+    TurnClarify,
     TurnRequest,
     TurnResponse,
 )
@@ -25,6 +26,7 @@ __all__ = [
     "StatusResponse",
     "ErrorBody",
     "ErrorDetail",
+    "TurnClarify",
     "get_runtime_adapter",
     "_new_trace_id",
 ]

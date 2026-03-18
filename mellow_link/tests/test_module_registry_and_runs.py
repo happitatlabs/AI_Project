@@ -59,7 +59,8 @@ def test_modules_api_lists_registered_modules(client):
     assert res.status_code == 200
     modules = res.json()["modules"]
     ids = {m["module_id"] for m in modules}
-    assert {"sql_analytics", "research_assistant", "ai_workflow_console", "rebuild_assistant"}.issubset(ids)
+    assert {"sql_analytics", "research_assistant", "rebuild_assistant"}.issubset(ids)
+    assert "ai_workflow_console" not in ids
 
 
 def test_sql_analytics_run_has_module_metadata(client):
@@ -326,6 +327,7 @@ String sql = "SELECT * FROM orders WHERE user_id = ?";
         "layer_reconstruction",
         "recomposition_draft",
         "risks",
+        "extracted_rules",
         "confidence",
         "missing_context",
     }
@@ -338,6 +340,7 @@ String sql = "SELECT * FROM orders WHERE user_id = ?";
     assert 0.0 <= dumped["confidence"] <= 1.0
     assert set(dumped["layer_reconstruction"].keys()) == {"database", "backend", "frontend"}
     assert set(dumped["recomposition_draft"].keys()) == {"database", "backend", "frontend"}
+    assert set(dumped["extracted_rules"].keys()) == {"status_permissions", "search_filters", "save_validation"}
     assert all(isinstance(dumped["layer_reconstruction"][key], list) for key in ("database", "backend", "frontend"))
     assert all(isinstance(dumped["recomposition_draft"][key], list) for key in ("database", "backend", "frontend"))
 
@@ -384,6 +387,23 @@ if ("PENDING".equals(status)) { showRejectButton = true; }
     assert any("status_permissions" in item for item in result.analysis_summary)
     assert any("role/status/action visibility" in item for item in result.rebuild_strategy)
     assert any("policy" in item.lower() for item in result.recomposition_draft.backend)
+    rules = result.extracted_rules.status_permissions.model_dump()
+    assert set(rules.keys()) == {
+        "entities",
+        "roles",
+        "statuses",
+        "actions",
+        "role_action_matrix",
+        "status_action_matrix",
+        "transition_rules",
+        "ui_visibility_rules",
+        "policy_hints",
+    }
+    assert rules["entities"]
+    assert "ADMIN".lower() in [item.lower() for item in rules["roles"]]
+    assert rules["actions"]
+    assert rules["transition_rules"]
+    assert rules["ui_visibility_rules"] or rules["policy_hints"]
 
 
 def test_rebuild_assistant_search_filters_branching():
@@ -420,6 +440,22 @@ LIMIT ? OFFSET ?
     assert any("OrderSearchResultsTable" in item for item in result.recomposition_draft.frontend)
     assert any("order_query_mapper" in item for item in result.recomposition_draft.backend)
     assert "검색 필터 상태" in result.one_line_conclusion
+    rules = result.extracted_rules.search_filters.model_dump()
+    assert set(rules.keys()) == {
+        "entities",
+        "filter_fields",
+        "query_params",
+        "sort_rules",
+        "paging_rules",
+        "query_binding_rules",
+        "default_filters",
+        "result_shape_hints",
+    }
+    assert rules["entities"]
+    assert rules["filter_fields"]
+    assert rules["query_params"]
+    assert rules["query_binding_rules"]
+    assert rules["paging_rules"] or rules["sort_rules"] or rules["default_filters"] or rules["result_shape_hints"]
 
 
 def test_rebuild_assistant_save_validation_branching():
@@ -446,6 +482,21 @@ repository.save(entity);
     assert any("save guard" in item.lower() or "duplicate check" in item.lower() for item in result.rebuild_strategy)
     assert any("CommandDTO" in item or "validator" in item.lower() for item in result.recomposition_draft.backend)
     assert "저장 검증과 중복 체크" in result.one_line_conclusion
+    rules = result.extracted_rules.save_validation.model_dump()
+    assert set(rules.keys()) == {
+        "entities",
+        "required_fields",
+        "field_validation_rules",
+        "duplicate_check_rules",
+        "save_guard_rules",
+        "exception_rules",
+        "command_boundary_hints",
+    }
+    assert rules["entities"]
+    assert rules["required_fields"]
+    assert rules["field_validation_rules"]
+    assert rules["duplicate_check_rules"]
+    assert rules["save_guard_rules"]
 
 
 def test_rebuild_assistant_confidence_varies_with_signal_coverage():
@@ -796,9 +847,55 @@ def test_rebuild_assistant_runner_emits_structured_result(monkeypatch):
     assert payload["run_kind"] == "rebuild_plan"
     assert isinstance(payload["structured_result"]["analysis_summary"], list)
     assert set(payload["structured_result"]["layer_reconstruction"].keys()) == {"database", "backend", "frontend"}
+    assert set(payload["structured_result"]["extracted_rules"].keys()) == {"status_permissions", "search_filters", "save_validation"}
     assert isinstance(payload["confidence"], float)
     todo_ids = [event["payload"].get("todo_id") for event in events if event["type"] == "todo_started"]
     assert todo_ids == ["B1", "B2", "B3", "B4", "B5"]
+
+
+def test_rebuild_assistant_extracted_rules_shape_is_kept_for_sparse_input():
+    from mellow_link.modules.rebuild_assistant.schemas import RebuildAssetsPayload
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+
+    svc = RebuildAssistantService()
+    prepared = svc.prepare_input(
+        goal="이 기능을 재구성해줘",
+        assets=RebuildAssetsPayload(source_code="<% legacy %>"),
+    )
+    result = svc.build_result(prepared)
+    dumped = result.extracted_rules.model_dump()
+
+    assert set(dumped.keys()) == {"status_permissions", "search_filters", "save_validation"}
+    assert set(dumped["status_permissions"].keys()) == {
+        "entities",
+        "roles",
+        "statuses",
+        "actions",
+        "role_action_matrix",
+        "status_action_matrix",
+        "transition_rules",
+        "ui_visibility_rules",
+        "policy_hints",
+    }
+    assert set(dumped["search_filters"].keys()) == {
+        "entities",
+        "filter_fields",
+        "query_params",
+        "sort_rules",
+        "paging_rules",
+        "query_binding_rules",
+        "default_filters",
+        "result_shape_hints",
+    }
+    assert set(dumped["save_validation"].keys()) == {
+        "entities",
+        "required_fields",
+        "field_validation_rules",
+        "duplicate_check_rules",
+        "save_guard_rules",
+        "exception_rules",
+        "command_boundary_hints",
+    }
 
 
 def _run_rebuild_case(monkeypatch, *, run_id: str, goal: str, assets, temp_context: str = ""):
@@ -866,9 +963,16 @@ if ("REJECTED".equals(status)) { showResubmitButton = true; }
         "layer_reconstruction",
         "recomposition_draft",
         "risks",
+        "extracted_rules",
         "confidence",
         "missing_context",
     }
+    rules = structured["extracted_rules"]["status_permissions"]
+    assert rules["roles"]
+    assert rules["statuses"]
+    assert rules["actions"]
+    assert rules["transition_rules"]
+    assert set(structured["extracted_rules"].keys()) == {"status_permissions", "search_filters", "save_validation"}
     assert "정책" in structured["one_line_conclusion"] or "액션" in structured["one_line_conclusion"] or "상태" in structured["one_line_conclusion"]
 
 
@@ -907,9 +1011,15 @@ LIMIT ? OFFSET ?
         "layer_reconstruction",
         "recomposition_draft",
         "risks",
+        "extracted_rules",
         "confidence",
         "missing_context",
     }
+    rules = structured["extracted_rules"]["search_filters"]
+    assert rules["filter_fields"]
+    assert rules["query_params"]
+    assert rules["query_binding_rules"]
+    assert rules["sort_rules"] or rules["default_filters"] or rules["result_shape_hints"]
     conclusion = structured["one_line_conclusion"]
     assert "검색" in conclusion or "필터" in conclusion or "쿼리" in conclusion
 
@@ -941,9 +1051,14 @@ repository.save(entity);
         "layer_reconstruction",
         "recomposition_draft",
         "risks",
+        "extracted_rules",
         "confidence",
         "missing_context",
     }
+    rules = structured["extracted_rules"]["save_validation"]
+    assert rules["required_fields"] or rules["field_validation_rules"]
+    assert rules["duplicate_check_rules"]
+    assert rules["save_guard_rules"]
     conclusion = structured["one_line_conclusion"]
     assert "검증" in conclusion or "저장" in conclusion or "중복" in conclusion
 

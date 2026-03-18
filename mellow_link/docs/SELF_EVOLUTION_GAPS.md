@@ -36,6 +36,128 @@
 
 ---
 
+## 2.1-A. 운영 스위치 우선순위
+
+운영 스위치는 아래 순서로 검토한다.
+
+1. **메모리 아카이빙 활성화 검토**
+2. **ENABLE_SCHEDULER 검토**
+3. **ENABLE_EVOLUTION_TRIGGER 검토**
+
+우선순위 이유:
+
+- **메모리 아카이빙**은 turn 완료 후 기록 경로만 안정적이면 되고, 시스템을 스스로 흔드는 힘이 가장 약하다.
+- **Scheduler**는 주기 실행이라 관측 가능성만 있으면 상대적으로 다루기 쉽지만, tick 폭주·중복 실행·롤백 절차가 필요하다.
+- **Evolution Trigger**는 비용, 실패, 자동 적용 범위, 예측 불가능한 상태 변경이 가장 많이 몰리므로 마지막이다.
+
+---
+
+## 2.1-B. 운영 스위치 활성화 조건
+
+운영 스위치는 코드보다 **켜는 조건**을 먼저 고정한다.
+
+### 메모리 아카이빙
+
+| 항목 | 기준 |
+|------|------|
+| 운영 기본값 | **off** 로 취급 |
+| 현재 코드 상태 | 별도 env 스위치는 아직 없음. `AgentBrain(enable_memory_archiving=True)` + archiver 초기화 성공 시 경로가 살아난다. |
+| 활성화 환경 | 로컬, 스테이징 우선 |
+| 롤백 방법 | `enable_memory_archiving=False`로 생성하거나 archiver 초기화 경로 차단 |
+| 자동 중지 조건 | 기록 실패 연속 발생 시 비활성화 검토. 최소 기준: 기록 실패가 사용자 응답 성공/실패 판단과 섞이면 안 됨 |
+| 추가 조건 | 아카이빙 실패가 turn 성공 자체를 깨지 않아야 하며, `last_error/degraded` 기준과 분리되어야 함 |
+
+코드 기준 확인:
+
+- 아카이빙 실패는 메인 플로우를 깨지 않도록 `warning`만 남긴다: `core/agent_experience.py`
+- 경험 장부 기록도 비동기이며 실패 시 `debug` 로그만 남긴다: `core/agent_experience.py`
+
+### 스케줄러
+
+| 항목 | 기준 |
+|------|------|
+| 기본값 | **off** |
+| 현재 코드 상태 | `Settings.enable_scheduler=False` |
+| 활성화 환경 | 단일 인스턴스 우선 |
+| 롤백 방법 | `ENABLE_SCHEDULER=0` 또는 env off 후 재시작 |
+| 자동 중지 조건 | tick 실패율 임계 초과, 중복 실행 감지, 시작/중지 루프 발생 시 off 유지 |
+| 추가 조건 | tick 로그와 중복 실행 방지 근거가 있어야 함 |
+
+코드 기준 확인:
+
+- startup에서 `settings.enable_scheduler`가 true일 때만 `SchedulerService`를 시작한다: `main.py`
+
+### Evolution Trigger
+
+| 항목 | 기준 |
+|------|------|
+| 기본값 | **off** |
+| 현재 코드 상태 | `Settings.enable_evolution_trigger=False`, `EVOLUTION_PROTOCOL.json`도 별도 게이트 사용 |
+| 활성화 환경 | 스테이징 한정 |
+| 롤백 방법 | `ENABLE_EVOLUTION_TRIGGER=0` 또는 프로토콜의 `evolution_trigger.enabled=false` |
+| 자동 중지 조건 | 비용 한도 초과, 연속 실패, patch 적용 실패, 검증 실패 시 off 유지 |
+| 추가 조건 | 자동 적용 범위와 비용 상한, 실패 시 중단 규칙이 먼저 고정되어야 함 |
+
+코드 기준 확인:
+
+- 설정 기본값은 off다: `config/settings.py`
+- 실제 자가발전 tick은 Scheduler 경유로 연결된다.
+
+---
+
+## 2.1-C. 1차 검토 범위
+
+### O-Review A. 메모리 아카이빙 검토
+
+- runtime turn 완료 후 경험 축적 경로가 실제로 존재하는지 확인
+- 기록 실패가 사용자 응답 경로와 `degraded` 판단을 오염시키지 않는지 확인
+- 최소 로그와 최소 테스트 추가
+
+현재 확인 결과:
+
+- `mellow_link`의 `AgentBrain` 경로에는 경험 축적 경로가 있다.
+  - `archive_experience()`와 `record_experience_ledger()`가 존재한다.
+  - 실패 시 예외를 다시 올리지 않고 로그만 남긴다.
+- `mellow_chat_runtime`의 `/runtime/turn` 경로에는 별도 메모리 아카이빙 연결이 아직 없다.
+  - 즉, 현재 Runtime API 성공 turn이 곧바로 experience ledger 적재로 이어지지는 않는다.
+  - Runtime에 메모리 아카이빙을 붙이려면 별도 브리지 작업이 필요하다.
+- 현재 기준으로 아카이빙 실패와 Runtime `degraded/last_error`는 분리되어 있다.
+  - 아카이빙 실패는 `ExperienceHelper` 경고 로그로만 남고,
+  - Runtime `degraded`는 Runtime 요청/응답 실패 축에서만 관리된다.
+
+### O-Review B. 스케줄러 검토
+
+- tick 로그 존재 확인
+- 중복 실행 방지 확인
+- 롤백 절차 문서화
+- 기본값은 계속 off 유지
+
+현재 확인 결과:
+
+- 기본값은 여전히 `off`다. `Settings.enable_scheduler=False`.
+- tick 로그는 이미 존재한다.
+  - 시작/정지
+  - pending task 발견
+  - task 실행/완료/실패
+- 중복 방지는 두 층이다.
+  - 서비스 중복 기동: `_is_running` 가드
+  - 기본 예약 태스크 중복 등록: task name 중복 검사
+- 롤백은 `ENABLE_SCHEDULER=0` 후 재시작을 기본 절차로 유지한다.
+
+### O-Review C. Evolution Trigger 검토
+
+- 지금은 문서와 가드만 정리
+- 실제 활성화는 보류 가능
+
+현재 확인 결과:
+
+- 기본값은 `off`다. `Settings.enable_evolution_trigger=False`.
+- trigger off 시 `run_evolution_tick()`은 `TRIGGER_DISABLED`로 즉시 반환한다.
+- Guardian/API 게이트가 닫혀 있으면 Tower 호출 전에 `DISABLED/AIRGAP_BLOCK`으로 반환한다.
+- 따라서 현재 단계에서는 문서/가드 유지가 맞고, 실제 활성화는 계속 보류한다.
+
+---
+
 ### 2.2 데이터 루프 보강 (권장)
 
 | 보완 항목 | 설명 |
