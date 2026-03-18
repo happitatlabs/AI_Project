@@ -15,6 +15,7 @@ class ModuleManifest:
     run_kind: str
     start_path: str
     icon: str = "[]"
+    visible_in_ui: bool = True
 
 
 @dataclass(frozen=True)

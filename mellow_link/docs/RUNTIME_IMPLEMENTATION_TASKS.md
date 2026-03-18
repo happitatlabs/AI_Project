@@ -5,6 +5,34 @@
 
 ---
 
+## 계약 고정 문장
+
+- Runtime V1 currently guarantees a stable contract, state/status semantics, core regression coverage, minimal operational observability, and an isolated post-response experience ledger bridge.
+- The bridge is intentionally limited to experience ledger recording only and does not affect degraded, last_error, HTTP status, or response body on failure.
+- Archiver, insight generation, and diagnosis chaining remain explicitly out of scope.
+- state_version은 같은 세션의 성공 turn 완료 시 1씩 증가한다.
+- model_tier_effective는 요청 tier와 분리된 실제 적용 tier다.
+- `/runtime/status`는 운영용 최소 상태 노출 API다.
+- 모든 필수 키는 nullable이어도 항상 포함한다.
+- Runtime 최소 운영 관측은 요청/응답 추적(trace_id), 상태 변화(degraded), 마지막 오류(last_error), 구현체(runtime_impl) 네 축을 기본으로 한다.
+- Runtime ledger bridge는 성공 turn 이후에만 실행되는 후행 부수효과로 취급한다. 실패는 degraded, last_error, HTTP status, 응답 바디에 영향을 주지 않는다.
+- 1차 Runtime ledger bridge의 `intent_type`은 사용자 입력 축약본을 임시 매핑한 값이며, 최종 의미 모델은 추후 별도 정리한다.
+
+## CI 기본 세트
+
+- Runtime 기본 회귀 세트는 `runtime-core`로 고정한다.
+- 포함 대상:
+  - `mellow_chat_runtime/tests/test_runtime_api_contract.py`
+  - `mellow_chat_runtime/tests/test_runtime_state_and_status.py`
+- 기본 실행 명령:
+  - `python -m pytest -q mellow_chat_runtime\tests\test_runtime_api_contract.py mellow_chat_runtime\tests\test_runtime_state_and_status.py`
+- 실행 정책:
+  - `pull_request`에서 항상 실행
+  - `main` 브랜치 `push`에서 항상 실행
+  - 실패 시 merge 방어선으로 취급
+
+---
+
 ## 백엔드
 
 | # | 작업 | 설명 |

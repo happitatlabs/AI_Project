@@ -1,0 +1,31 @@
+name: runtime-core
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  runtime-core:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install runtime-core test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install fastapi==0.118.0 pydantic==2.12.5 httpx==0.28.1 pytest==8.3.4 pytest-asyncio==0.24.0
+
+      - name: Run runtime-core regression suite
+        run: |
+          python -m pytest -q \
+            mellow_chat_runtime/tests/test_runtime_api_contract.py \
+            mellow_chat_runtime/tests/test_runtime_state_and_status.py

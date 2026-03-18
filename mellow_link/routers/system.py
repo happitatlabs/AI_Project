@@ -22,6 +22,7 @@ from mellow_link.infra import (
 )
 from mellow_link.modules import get_module_registry
 from mellow_link.services import get_vtuber_relay, get_rag_service
+from mellow_link.media import media_health_snapshot, media_status_snapshot
 from mellow_link.utils import get_avatar_status, DEFAULT_AVATAR_WS_PORT
 
 logger = logging.getLogger(__name__)
@@ -65,10 +66,22 @@ async def serve_legacy_ui() -> FileResponse:
     return FileResponse(os.path.join(app_state.static_dir or ".", "index.html"))
 
 
+@router.get("/runtime-console", include_in_schema=False)
+async def serve_runtime_console() -> FileResponse:
+    """Serve the runtime-only user chat UI."""
+    return FileResponse(os.path.join(app_state.static_dir or ".", "runtime_console.html"))
+
+
+@router.get("/runtime-operator", include_in_schema=False)
+async def serve_runtime_operator() -> FileResponse:
+    """Serve the runtime-only operator UI."""
+    return FileResponse(os.path.join(app_state.static_dir or ".", "runtime_operator.html"))
+
+
 @router.get("/", tags=["System"], include_in_schema=False)
 async def root():
     """Root endpoint - redirect to /ui."""
-    return RedirectResponse(url="/ui")
+    return RedirectResponse(url="/runtime-console")
 
 
 # =============================================================================
@@ -82,12 +95,11 @@ async def health_check():
 
     if app_state.llm_service:
         services_health["llm"] = await app_state.llm_service.health_check()
-    if app_state.image_service:
-        services_health["image"] = await app_state.image_service.health_check()
     if app_state.doc_service:
         services_health["document"] = await app_state.doc_service.health_check()
     if app_state.vram_watchdog:
         services_health["vram"] = await app_state.vram_watchdog.health_check()
+    services_health.update(await media_health_snapshot())
 
     orchestrator_health = {}
     if app_state.orchestrator:
@@ -118,6 +130,7 @@ async def list_modules():
                 "icon": m.manifest.icon,
             }
             for m in registry.list_modules()
+            if m.manifest.visible_in_ui
         ]
     }
 
@@ -134,10 +147,9 @@ async def get_status():
     services = {}
     if app_state.llm_service:
         services["llm"] = app_state.llm_service.get_status().name
-    if app_state.image_service:
-        services["image"] = app_state.image_service.get_status().name
     if app_state.doc_service:
         services["document"] = app_state.doc_service.get_status().name
+    services.update(media_status_snapshot())
 
     health = await app_state.orchestrator.health_check() if app_state.orchestrator else {}
 
@@ -310,3 +322,5 @@ async def mellow_link_init(
     except Exception as e:
         logger.error(f"[MellowLink] Init error: {e}")
         return {"success": False, "error": str(e)}
+
+

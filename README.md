@@ -1,7 +1,7 @@
 # AI_Project
 
 Mellow-Link는 공통 실행 엔진 위에 유스케이스 모듈을 얹는 로컬 실행형 AI 플랫폼입니다.  
-사용자는 `/ui`에서 모듈을 선택해 작업을 시작하고, 모든 실행은 `run_id` 기준으로 생성·추적됩니다.
+기본 사용자 진입점은 `/runtime-console`이며, `/ui`는 모듈 허브와 run 콘솔 진입용 홈으로 유지됩니다.
 
 현재 이 프로젝트의 핵심 프레임은 `엔진 + 모듈`입니다.
 
@@ -21,20 +21,23 @@ Mellow-Link는 공통 실행 엔진 위에 유스케이스 모듈을 얹는 로�
 
 현재 기준 기본 사용자 흐름은 아래와 같습니다.
 
-1. `/ui`에서 모듈을 선택하고 작업을 시작합니다.
-2. 시스템이 `run_id`를 생성합니다.
-3. run은 기본 session에 자동 연결됩니다.
+1. 기본 채팅 진입은 `/runtime-console`에서 시작합니다.
+2. 런타임 UI는 `POST /runtime/turn`, `GET /runtime/status`만 사용합니다.
+3. 모듈 기반 작업은 `/ui`에서 시작하고, 시스템이 `run_id`를 생성합니다.
 4. 실행이 시작되면 `/user-console?run_id=...`로 이동합니다.
 5. 이후 `/runs`에서 같은 run에 다시 진입할 수 있습니다.
 
 핵심 URL:
 
-- `/ui`: 제품 홈, 작업 시작
+- `/runtime-console`: 기본 사용자 채팅 진입점
+- `/runtime-operator`: Runtime 최소 운영 상태 화면
+- `/ui`: 모듈 허브, 작업 시작
 - `/runs`: 실행 목록
 - `/user-console?run_id=...`: 사용자 진행/결과 뷰
 - `/operator-console?run_id=...`: 운영자 제어 뷰
 - `/dev-dashboard`: 다중 run 비교 뷰
 - `/dev-console?run_id=...`: 특정 run 디버깅 뷰
+- `/index.html`: deprecated legacy UI
 
 ## 이 프로그램이 하는 일
 
@@ -80,12 +83,26 @@ Mellow-Link는 공통 실행 엔진 위에 유스케이스 모듈을 얹는 로�
 
 ### `/ui`
 
-제품 홈입니다.
+모듈 허브입니다.
 
 - 모듈 선택
-- 입력/업로드
-- run 생성
+- 각 모듈 시작점 진입
 - 성공 시 `/user-console`로 이동
+
+### `/runtime-console`
+
+기본 사용자 채팅 화면입니다.
+
+- `POST /runtime/turn` 호출
+- `GET /runtime/status` 상태 표시
+- 사용자 레벨 `turn.speech / passage / ooc / clarify`만 렌더링
+
+### `/runtime-operator`
+
+Runtime 최소 운영 화면입니다.
+
+- `GET /runtime/status`만 사용
+- `runtime.impl / system_state / degraded / last_error` 표시
 
 ### `/runs`
 
@@ -132,6 +149,15 @@ Mellow-Link는 공통 실행 엔진 위에 유스케이스 모듈을 얹는 로�
 - tool usage
 - error detail
 
+### `/index.html`
+
+레거시 호환 화면입니다.
+
+- deprecated 상태
+- 신규 사용자 진입 금지
+- 과거 링크/호환 보호용
+- 제거 후보
+
 ## 현재 상태
 
 현재 기준으로 상대적으로 안정화된 흐름은 아래와 같습니다.
@@ -146,6 +172,9 @@ Mellow-Link는 공통 실행 엔진 위에 유스케이스 모듈을 얹는 로�
 최근 정리된 점:
 
 - `run_id` 중심 공통 콘솔 구조 정리
+- Runtime 전용 사용자/운영 화면 추가 (`/runtime-console`, `/runtime-operator`)
+- 기본 루트(`/`)를 `/runtime-console`로 전환
+- legacy `index.html`를 deprecated 호환 레이어로 격하
 - 사용자용 진행률을 모듈별 raw todo에서 정규화된 3단계로 통일
 - `research_assistant`는 범용 tool loop 대신 direct research inference 경로 사용
 - research retry는 같은 lifecycle 안에서 재시도하고, 종료 후에만 모델 unload
@@ -157,7 +186,8 @@ Mellow-Link는 공통 실행 엔진 위에 유스케이스 모듈을 얹는 로�
 2. `mellow_link/.env`에서 JWT 시크릿을 고정합니다.
 3. 필요하면 선택 서비스를 켜거나 끕니다.
 4. `python -m mellow_link.main` 또는 [launcher.py](/D:/AI_Project/launcher.py)로 서버를 실행합니다.
-5. 브라우저에서 `http://127.0.0.1:8000/ui`로 접속합니다.
+5. 기본 UI는 `http://127.0.0.1:8000/runtime-console`로 접속합니다.
+6. 모듈 허브는 `http://127.0.0.1:8000/ui`에서 엽니다.
 
 예시:
 
@@ -167,6 +197,25 @@ VTUBER_RELAY_ENABLED=0
 AVATAR_AUTO_LAUNCH_ENABLED=0
 ENABLE_EDGE_TTS=0
 ```
+
+## Runtime 회귀 테스트
+
+Runtime 계약과 상태 회귀 방어선은 아래 두 파일입니다.
+
+- `mellow_chat_runtime/tests/test_runtime_api_contract.py`
+- `mellow_chat_runtime/tests/test_runtime_state_and_status.py`
+
+로컬 재현 명령:
+
+```powershell
+python -m pytest -q mellow_chat_runtime\tests\test_runtime_api_contract.py mellow_chat_runtime\tests\test_runtime_state_and_status.py
+```
+
+CI 기본 세트는 [runtime-core.yml](/D:/AI_Project/.github/workflows/runtime-core.yml)로 분리되어 있습니다.
+
+- Job 이름: `runtime-core`
+- 실행 이벤트: `pull_request`, `main` 브랜치 `push`
+- 목적: Runtime 계약/상태 회귀가 깨지면 바로 실패하도록 고정
 
 ## 선택 서비스
 

@@ -68,6 +68,37 @@ def _emit_finished(run_id: str, success: bool = True, summary: str = "done"):
     emit_event(run_id, EVENT_TYPE_RUN_FINISHED, {"success": success, "summary": summary})
 
 
+
+def test_root_redirects_to_runtime_console(client):
+    res = client.get("/", follow_redirects=False)
+    assert res.status_code in (302, 307)
+    assert res.headers["location"] == "/runtime-console"
+
+
+def test_legacy_ui_is_marked_deprecated(client):
+    res = client.get("/index.html")
+    assert res.status_code == 200
+    assert "Deprecated" in res.text
+    assert "/runtime-console" in res.text
+
+
+def test_home_prioritizes_runtime_entry(client):
+    res = client.get("/ui")
+    assert res.status_code == 200
+    text = res.text
+    assert "Default Entry: Runtime Chat" in text
+    assert "Runtime Chat" in text
+
+
+def test_legacy_ui_disables_new_chat_flow(client):
+    res = client.get("/index.html")
+    assert res.status_code == 200
+    text = res.text
+    assert "Legacy UI (Deprecated)" in text
+    assert "Runtime Console 사용을 권장합니다." in text
+    assert 'id="messageInput"' in text and 'disabled' in text
+    assert 'id="sendBtn"' in text and 'Legacy chat disabled' in text
+
 def test_ui_exposes_module_hub(client):
     res = client.get("/ui")
     assert res.status_code == 200
@@ -76,6 +107,17 @@ def test_ui_exposes_module_hub(client):
     assert "/api/modules" in text
     assert "Modules" in text
 
+
+
+def test_runtime_console_pages_are_exposed(client):
+    chat_res = client.get("/runtime-console")
+    assert chat_res.status_code == 200
+    assert "/runtime/turn" in chat_res.text
+    assert "/runtime/status" in chat_res.text
+
+    ops_res = client.get("/runtime-operator")
+    assert ops_res.status_code == 200
+    assert "/runtime/status" in ops_res.text
 
 def test_runs_creation_assigns_default_session_and_list_shows_new_run(client):
     user = _register(client, "phase1_owner")
@@ -164,3 +206,6 @@ def test_owned_runs_only_and_orphan_runs_hidden(client):
     ids = {item["run_id"] for item in list_res.json()["runs"]}
     assert owned["run_id"] in ids
     assert orphan_id not in ids
+
+
+
