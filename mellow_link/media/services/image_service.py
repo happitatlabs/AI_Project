@@ -21,10 +21,14 @@ import json
 import logging
 import uuid
 import time
+import io
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Callable
 
 from mellow_link.media.schemas import ImageRequest
+from mellow_link.services.output_provenance import ensure_sidecar, write_sidecar_best_effort
+from mellow_link.services.runtime_config import get_output_directories, should_strip_prompt_metadata
+from PIL import Image
 
 from .image_schemas import (
     ImageGenerationError,
@@ -93,7 +97,7 @@ class ImageService:
         self.host = host
         self.port = port
         self.timeout = timeout
-        self.output_dir = (output_dir or Path("./outputs/images")).resolve()
+        self.output_dir = (output_dir or get_output_directories()["images"]).resolve()
 
         self._status: ImageStatus = ImageStatus.DISCONNECTED
         self._base_url: str = f"http://{host}:{port}"
@@ -167,11 +171,11 @@ class ImageService:
         except aiohttp.ClientError as e:
             logger.error(f"[ImageService] Connection failed: {e}")
             self._status = ImageStatus.ERROR
-            raise ConnectionError(f"Failed to connect to ComfyUI: {e}")
+            raise ConnectionError(f"Failed to connect to ComfyUI at {self._base_url}: {e}")
         except Exception as e:
             logger.error(f"[ImageService] Unexpected connection error: {e}")
             self._status = ImageStatus.ERROR
-            raise
+            raise ConnectionError(f"Unexpected ComfyUI connection error at {self._base_url}: {e}") from e
 
     async def disconnect(self) -> None:
         """
@@ -418,7 +422,10 @@ class ImageService:
         TUI/외부 호출을 위한 호환 API. get_media_ai() 위임.
         ENABLE_MEDIA_AI=0이면 RuntimeError.
         """
-        result = await self.generate(request, on_progress=on_progress)
+        if self.is_ready() and self._session and self._ws:
+            result = await self._execute_generation(request, on_progress=on_progress)
+        else:
+            result = await self.generate(request, on_progress=on_progress)
         if not getattr(result, "images", None):
             raise ImageGenerationError("No images generated")
         return str(Path(result.images[0]).resolve())
@@ -428,6 +435,8 @@ class ImageService:
         이미지 생성 실행. get_media_ai().generate_image()로 위임.
         ENABLE_MEDIA_AI=0이면 RuntimeError.
         """
+        if self.is_ready() and self._session and self._ws:
+            return await self._execute_generation(request, on_progress=on_progress)
         from mellow_link.media.adapters.factory import get_media_ai
         return await get_media_ai().generate_image(request, on_progress=on_progress)
 
@@ -450,6 +459,7 @@ class ImageService:
             self._execution_complete.clear()
             self._execution_error = None
             self._execution_outputs = {}
+            self._current_request_provenance = getattr(request, "provenance", None)
 
             if on_progress:
                 self._progress_callbacks.append(lambda pid, prog, msg: on_progress(prog, msg))
@@ -517,6 +527,7 @@ class ImageService:
 
         finally:
             self._current_prompt_id = None
+            self._current_request_provenance = None
             if on_progress and on_progress in self._progress_callbacks:
                 self._progress_callbacks.remove(on_progress)
 
@@ -700,8 +711,28 @@ class ImageService:
                 local_path = self.output_dir / filename
                 content = await resp.read()
 
+                if should_strip_prompt_metadata():
+                    content = self._strip_png_metadata(content)
+
                 with open(local_path, 'wb') as f:
                     f.write(content)
+
+                provenance = getattr(self, "_current_request_provenance", None)
+                if provenance:
+                    write_sidecar_best_effort(
+                        local_path,
+                        artifact_type="image",
+                        source=provenance.get("source", {}),
+                        runtime=provenance.get("runtime", {}),
+                        request=provenance.get("request", {}),
+                    )
+                    ensure_sidecar(
+                        local_path,
+                        artifact_type="image",
+                        source=provenance.get("source", {}),
+                        runtime=provenance.get("runtime", {}),
+                        request=provenance.get("request", {}),
+                    )
 
                 logger.debug(f"[ImageService] Downloaded: {local_path}")
                 return local_path
@@ -709,6 +740,16 @@ class ImageService:
         except Exception as e:
             logger.error(f"[ImageService] Download error: {e}")
             return None
+
+    @staticmethod
+    def _strip_png_metadata(content: bytes) -> bytes:
+        try:
+            image = Image.open(io.BytesIO(content))
+            out = io.BytesIO()
+            image.save(out, format=image.format or "PNG")
+            return out.getvalue()
+        except Exception:
+            return content
 
     async def cancel_generation(self, prompt_id: Optional[str] = None) -> bool:
         """

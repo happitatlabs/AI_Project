@@ -44,41 +44,34 @@ V0 범위는 전체 시스템 마이그레이션이 아니라 단일 기능 수�
 
 ## 시작 경로
 
-- UI: `/modules/rebuild_assistant`
-- Run API: `POST /modules/rebuild_assistant/runs`
+- UI 안내: `/modules/rebuild_assistant`
+- 실제 실행 시작점: `/projects/create`
+- 기본 실행선: `project -> anonymization -> SafeAnalysisBundle -> rebuild_assistant`
+- 참고: `POST /modules/rebuild_assistant/runs` 는 더 이상 공개 실행 경로가 아니며 차단됩니다.
 
 ## 입력
 
-요청 스키마는 아래 필드를 사용합니다.
+공개 실행 요청은 raw asset이 아니라 `SafeAnalysisBundle`을 사용합니다.
 
 - `goal: str`
   - 필수
   - `goal.strip()` 기준 최소 8자
-- `assets`
-  - `source_code`
-  - `database_schema`
-  - `sql_queries`
-  - `ui_template`
-  - `framework_info`
+- `safe_bundle`
+  - 익명화된 canonical source
+  - canonical 기준 structure
+  - 원본/매핑 미포함
 - `constraints: list[str]`
-- `temp_session_id: str | None`
 
-`assets` 또는 `temp_session_id` 중 하나는 반드시 필요합니다.
+raw `assets` / `temp_session_id` 입력은 공개 API에서 사용하지 않습니다.
 
 ## 업로드 보조 기능
 
-UI에서는 기존 temp upload 흐름을 그대로 재사용합니다.
+프로젝트 UI는 기존 temp upload 저장소를 재사용하지만, 분석 실행 전에 반드시 익명화 파이프라인을 거칩니다.
 
-- 업로드 파일은 모두 temp context에도 저장됩니다.
-- 일부 파일은 브라우저에서 자동 분류되어 textarea에 보조 입력됩니다.
-  - `goal.txt` -> `goal`
-  - `constraints.txt` -> `constraints`
-  - `*.jsp`, `*.html` -> `ui_template`
-  - `*.java`, `*.js`, `*.ts`, `*.xml` -> `source_code`
-  - `schema*.sql`, `ddl*.sql`, `CREATE TABLE` 중심 SQL -> `database_schema`
-  - `query*.sql`, `mapper*.sql`, query-heavy SQL -> `sql_queries`
-  - `framework*`, `readme*`, `.md`, `.properties`, `.yml`, `.yaml` -> `framework_info`
-- 사용자가 이미 직접 입력한 textarea는 자동 분류가 덮어쓰지 않습니다.
+- 원본은 secure storage로 분리 저장됩니다.
+- canonical anonymized source가 생성됩니다.
+- structure는 canonical source 기준으로만 추출됩니다.
+- `rebuild_assistant`는 SafeAnalysisBundle만 소비합니다.
 
 ## 분류 모드
 
@@ -153,7 +146,8 @@ UI에서는 기존 temp upload 흐름을 그대로 재사용합니다.
 현재 테스트는 아래를 검증합니다.
 
 - 모듈 등록 및 run metadata
-- 입력 검증
+- raw 공개 route 차단
+- safe bundle 기반 run 생성
 - `structured_result` shape
 - feature mode 분류 회귀
 - `status_permissions` / `search_filters` / `save_validation` 샘플의 결론 문구

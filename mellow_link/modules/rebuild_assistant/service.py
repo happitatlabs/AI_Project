@@ -3,9 +3,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from mellow_link.services.anonymization.schemas import SafeAnalysisBundle
+
 from .schemas import (
     ExtractedRulesEnvelope,
     LayeredListResult,
+    MissingContextItem,
     RebuildAssetsPayload,
     SaveValidationRules,
     SearchFilterRules,
@@ -110,20 +113,72 @@ class RebuildAssistantService:
         prepared.missing_context = self.detect_missing_context(prepared)
         return prepared
 
+    def prepare_safe_bundle_input(
+        self,
+        *,
+        goal: str,
+        safe_bundle: SafeAnalysisBundle,
+        constraints: list[str] | None = None,
+    ) -> PreparedRebuildInput:
+        anonymized_sources = "\n\n".join(
+            f"[SAFE SOURCE: {source.asset_id}]\n{source.content}"
+            for source in safe_bundle.sources
+            if (source.content or "").strip()
+        )
+        structures = "\n\n".join(
+            self._render_structure_block(structure)
+            for structure in safe_bundle.structures
+            if structure.nodes or structure.edges
+        )
+        assets = RebuildAssetsPayload(
+            source_code=anonymized_sources,
+            ui_template=structures,
+            framework_info=f"safe_bundle={safe_bundle.bundle_id}, masking_level={safe_bundle.masking_level.value}",
+        )
+        normalized_constraints = list(constraints or []) + [
+            f"safe_bundle_id={safe_bundle.bundle_id}",
+            f"safe_bundle_level={safe_bundle.masking_level.value}",
+            "safe_bundle_only=true",
+        ]
+        return self.prepare_input(goal=goal, assets=assets, constraints=normalized_constraints, temp_context="")
+
     def is_scope_limited(self, goal: str) -> bool:
         text = (goal or "").strip().lower()
         return bool(text) and any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in self.SCOPE_LIMIT_PATTERNS)
 
     def detect_missing_context(self, prepared: PreparedRebuildInput) -> list[str]:
-        missing: list[str] = []
+        return [item.required_material for item in self.build_missing_context_details(prepared)]
+
+    def build_missing_context_details(self, prepared: PreparedRebuildInput) -> list[MissingContextItem]:
+        missing: list[MissingContextItem] = []
         if not prepared.assets.source_code and not prepared.assets.ui_template and not prepared.temp_context:
-            missing.append("레거시 화면 또는 서버 코드가 부족합니다.")
+            missing.append(
+                MissingContextItem(
+                    required_material="레거시 화면 또는 서버 코드",
+                    reason="기능 흐름과 화면-백엔드 결합 지점을 확인할 근거가 부족합니다.",
+                )
+            )
         if not prepared.assets.database_schema and not prepared.assets.sql_queries:
-            missing.append("DB 스키마 또는 SQL 쿼리 정보가 부족합니다.")
+            missing.append(
+                MissingContextItem(
+                    required_material="DB 스키마 또는 핵심 SQL",
+                    reason="업무 규칙과 데이터 검증 규칙을 구조화할 DB 근거가 부족합니다.",
+                )
+            )
         if not prepared.assets.framework_info:
-            missing.append("기존 프레임워크/런타임 정보가 부족합니다.")
+            missing.append(
+                MissingContextItem(
+                    required_material="기존 프레임워크/런타임 정보",
+                    reason="현대화 설계안의 기술 제약과 전환 경계를 정확히 잡기 어렵습니다.",
+                )
+            )
         if not prepared.signals.status_permissions and not prepared.signals.search_filters and not prepared.signals.save_validation:
-            missing.append("핵심 기능 흐름(권한/조회/저장 규칙)을 드러내는 코드 단서가 더 필요합니다.")
+            missing.append(
+                MissingContextItem(
+                    required_material="권한/조회/저장 흐름이 드러나는 추가 코드 또는 문서",
+                    reason="핵심 업무 규칙의 우선순위와 feature mode를 더 명확히 판별해야 합니다.",
+                )
+            )
         return missing
 
     def extract_feature_signals(self, prepared: PreparedRebuildInput) -> FeatureSignals:
@@ -640,6 +695,7 @@ class RebuildAssistantService:
     def build_result(self, prepared: PreparedRebuildInput) -> StructuredRebuildResult:
         confidence = self.estimate_confidence(prepared)
         extracted_rules = self.extract_rules(prepared)
+        missing_context_details = self.build_missing_context_details(prepared)
         return StructuredRebuildResult(
             one_line_conclusion=self._build_conclusion(prepared, confidence),
             analysis_summary=self.analyze_assets(prepared),
@@ -648,9 +704,24 @@ class RebuildAssistantService:
             recomposition_draft=self.build_recomposition_draft(prepared),
             risks=self.build_risks(prepared),
             extracted_rules=extracted_rules,
+            recommended_directions=self.build_recommended_directions(prepared),
             confidence=confidence,
-            missing_context=list(prepared.missing_context),
+            missing_context=[item.required_material for item in missing_context_details],
+            missing_context_details=missing_context_details,
         )
+
+    def build_recommended_directions(self, prepared: PreparedRebuildInput) -> list[str]:
+        concept = self._primary_concept(prepared)
+        directions = [
+            f"{concept} 기능을 단일 현대화 범위로 고정하고 우선 분석 자산을 화면/API/SQL 기준으로 정리합니다.",
+            "숨은 업무 규칙은 권한, 상태 전이, 조회 필터, 저장 검증 순서로 검토 가능한 표로 정리합니다.",
+            "고객사 표준 템플릿 기준으로 React + REST API + repository 경계 초안을 먼저 확정합니다.",
+        ]
+        if prepared.missing_context:
+            directions[0] = f"{concept} 기능 범위를 유지하되 추가 자료를 먼저 보강한 뒤 상세 설계를 확정합니다."
+        if prepared.scope_limited:
+            directions[2] = "전체 전환 대신 단일 기능 파일럿 구조와 단계적 전환 초안을 우선 확정합니다."
+        return directions[:3]
 
     def format_user_summary(
         self,
@@ -689,7 +760,23 @@ class RebuildAssistantService:
             *self._render_bullets(result.risks),
         ]
         if result.missing_context:
-            lines.extend(["", "추가 필요 정보", *self._render_bullets(result.missing_context)])
+            lines.append("")
+            lines.append("추가 자료 요청")
+            for item in result.missing_context_details:
+                lines.extend(
+                    [
+                        "[필요 자료]",
+                        f"- {item.required_material}",
+                        "",
+                        "[이유]",
+                        f"- {item.reason}",
+                        "",
+                    ]
+                )
+            if not result.missing_context_details:
+                lines.extend(self._render_bullets(result.missing_context))
+        if result.recommended_directions:
+            lines.extend(["", "추천 방향", *self._render_bullets(result.recommended_directions)])
         lines.extend(
             [
                 "",
@@ -1034,6 +1121,12 @@ class RebuildAssistantService:
         if not (value or "").strip():
             return ""
         return f"[{title}]\n{value.strip()}"
+
+    def _render_structure_block(self, structure) -> str:
+        node_lines = [f"- node:{node.kind}:{node.id}" for node in structure.nodes]
+        edge_lines = [f"- edge:{edge.from_id}->{edge.to_id}:{edge.type}" for edge in structure.edges]
+        body = "\n".join(node_lines + edge_lines)
+        return f"[SAFE STRUCTURE: {structure.asset_id}]\n{body}".strip()
 
     def _render_bullets(self, items: list[str]) -> list[str]:
         return [f"- {item}" for item in items] if items else ["- 정보가 충분하지 않습니다."]

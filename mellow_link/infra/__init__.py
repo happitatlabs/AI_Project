@@ -50,6 +50,9 @@ from .database import (
     DocumentChunk,
     AgentRun,
     AgentRunEvent,
+    ModernizationProject,
+    ProjectAsset,
+    ProjectRunHistory,
     # Helper Functions
     create_default_folders_for_user,
     ensure_user_has_folders,
@@ -131,6 +134,9 @@ __all__ = [
     "DocumentChunk",
     "AgentRun",
     "AgentRunEvent",
+    "ModernizationProject",
+    "ProjectAsset",
+    "ProjectRunHistory",
     # Run Events
     "create_run",
     "emit_event",

@@ -28,7 +28,39 @@ except ImportError:
 
 # Force output_dir to be inside mellow_link package
 _MELLOW_LINK_DIR = Path(os.path.dirname(os.path.abspath(__file__))).parent
+_REPO_ROOT = _MELLOW_LINK_DIR.parent
+_ENV_FILE = _REPO_ROOT / ".env"
 _FORCED_OUTPUT_DIR = _MELLOW_LINK_DIR / "outputs"
+_REPO_ENV_OVERRIDE_KEYS = {
+    "ENABLE_MEDIA_AI",
+    "ENABLE_MEDIA_COMPUTE",
+    "ENABLE_FFMPEG",
+}
+
+
+def _preload_repo_env() -> None:
+    if not _ENV_FILE.exists():
+        return
+    try:
+        for raw_line in _ENV_FILE.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            if not key:
+                continue
+            normalized = value.strip().strip('"').strip("'")
+            if key in _REPO_ENV_OVERRIDE_KEYS:
+                os.environ[key] = normalized
+                continue
+            if key not in os.environ:
+                os.environ[key] = normalized
+    except Exception:
+        pass
+
+
+_preload_repo_env()
 
 
 class Settings(BaseSettings):
@@ -79,6 +111,11 @@ class Settings(BaseSettings):
         default=Path("./outputs"),
         description="Directory for generated outputs",
         validation_alias="MELLOW_OUTPUT_DIR" if PYDANTIC_V2 else None
+    )
+    anonymization_storage_root: Path = Field(
+        default=Path("./data/anonymization"),
+        description="Root directory for anonymization originals, canonical bundles, and exports",
+        validation_alias="ANONYMIZATION_STORAGE_ROOT" if PYDANTIC_V2 else None
     )
 
     # ==================== Ollama (LLM) Settings ====================
@@ -637,14 +674,14 @@ class Settings(BaseSettings):
     # ==================== Pydantic Configuration ====================
     if PYDANTIC_V2:
         model_config = SettingsConfigDict(
-            env_file=".env",  # .env file load
+            env_file=str(_ENV_FILE),  # repo-root .env
             env_file_encoding="utf-8",  # encoding settings
             extra="ignore",  # ignore undefined variables in .env without error
             case_sensitive=False
         )
     else:
         class Config:
-            env_file = ".env"
+            env_file = str(_ENV_FILE)
             env_file_encoding = "utf-8"
             case_sensitive = False
 
@@ -660,7 +697,7 @@ class Settings(BaseSettings):
                 )
             return v
 
-        @field_validator("model_dir", "data_dir", "output_dir", "template_dir", mode="before")
+        @field_validator("model_dir", "data_dir", "output_dir", "template_dir", "anonymization_storage_root", mode="before")
         @classmethod
         def convert_to_path(cls, v):
             if isinstance(v, str):
@@ -708,7 +745,7 @@ class Settings(BaseSettings):
                 )
             return v
 
-        @validator("model_dir", "data_dir", "output_dir", "template_dir", pre=True)
+        @validator("model_dir", "data_dir", "output_dir", "template_dir", "anonymization_storage_root", pre=True)
         def convert_to_path(cls, v):
             if isinstance(v, str):
                 return Path(v)
@@ -795,6 +832,7 @@ class Settings(BaseSettings):
             self.video_output_dir,  # mellow_link/outputs/videos
             self.document_output_dir,  # mellow_link/outputs/documents
             self.template_dir,
+            self.anonymization_storage_root,
         ]
         for directory in directories:
             directory.mkdir(parents=True, exist_ok=True)
@@ -859,6 +897,7 @@ class Settings(BaseSettings):
             "model_dir": str(self.model_dir),
             "data_dir": str(self.data_dir),
             "output_dir": str(self.output_dir),
+            "anonymization_storage_root": str(self.anonymization_storage_root),
             "ollama": {
                 "host": self.ollama_host,
                 "port": self.ollama_port,

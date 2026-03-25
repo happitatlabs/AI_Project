@@ -1,5 +1,6 @@
 import uuid
 from types import SimpleNamespace
+from pathlib import Path
 
 import pytest
 
@@ -52,6 +53,53 @@ def _user_headers():
         create_default_folders_for_user(db, user.id, role=UserRole.USER.value)
         token = create_access_token(data={"sub": username}, role=user.role)
     return {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+
+
+def _safe_bundle_payload():
+    return {
+        "goal": "이 JSP 주문 화면을 React 구조로 바꿔줘",
+        "safe_bundle": {
+            "bundle_id": f"safe_bundle_{uuid.uuid4().hex[:8]}",
+            "project_id": "proj_test",
+            "masking_level": "FULL",
+            "asset_summary": [
+                {
+                    "asset_id": "asset_001",
+                    "name": "legacy.jsp",
+                    "temp_file_id": "temp_001",
+                    "size": 10,
+                    "kind_hint": "ui",
+                    "language": "jsp",
+                }
+            ],
+            "sources": [
+                {
+                    "asset_id": "asset_001",
+                    "level": "FULL",
+                    "language": "jsp",
+                    "source_type": "canonical_anonymized",
+                    "content": "class CLS_001 { function FUNC_001() {} }",
+                    "replacement_stats": {"class": 1, "function": 1},
+                }
+            ],
+            "structures": [
+                {
+                    "asset_id": "asset_001",
+                    "level": "FULL",
+                    "extracted_from": "canonical",
+                    "nodes": [{"kind": "class", "id": "CLS_001"}],
+                    "edges": [],
+                }
+            ],
+            "guard": {
+                "contains_original": False,
+                "contains_mapping": False,
+                "canonical_only": True,
+                "structure_extracted_from_canonical": True,
+            },
+        },
+        "constraints": [],
+    }
 
 
 def test_modules_api_lists_registered_modules(client):
@@ -120,23 +168,20 @@ def test_research_assistant_reuses_temp_upload_flow(client, monkeypatch):
     assert body["run_kind"] == "research_run"
 
 
-def test_rebuild_assistant_run_has_module_metadata(client, monkeypatch):
+def test_rebuild_assistant_bundle_run_has_module_metadata(client, monkeypatch):
     from mellow_link.modules.rebuild_assistant import api as rebuild_api
 
     monkeypatch.setattr(
         rebuild_api,
-        "start_rebuild_assistant_run",
+        "start_rebuild_assistant_safe_bundle_run",
         lambda *args, **kwargs: None,
     )
 
     headers = _user_headers()
     res = client.post(
-        "/modules/rebuild_assistant/runs",
+        "/modules/rebuild_assistant/bundle-runs",
         headers={**headers, "Content-Type": "application/json"},
-        json={
-            "goal": "이 JSP 주문 화면을 React 구조로 바꿔줘",
-            "assets": {"source_code": "<% String id = request.getParameter(\"id\"); %>"},
-        },
+        json=_safe_bundle_payload(),
     )
     assert res.status_code == 200, res.text
     data = res.json()
@@ -149,30 +194,81 @@ def test_rebuild_assistant_run_has_module_metadata(client, monkeypatch):
     assert body["run_kind"] == "rebuild_plan"
 
 
-def test_rebuild_assistant_validates_goal_length(client):
+def test_rebuild_assistant_raw_public_route_is_blocked(client):
     headers = _user_headers()
     res = client.post(
         "/modules/rebuild_assistant/runs",
         headers={**headers, "Content-Type": "application/json"},
-        json={
-            "goal": "짧다",
-            "assets": {"source_code": "legacy"},
-        },
+        json={"goal": "짧다", "assets": {"source_code": "legacy"}},
     )
-    assert res.status_code == 422
+    assert res.status_code == 403
 
 
-def test_rebuild_assistant_requires_assets_or_temp_session(client):
+def test_rebuild_assistant_bundle_run_requires_safe_bundle(client):
     headers = _user_headers()
     res = client.post(
-        "/modules/rebuild_assistant/runs",
+        "/modules/rebuild_assistant/bundle-runs",
         headers={**headers, "Content-Type": "application/json"},
         json={
             "goal": "이 기능을 단일 페이지 기준으로 재구성해줘",
-            "assets": {},
+            "constraints": [],
         },
     )
     assert res.status_code == 422
+
+
+def test_start_project_wrapped_run_requires_safe_bundle():
+    from mellow_link.modules.rebuild_assistant.api import start_project_wrapped_run
+
+    try:
+        start_project_wrapped_run(
+            run_id="run_missing_bundle",
+            session_id="session_missing_bundle",
+            project_name="프로젝트",
+            client_name="고객사",
+            upload_session_id="upload",
+            constraints=[],
+            asset_manifest=[],
+        )
+    except TypeError as exc:
+        assert "safe_bundle" in str(exc)
+    else:
+        raise AssertionError("safe_bundle must be required")
+
+
+def test_rebuild_assistant_static_ui_does_not_call_raw_runs(client):
+    res = client.get("/modules/rebuild_assistant")
+    assert res.status_code == 200, res.text
+    assert "/modules/rebuild_assistant/runs" not in res.text
+    assert "Raw Run Disabled" in res.text
+    assert "/projects/create" in res.text
+
+
+def test_rebuild_assistant_compat_references_stay_in_allowed_files():
+    root = Path(r"C:\Users\Hyein\ClaudeAI\AI_Project\mellow_link")
+    allowed_compat = {
+        str(root / "modules" / "rebuild_assistant" / "compat.py"),
+        str(root / "tests" / "test_module_registry_and_runs.py"),
+    }
+    allowed_raw_route = {
+        str(root / "modules" / "rebuild_assistant" / "api.py"),
+        str(root / "modules" / "rebuild_assistant" / "README.md"),
+        str(root / "tests" / "test_module_registry_and_runs.py"),
+    }
+
+    compat_hits = []
+    raw_route_hits = []
+    for path in root.rglob("*"):
+        if not path.is_file() or path.suffix not in {".py", ".md", ".html"}:
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if "start_rebuild_assistant_run_compat(" in text:
+            compat_hits.append(str(path))
+        if "/modules/rebuild_assistant/runs" in text:
+            raw_route_hits.append(str(path))
+
+    assert set(compat_hits) <= allowed_compat
+    assert set(raw_route_hits) <= allowed_raw_route
 
 
 def test_research_assistant_formats_user_facing_summary():
@@ -328,14 +424,18 @@ String sql = "SELECT * FROM orders WHERE user_id = ?";
         "recomposition_draft",
         "risks",
         "extracted_rules",
+        "recommended_directions",
         "confidence",
         "missing_context",
+        "missing_context_details",
     }
     assert isinstance(dumped["one_line_conclusion"], str)
     assert isinstance(dumped["analysis_summary"], list)
     assert isinstance(dumped["rebuild_strategy"], list)
     assert isinstance(dumped["risks"], list)
+    assert isinstance(dumped["recommended_directions"], list)
     assert isinstance(dumped["missing_context"], list)
+    assert isinstance(dumped["missing_context_details"], list)
     assert isinstance(dumped["confidence"], float)
     assert 0.0 <= dumped["confidence"] <= 1.0
     assert set(dumped["layer_reconstruction"].keys()) == {"database", "backend", "frontend"}
@@ -543,6 +643,7 @@ def test_rebuild_assistant_summary_mentions_scope_metadata():
     assert "레이어별 재구성" in summary
     assert "초안" in summary
     assert "리스크" in summary
+    assert "추천 방향" in summary
     assert "confidence:" in summary
 
 
@@ -808,6 +909,7 @@ def _run_research_abort_case(monkeypatch, abort_stage: str):
 
 def test_rebuild_assistant_runner_emits_structured_result(monkeypatch):
     from mellow_link import app_state
+    from mellow_link.modules.rebuild_assistant import compat as rebuild_compat
     from mellow_link.modules.rebuild_assistant import runner as rebuild_runner
 
     events = []
@@ -827,11 +929,11 @@ def test_rebuild_assistant_runner_emits_structured_result(monkeypatch):
     monkeypatch.setattr(rebuild_runner, "emit_event", fake_emit)
     monkeypatch.setattr(app_state, "TEMP_CONTEXT_STORE", {"rebuild-temp": "--- [legacy.jsp] ---\n<% String sql = \"SELECT * FROM orders\"; %>"}, raising=False)
 
-    rebuild_runner.start_rebuild_assistant_run(
+    rebuild_compat.start_rebuild_assistant_run_compat(
         run_id="run_rebuild_test",
         session_id="session-test",
         goal="이 JSP 주문 조회 화면을 React + REST API로 재구성해줘",
-        assets=rebuild_runner.RebuildAssetsPayload(
+        assets=rebuild_compat.RebuildAssetsPayload(
             source_code="<% String sql = \"SELECT * FROM orders\"; %>",
             sql_queries="SELECT * FROM orders",
         ),
@@ -846,6 +948,8 @@ def test_rebuild_assistant_runner_emits_structured_result(monkeypatch):
     assert payload["module_id"] == "rebuild_assistant"
     assert payload["run_kind"] == "rebuild_plan"
     assert isinstance(payload["structured_result"]["analysis_summary"], list)
+    assert isinstance(payload["structured_result"]["recommended_directions"], list)
+    assert isinstance(payload["structured_result"]["missing_context_details"], list)
     assert set(payload["structured_result"]["layer_reconstruction"].keys()) == {"database", "backend", "frontend"}
     assert set(payload["structured_result"]["extracted_rules"].keys()) == {"status_permissions", "search_filters", "save_validation"}
     assert isinstance(payload["confidence"], float)
@@ -900,6 +1004,7 @@ def test_rebuild_assistant_extracted_rules_shape_is_kept_for_sparse_input():
 
 def _run_rebuild_case(monkeypatch, *, run_id: str, goal: str, assets, temp_context: str = ""):
     from mellow_link import app_state
+    from mellow_link.modules.rebuild_assistant import compat as rebuild_compat
     from mellow_link.modules.rebuild_assistant import runner as rebuild_runner
 
     events = []
@@ -919,7 +1024,7 @@ def _run_rebuild_case(monkeypatch, *, run_id: str, goal: str, assets, temp_conte
     monkeypatch.setattr(rebuild_runner, "emit_event", fake_emit)
     monkeypatch.setattr(app_state, "TEMP_CONTEXT_STORE", {"rebuild-regression-temp": temp_context}, raising=False)
 
-    rebuild_runner.start_rebuild_assistant_run(
+    rebuild_compat.start_rebuild_assistant_run_compat(
         run_id=run_id,
         session_id="session-test",
         goal=goal,
@@ -964,8 +1069,10 @@ if ("REJECTED".equals(status)) { showResubmitButton = true; }
         "recomposition_draft",
         "risks",
         "extracted_rules",
+        "recommended_directions",
         "confidence",
         "missing_context",
+        "missing_context_details",
     }
     rules = structured["extracted_rules"]["status_permissions"]
     assert rules["roles"]
@@ -1012,8 +1119,10 @@ LIMIT ? OFFSET ?
         "recomposition_draft",
         "risks",
         "extracted_rules",
+        "recommended_directions",
         "confidence",
         "missing_context",
+        "missing_context_details",
     }
     rules = structured["extracted_rules"]["search_filters"]
     assert rules["filter_fields"]
@@ -1052,8 +1161,10 @@ repository.save(entity);
         "recomposition_draft",
         "risks",
         "extracted_rules",
+        "recommended_directions",
         "confidence",
         "missing_context",
+        "missing_context_details",
     }
     rules = structured["extracted_rules"]["save_validation"]
     assert rules["required_fields"] or rules["field_validation_rules"]

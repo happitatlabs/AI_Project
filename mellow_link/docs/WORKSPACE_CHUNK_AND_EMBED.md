@@ -30,7 +30,7 @@
 
 ```bash
 # 프로젝트 루트에서
-cd D:\AI_Project
+cd C:\Users\Hyein\ClaudeAI\AI_Project
 python -m mellow_link.services.workspace_chunk_runner
 ```
 
@@ -40,13 +40,13 @@ python -m mellow_link.services.workspace_chunk_runner
 
 ```bash
 python -m mellow_link.services.workspace_chunk_runner \
-  --root D:\AI_Project\mellow_link\workspace \
+  --root C:\Users\Hyein\ClaudeAI\AI_Project\mellow_link\workspace \
   --extensions "md,txt,py" \
   --min-tokens 500 \
   --max-tokens 1000 \
   --overlap-ratio 0.15 \
   --max-retries 2 \
-  --db D:\AI_Project\mellow_link\outputs\workspace_rag.db
+  --db C:\Users\Hyein\ClaudeAI\AI_Project\mellow_link\outputs\workspace_rag.db
 ```
 
 ### 3. 코드에서 폴더/문서 단위 실행
@@ -137,3 +137,4 @@ completed = get_feedback(status="completed")
 
 - **Ollama** 실행 중이며 `embedding` API 사용 가능 (기본: `nomic-embed-text`).
 - 설정: `config/settings.py` 또는 환경변수 `MELLOW_OLLAMA_HOST`, `MELLOW_LLM_EMBEDDING_MODEL` 등.
+

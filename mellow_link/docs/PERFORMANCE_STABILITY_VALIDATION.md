@@ -60,7 +60,7 @@
 ## How to run automated smoke tests
 
 ```bash
-cd D:\AI_Project
+cd C:\Users\Hyein\ClaudeAI\AI_Project
 python -m pytest mellow_link/tests/test_performance_stability_patches.py -v
 ```
 
@@ -68,3 +68,4 @@ python -m pytest mellow_link/tests/test_performance_stability_patches.py -v
 - Ensures observation strict modes parsing (fast vs thinking/research).
 - Ensures prompt assembler drops whole sections and does not truncate the NO_HALLUCINATION policy mid-sentence.
 - Ensures `build_system_prompt(..., use_template_mode=False)` remains backward compatible.
+

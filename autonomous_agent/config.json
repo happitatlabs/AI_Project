@@ -1,0 +1,39 @@
+{
+  "llm": {
+    "provider": "ollama",
+    "base_url": "http://localhost:11434",
+    "model": "qwen3.5:9b",
+    "timeout": 60,
+    "fallback_to_rules": true
+  },
+  "agent": {
+    "max_cycles": 5,
+    "cycle_delay": 0.5,
+    "workspace": ".",
+    "memory_file": "agent_memory.json",
+    "goal_file": "agent_goal.md"
+  },
+  "logging": {
+    "level": "INFO",
+    "log_file": "agent.log"
+  },
+  "daemon": {
+    "interval_seconds": 300,
+    "max_restart_attempts": 5,
+    "restart_delay_seconds": 30,
+    "health_check_interval_seconds": 60,
+    "pid_file": "agent.pid",
+    "dangerous_action_types": ["delete", "external_send"],
+    "approval_file": "pending_approvals.json",
+    "approval_timeout_seconds": 120
+  },
+  "maintenance": {
+    "log_dir": "logs",
+    "archive_dir": "archive",
+    "log_retention_days": 7,
+    "skills_archive_days": 30,
+    "memory_max_history": 100,
+    "compress_old_logs": true,
+    "auto_run_after_cycles": 50
+  }
+}

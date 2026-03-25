@@ -23,6 +23,12 @@ import random
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from mellow_link.services.prompt_policy import (
+    build_runtime_system_prompt,
+    enforce_scene_policy,
+)
+from mellow_link.services.semantic_scene_extractor import extract_semantic_scenes
+
 
 _KOREAN_STOPWORDS = {
     "그", "이", "저", "것", "수", "듯", "처럼", "보다",
@@ -62,7 +68,7 @@ def _pick_motion_bucket(camera_hint: str) -> int:
     """
     h = (camera_hint or "").lower()
     if "static" in h or "locked" in h:
-        return 50
+        return 16
     if "slow" in h and ("zoom" in h or "push" in h):
         return 80
     if "pan" in h:
@@ -82,11 +88,11 @@ def _infer_camera_and_motion(line: str) -> Tuple[str, str]:
     calm_markers = ("기억", "그리", "눈물", "조용", "새벽", "밤", "달", "별", "고요", "따뜻", "포근")
 
     if any(m in t for m in dynamic_markers):
-        return ("dynamic handheld pan", "subject movement, wind, cloth flutter, dynamic parallax")
+        return ("static locked shot", "ambient motion only, wind through the environment, cloth flutter, gentle parallax, seamless loop")
     if any(m in t for m in calm_markers):
-        return ("slow cinematic zoom in", "subtle breathing motion, gentle parallax, soft atmosphere drift")
-    # 기본값: 느린 패닝
-    return ("slow pan left", "subtle parallax, gentle ambient motion")
+        return ("static locked shot", "subtle ambient motion, light haze, gentle fabric motion, seamless loop")
+    # 기본값: 고정 프레임
+    return ("static locked shot", "subtle ambient motion, soft light fluctuation, seamless loop")
 
 
 @dataclass(frozen=True)
@@ -101,7 +107,7 @@ class PlannerConfig:
 # LLM Persona (The Cinematographer)
 # =============================================================================
 
-CINEMATOGRAPHER_SYSTEM_PROMPT = """
+DEFAULT_CINEMATOGRAPHER_SYSTEM_PROMPT = """
 당신은 추상적인 노래 가사를 시각적이고 영화적인 촬영 지시서로 변환하는 노련한 시네마토그래퍼입니다.
 
 규칙:
@@ -157,6 +163,143 @@ def _scrub_lyric_echo(desc: str, lyric_text: str) -> str:
     return d
 
 
+def _semantic_to_static_description(semantic_scene: Dict[str, Any]) -> str:
+    location = dict(semantic_scene.get("location") or {})
+    subject = dict(semantic_scene.get("subject") or {})
+    parts: List[str] = []
+
+    time_value = str(semantic_scene.get("time", "unspecified") or "unspecified")
+    weather = str(semantic_scene.get("weather", "unspecified") or "unspecified")
+    action = str(semantic_scene.get("action", "still_observation") or "still_observation")
+    emotion = str(semantic_scene.get("emotion", "contemplative") or "contemplative")
+    visual_elements = [str(v).replace("_", " ") for v in list(semantic_scene.get("visual_elements") or [])]
+
+    subtype = str(location.get("subtype", "ambient_room") or "ambient_room").replace("_", " ")
+    parts.append(f"{subtype} setting")
+    if time_value != "unspecified":
+        parts.append(f"{time_value} atmosphere")
+    if weather != "unspecified":
+        parts.append(f"{weather}-touched environment")
+
+    subject_type = str(subject.get("type", "environment") or "environment")
+    if subject_type == "human":
+        count = int(subject.get("count", 1) or 1)
+        state = str(subject.get("state", "present") or "present").replace("_", " ")
+        parts.append(f"{count} solitary presence, {state}")
+    else:
+        parts.append("empty environment with no visible people")
+
+    emotion_map = {
+        "longing": "melancholic lighting and reflective surfaces",
+        "sorrow": "soft dim light with muted contrast",
+        "comfort": "warm practical lighting and gentle shadows",
+        "hope": "soft glow breaking through the scene",
+        "tension": "restless contrast and hard-edged shadows",
+        "contemplative": "soft side lighting and quiet negative space",
+    }
+    parts.append(emotion_map.get(emotion, "soft side lighting and quiet negative space"))
+
+    action_map = {
+        "sitting_by_window": "window-side composition with seated silhouette near the glass",
+        "watching_rain": "composition focused on the window and rain-streaked reflections",
+        "walking_slowly": "long frame with a slow path through space",
+        "running": "tense corridor-like depth with strong directional lines",
+        "waiting_still": "still composition centered on patient stillness",
+        "staring_in_reflection": "reflective surface foreground and layered depth",
+        "still_observation": "locked composition with clear foreground-background separation",
+    }
+    parts.append(action_map.get(action, "locked composition with clear foreground-background separation"))
+
+    parts.extend(visual_elements[:5])
+    return ", ".join(_unique_preserve(parts))
+
+
+def _semantic_to_motion_description(semantic_scene: Dict[str, Any]) -> str:
+    weather = str(semantic_scene.get("weather", "unspecified") or "unspecified")
+    action = str(semantic_scene.get("action", "still_observation") or "still_observation")
+    emotion = str(semantic_scene.get("emotion", "contemplative") or "contemplative")
+    subject = dict(semantic_scene.get("subject") or {})
+
+    motion_parts = ["background frame stays steady", "localized motion emphasis", "seamless loop"]
+
+    if weather == "rain":
+        motion_parts.extend(["raindrops sliding on glass", "subtle reflection shimmer", "light pulse near the window"])
+    elif weather == "wind":
+        motion_parts.extend(["gentle fabric motion", "soft environmental drift", "foliage or curtain shimmer"])
+    elif weather == "fog":
+        motion_parts.extend(["slow haze drift", "soft depth breathing", "light bloom breathing softly"])
+    else:
+        motion_parts.append("subtle ambient motion only")
+
+    if action == "sitting_by_window":
+        motion_parts.append("quiet curtain movement near the window")
+    elif action == "watching_rain":
+        motion_parts.append("window reflections pulsing softly")
+    elif action == "walking_slowly":
+        motion_parts.append("soft clothing shimmer and drifting background haze")
+    elif action == "running":
+        motion_parts.append("restless light ripple and moving dust while the frame stays fixed")
+    elif action == "staring_in_reflection":
+        motion_parts.append("reflection shimmer and faint light fluctuation")
+    else:
+        motion_parts.append("soft light fluctuation")
+
+    if str(subject.get("type", "environment") or "environment") != "human":
+        motion_parts.append("environment-only movement")
+
+    emotion_overlays = {
+        "longing": "gentle melancholic pacing",
+        "sorrow": "heavy stillness",
+        "comfort": "calm breathing rhythm",
+        "hope": "subtle brightening glow",
+        "tension": "restrained nervous energy",
+        "contemplative": "quiet observational mood",
+    }
+    motion_parts.append(emotion_overlays.get(emotion, "quiet observational mood"))
+    return ", ".join(_unique_preserve(motion_parts))
+
+
+def _build_structured_scene(
+    *,
+    idx: int,
+    lyric_line: str,
+    segment_payload: Dict[str, Any],
+    semantic_scene: Dict[str, Any],
+    base_seed: int,
+    shared_keywords: str,
+    width: int,
+    height: int,
+) -> Dict[str, Any]:
+    camera_hint, _ = _infer_camera_and_motion(str(semantic_scene.get("action") or ""))
+    motion_bucket_id = _pick_motion_bucket(camera_hint)
+    static_desc = _scrub_lyric_echo(_semantic_to_static_description(semantic_scene), lyric_line)
+    dynamic_desc = _scrub_lyric_echo(_semantic_to_motion_description(semantic_scene), lyric_line)
+    scene = {
+        "scene_index": idx + 1,
+        "segment_id": str(segment_payload.get("segment_id", idx)),
+        "lyric_text": lyric_line,
+        "start_time": float(segment_payload.get("start_time", 0.0) or 0.0),
+        "end_time": float(segment_payload.get("end_time", 0.0) or 0.0),
+        "semantic_scene": semantic_scene,
+        "semantic_summary": {
+            "emotion": semantic_scene.get("emotion"),
+            "action": semantic_scene.get("action"),
+            "time": semantic_scene.get("time"),
+            "weather": semantic_scene.get("weather"),
+        },
+        "static_scene_description": static_desc,
+        "dynamic_action_description": dynamic_desc,
+        "shared_keywords": shared_keywords,
+        "style_seed": int(base_seed),
+        "seed": int(base_seed) + (idx * 101),
+        "motion_bucket_id": int(motion_bucket_id),
+        "width": width,
+        "height": height,
+        "negative_prompt": "",
+    }
+    return scene
+
+
 class VisualPlanner:
     """
     Story/Context 기반 Scene Planner.
@@ -187,7 +330,9 @@ class VisualPlanner:
 
             meta = metadata or {}
             segments_payload = []
-            for i, seg in enumerate(list(lyrics_segments)[: int(self.config.max_scenes)]):
+            limited_segments = list(lyrics_segments)[: int(self.config.max_scenes)]
+            semantic_scenes = extract_semantic_scenes(limited_segments)
+            for i, seg in enumerate(limited_segments):
                 segments_payload.append(
                     {
                         "segment_id": str(seg.get("id", i)),
@@ -203,20 +348,21 @@ class VisualPlanner:
                     "metadata": meta,
                     "shared_keywords": shared_keywords,
                     "segments": segments_payload,
+                    "semantic_scenes": semantic_scenes,
                 },
                 ensure_ascii=False,
                 indent=2,
             )
 
             prompt = (
-                "아래 JSON 입력을 참고하여, segments 각각에 대해 촬영 지시서 JSON 배열만 출력하세요.\n"
+                "아래 JSON 입력을 참고하여, semantic_scenes를 기반으로 segments 각각의 촬영 지시서 JSON 배열만 출력하세요.\n"
                 "출력 JSON 배열의 각 원소는 입력 segment_id를 그대로 포함해야 합니다.\n\n"
                 f"{user_prompt}"
             )
 
             result = await svc.generate(
                 prompt=prompt,
-                system_prompt=CINEMATOGRAPHER_SYSTEM_PROMPT,
+                system_prompt=build_runtime_system_prompt(DEFAULT_CINEMATOGRAPHER_SYSTEM_PROMPT),
                 mode=str(llm_mode),
                 temperature=0.2,
                 max_tokens=2048,
@@ -241,45 +387,34 @@ class VisualPlanner:
                     continue
                 sid = str(item.get("segment_id", idx))
                 lyric_line = str(segments_payload[idx].get("text", "")) if idx < len(segments_payload) else ""
-                static_desc = _scrub_lyric_echo(str(item.get("static_scene_description", "")).strip(), lyric_line)
-                dynamic_desc = _scrub_lyric_echo(str(item.get("dynamic_action_description", "")).strip(), lyric_line)
+                semantic_scene = semantic_scenes[idx] if idx < len(semantic_scenes) else {}
+                static_desc = _scrub_lyric_echo(
+                    str(item.get("static_scene_description", "")).strip() or _semantic_to_static_description(semantic_scene),
+                    lyric_line,
+                )
+                dynamic_desc = _scrub_lyric_echo(
+                    str(item.get("dynamic_action_description", "")).strip() or _semantic_to_motion_description(semantic_scene),
+                    lyric_line,
+                )
                 sk = str(item.get("shared_keywords", shared_keywords)).strip() or shared_keywords
 
-                # motion_bucket은 휴리스틱으로 보강(LLM이 누락해도 됨)
-                cam_hint, motion_hint = _infer_camera_and_motion(dynamic_desc or "")
-                motion_bucket_id = _pick_motion_bucket(cam_hint)
-
-                # ✅ verified: 프롬프트 포맷 강제 (가사 원문 직접 혼입 금지)
-                static_prompt = ", ".join(
-                    [p for p in ["cinematic music video still", static_desc, "soft lighting", "high quality", "16:9 composition"] if str(p).strip()]
-                )
-                motion_prompt = ", ".join(
-                    [p for p in ["cinematic music video", dynamic_desc, "consistent color", "no flicker"] if str(p).strip()]
-                )
-
-                scenes.append(
-                    {
-                        "scene_index": idx + 1,
+                scene = _build_structured_scene(
+                    idx=idx,
+                    lyric_line=lyric_line,
+                    segment_payload={
                         "segment_id": sid,
-                        "lyric_text": lyric_line,
                         "start_time": float(segments_payload[idx].get("start_time", 0.0)) if idx < len(segments_payload) else 0.0,
                         "end_time": float(segments_payload[idx].get("end_time", 0.0)) if idx < len(segments_payload) else 0.0,
-                        # ✅ required fields
-                        "static_scene_description": static_desc,
-                        "dynamic_action_description": dynamic_desc,
-                        "shared_keywords": sk,
-                        # wiring convenience (used by UI/services)
-                        "static_prompt": static_prompt,
-                        "motion_prompt": motion_prompt,
-                        # consistency
-                        "style_seed": int(base_seed),
-                        "seed": int(base_seed) + (idx * 101),
-                        "motion_bucket_id": int(motion_bucket_id),
-                        "width": width,
-                        "height": height,
-                        "negative_prompt": "",
-                    }
+                    },
+                    semantic_scene=semantic_scene,
+                    base_seed=int(base_seed),
+                    shared_keywords=sk,
+                    width=width,
+                    height=height,
                 )
+                scene["static_scene_description"] = static_desc
+                scene["dynamic_action_description"] = dynamic_desc
+                scenes.append(enforce_scene_policy(scene))
 
             if scenes:
                 return scenes
@@ -307,8 +442,11 @@ class VisualPlanner:
         if base_seed is None:
             base_seed = random.randint(0, 2**31 - 1)
 
+        limited_segments = list(lyrics_segments)[:max_scenes]
+        semantic_scenes = extract_semantic_scenes(limited_segments)
+
         # 전체 컨텍스트(가사 전체) 기반 키워드/스타일 힌트
-        full_text = "\n".join([str(s.get("text", "")).strip() for s in lyrics_segments if str(s.get("text", "")).strip()])
+        full_text = "\n".join([str(s.get("text", "")).strip() for s in limited_segments if str(s.get("text", "")).strip()])
         global_keywords = _unique_preserve(_tokenize(full_text))[:12]
 
         mood = str(meta.get("mood") or "").strip()
@@ -320,7 +458,7 @@ class VisualPlanner:
         shared_keywords = "cinematic, film still, soft lighting, 16:9 composition"
 
         scenes: List[Dict[str, Any]] = []
-        for idx, seg in enumerate(list(lyrics_segments)[:max_scenes]):
+        for idx, seg in enumerate(limited_segments):
             lyric_line = str(seg.get("text", "")).strip()
             if not lyric_line:
                 continue
@@ -330,58 +468,23 @@ class VisualPlanner:
 
             local_kw = _unique_preserve(_tokenize(lyric_line))
             keywords = _unique_preserve((local_kw + global_keywords))[:8]
-
-            camera_hint, motion_hint = _infer_camera_and_motion(lyric_line)
-            motion_bucket_id = _pick_motion_bucket(camera_hint)
-
-            # ✅ verified: "가사를 그대로 쓰지 마라" (휴리스틱도 가사 단어를 prompt에 넣지 않음)
-            # - lyric_line은 분기(정서/리듬) 판단에만 사용, 프롬프트 문자열에는 직접 포함하지 않는다.
-            # ✅ required 3-field split
-            static_scene_description = ", ".join(
-                [p for p in [
-                    "a foggy mirror on a wall, soft side lighting",
-                    "a quiet room with a single window, dust in the air",
-                    "a table with a worn handkerchief and a cup of tea",
-                    "shallow depth of field, clear subject separation",
-                ] if p]
-            )
-            dynamic_action_description = ", ".join(
-                [p for p in [
-                    "camera slowly pushes in toward the mirror",
-                    "a hand enters frame and gently wipes the glass",
-                    "subtle parallax, stable exposure",
-                ] if p]
-            )
-
-            static_prompt = ", ".join(
-                [p for p in ["cinematic music video still", static_scene_description, "soft lighting", "high quality", "16:9 composition"] if str(p).strip()]
-            )
-            motion_prompt = ", ".join(
-                [p for p in ["cinematic music video", dynamic_action_description, "consistent color", "no flicker"] if str(p).strip()]
-            )
-
-            scenes.append(
-                {
-                    "scene_index": idx + 1,
+            semantic_scene = semantic_scenes[idx] if idx < len(semantic_scenes) else {}
+            scene = _build_structured_scene(
+                idx=idx,
+                lyric_line=lyric_line,
+                segment_payload={
                     "segment_id": str(idx),
-                    "lyric_text": lyric_line,
                     "start_time": start_time,
                     "end_time": end_time,
-                    "keywords": keywords,
-                    "style_seed": int(base_seed),
-                    "seed": int(base_seed) + (idx * 101),
-                    "static_scene_description": static_scene_description,
-                    "dynamic_action_description": dynamic_action_description,
-                    "shared_keywords": shared_keywords,
-                    # wiring convenience (backward compatible)
-                    "static_prompt": static_prompt,
-                    "motion_prompt": motion_prompt,
-                    "negative_prompt": "",
-                    "motion_bucket_id": int(motion_bucket_id),
-                    "width": width,
-                    "height": height,
-                }
+                },
+                semantic_scene=semantic_scene,
+                base_seed=int(base_seed),
+                shared_keywords=shared_keywords,
+                width=width,
+                height=height,
             )
+            scene["keywords"] = keywords
+            scenes.append(enforce_scene_policy(scene))
 
         return scenes
 

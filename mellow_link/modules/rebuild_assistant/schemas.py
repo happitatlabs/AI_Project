@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from mellow_link.services.anonymization.schemas import SafeAnalysisBundle
+
 
 class RebuildAssetsPayload(BaseModel):
     source_code: str = ""
@@ -68,6 +70,11 @@ class ExtractedRulesEnvelope(BaseModel):
     save_validation: SaveValidationRules = Field(default_factory=SaveValidationRules)
 
 
+class MissingContextItem(BaseModel):
+    required_material: str
+    reason: str
+
+
 class CompanyRuleProfile(BaseModel):
     profile_name: str = "default_placeholder"
     enabled: bool = False
@@ -83,8 +90,10 @@ class StructuredRebuildResult(BaseModel):
     recomposition_draft: LayeredListResult = Field(default_factory=LayeredListResult)
     risks: list[str] = Field(default_factory=list)
     extracted_rules: ExtractedRulesEnvelope = Field(default_factory=ExtractedRulesEnvelope)
+    recommended_directions: list[str] = Field(default_factory=list)
     confidence: float = 0.0
     missing_context: list[str] = Field(default_factory=list)
+    missing_context_details: list[MissingContextItem] = Field(default_factory=list)
 
     @field_validator("confidence", mode="before")
     @classmethod
@@ -96,11 +105,17 @@ class StructuredRebuildResult(BaseModel):
         return max(0.0, min(1.0, numeric))
 
 
-class RebuildAssistantStartRequest(BaseModel):
+class RebuildAssistantStartResponse(BaseModel):
+    run_id: str
+    session_id: str
+    module_id: str = "rebuild_assistant"
+    run_kind: str = "rebuild_plan"
+
+
+class RebuildAssistantBundleRequest(BaseModel):
     goal: str = Field(..., description="Single feature/page legacy reconstruction goal")
-    assets: RebuildAssetsPayload = Field(default_factory=RebuildAssetsPayload)
+    safe_bundle: SafeAnalysisBundle
     constraints: list[str] = Field(default_factory=list)
-    temp_session_id: str | None = None
 
     @field_validator("goal")
     @classmethod
@@ -110,15 +125,59 @@ class RebuildAssistantStartRequest(BaseModel):
             raise ValueError("goal must be at least 8 characters after trimming")
         return stripped
 
-    @model_validator(mode="after")
-    def validate_assets_or_temp_context(self) -> "RebuildAssistantStartRequest":
-        if self.assets.has_any_content() or (self.temp_session_id or "").strip():
-            return self
-        raise ValueError("Provide at least one asset or temp_session_id")
+
+class ProjectAssetItem(BaseModel):
+    name: str
+    temp_file_id: str
+    size: int = 0
+    category_hint: str = ""
+
+    @field_validator("name", "temp_file_id")
+    @classmethod
+    def validate_asset_strings(cls, value: str) -> str:
+        stripped = (value or "").strip()
+        if not stripped:
+            raise ValueError("asset field cannot be blank")
+        return stripped
 
 
-class RebuildAssistantStartResponse(BaseModel):
+class ProjectStartRequest(BaseModel):
+    project_name: str = Field(..., description="Commercial modernization project name")
+    client_name: str = Field(..., description="Customer or account name")
+    upload_session_id: str = Field(..., description="Temp upload session ID")
+    asset_manifest: list[ProjectAssetItem] = Field(default_factory=list)
+    template_key: str = Field("default_modernization_v1")
+    constraints: list[str] = Field(default_factory=list)
+
+    @field_validator("project_name", "client_name", "upload_session_id", "template_key")
+    @classmethod
+    def validate_required_strings(cls, value: str) -> str:
+        stripped = (value or "").strip()
+        if not stripped:
+            raise ValueError("required field cannot be blank")
+        return stripped
+
+    @field_validator("constraints")
+    @classmethod
+    def normalize_constraints(cls, value: list[str]) -> list[str]:
+        return [item.strip() for item in (value or []) if (item or "").strip()]
+
+
+class ProjectStartResponse(BaseModel):
+    project_id: str
     run_id: str
     session_id: str
-    module_id: str = "rebuild_assistant"
-    run_kind: str = "rebuild_plan"
+    status: str = "running"
+
+
+class ProjectReanalysisRequest(BaseModel):
+    new_asset_manifest: list[ProjectAssetItem] = Field(default_factory=list)
+
+
+class ProjectReanalysisResponse(BaseModel):
+    project_id: str
+    run_id: str
+    session_id: str
+    status: str = "running"
+    promoted_asset_count: int = 0
+    latest_asset_count: int = 0

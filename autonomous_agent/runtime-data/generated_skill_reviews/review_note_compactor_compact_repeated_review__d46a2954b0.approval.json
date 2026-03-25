@@ -1,0 +1,22 @@
+{
+  "skill_id": "review_note_compactor_compact_repeated_review__d46a2954b0",
+  "updated_at": "2026-03-23T14:27:00.940724+00:00",
+  "records": {
+    "transform_approval": {
+      "skill_id": "review_note_compactor_compact_repeated_review__d46a2954b0",
+      "approval_type": "transform_approval",
+      "decision": "approved",
+      "approved_at": "2026-03-23T14:27:00.940724+00:00",
+      "approver": "admin",
+      "rationale": "ok",
+      "followup_required": false,
+      "notes": [],
+      "source_review_decision": "approve_for_consideration",
+      "source_packet_id": "review_note_compactor_compact_repeated_review__d46a2954b0.packet",
+      "source_transform_template": "review_note_compactor_compact_repeated_review__d46a2954b0.transform",
+      "final_target_name": "review_note_compactor_v1",
+      "final_target_path": "skills/review_note_compactor_v1.json",
+      "rollback_reference": null
+    }
+  }
+}

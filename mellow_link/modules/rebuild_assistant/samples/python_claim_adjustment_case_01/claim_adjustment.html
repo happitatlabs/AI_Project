@@ -1,0 +1,18 @@
+<div class="claim-adjustment">
+    <h2>청구 조정 상세</h2>
+    <div>상태: {{ status }}</div>
+    <div>긴급 여부: {{ is_urgent }}</div>
+    <div>사고 유형: {{ accident_type }}</div>
+
+    {% if status == "REVIEW" %}
+        <div class="hint">검토 상태에서만 조정 가능</div>
+    {% endif %}
+
+    {% if is_urgent == "Y" and branch_code == "B99" %}
+        <div class="warning">특수지점 긴급건은 본사 선승인 후 처리</div>
+    {% endif %}
+
+    {% if claim_amount >= 3000000 and user_role == "BRANCH_MANAGER" %}
+        <div class="warning">지점장 단독 승인 한도 초과</div>
+    {% endif %}
+</div>

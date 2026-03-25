@@ -1,0 +1,53 @@
+{
+  "skill_id": "runtime_state_summarizer_summarize_runtime_state__e261e1f671",
+  "created_at": "2026-03-23T06:45:06.791062+00:00",
+  "generated_by": "manual_smoke_test",
+  "purpose": "summarize runtime state for manual review",
+  "status": "queued_for_manual_promotion",
+  "sandbox_only": true,
+  "promotion_required": true,
+  "allowed_inputs": [
+    "runtime_state"
+  ],
+  "allowed_outputs": [
+    "summary_lines",
+    "summary_text"
+  ],
+  "validation_summary": "validated: 0 warning(s)",
+  "sandbox_result_summary": "runtime state summarized with 2 marker(s)",
+  "skill_definition": {
+    "name": "runtime_state_summarizer",
+    "description": "runtime_state_summarizer generated sandbox-only draft",
+    "when_to_use": "Use when a sandbox-only runtime_state_summarizer summary is needed",
+    "input": "runtime_state",
+    "output": "summary_lines, summary_text",
+    "steps": [
+      "summarize_runtime_state"
+    ],
+    "risk_level": "safe",
+    "behavior_class": "report",
+    "skill_kind": "runtime_state_summarizer",
+    "capabilities": [
+      "read_only",
+      "summary",
+      "formatting"
+    ]
+  },
+  "last_validation_report": {
+    "validated_at": "2026-03-23T06:45:06.798343+00:00",
+    "validation_passed": true,
+    "validation_errors": [],
+    "validation_warnings": []
+  },
+  "last_sandbox_result": {
+    "run_id": "generated_skill_run_1b4278043315",
+    "sandbox_result": "passed",
+    "output_summary": "runtime state summarized with 2 marker(s)",
+    "runtime_notes": []
+  },
+  "last_queue_entry": {
+    "queued_at": "2026-03-23T06:45:06.804351+00:00",
+    "promotion_status": "pending_manual_review",
+    "promoted": false
+  }
+}

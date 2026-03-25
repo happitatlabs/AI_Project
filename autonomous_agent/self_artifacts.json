@@ -1,0 +1,27 @@
+{
+  "exact_names": [
+    "agent_state.json",
+    "pending_approvals.json",
+    "agent.pid"
+  ],
+  "glob_patterns": [
+    "reports/**",
+    "archive/**",
+    "logs/**",
+    "history/history_current.jsonl",
+    "history/history_*.jsonl",
+    "history/runtime_*.jsonl",
+    "*.log",
+    "*.jsonl",
+    "runtime_trace*",
+    "session_trace*",
+    "agent_trace*",
+    "*.pid.lock",
+    "workspace_reporter_*",
+    "file_classifier_*",
+    "code_reviewer_*",
+    "report_*",
+    "change_summary_*",
+    "memory_analysis_*"
+  ]
+}

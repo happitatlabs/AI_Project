@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import threading
+from typing import Callable
 
-from mellow_link import app_state
 from mellow_link.infra.run_events import (
     EVENT_TYPE_LOG,
     EVENT_TYPE_PLAN_CREATED,
@@ -12,31 +12,33 @@ from mellow_link.infra.run_events import (
     EVENT_TYPE_TODO_STARTED,
     emit_event,
 )
+from mellow_link.services.anonymization.schemas import SafeAnalysisBundle
 
-from .schemas import RebuildAssetsPayload
 from .service import RebuildAssistantService
 
 
-def start_rebuild_assistant_run(
+def _rebuild_todos() -> list[dict[str, str]]:
+    return [
+        {"todo_id": "B1", "title": "입력 정리", "status": "pending"},
+        {"todo_id": "B2", "title": "자산 분석", "status": "pending"},
+        {"todo_id": "B3", "title": "설계 초안 생성", "status": "pending"},
+        {"todo_id": "B4", "title": "설계 초안 보강", "status": "pending"},
+        {"todo_id": "B5", "title": "결과 패키지 정리", "status": "pending"},
+    ]
+
+
+def _spawn_rebuild_run(
+    *,
     run_id: str,
     session_id: str | None,
-    *,
     goal: str,
-    assets: RebuildAssetsPayload,
-    constraints: list[str] | None = None,
-    temp_session_id: str | None = None,
+    prepare_input: Callable[[RebuildAssistantService], object],
+    run_meta: dict,
 ) -> None:
-    todos = [
-        {"todo_id": "B1", "title": "입력 준비", "status": "pending"},
-        {"todo_id": "B2", "title": "레거시 분석", "status": "pending"},
-        {"todo_id": "B3", "title": "재구성 설계", "status": "pending"},
-        {"todo_id": "B4", "title": "초안 생성", "status": "pending"},
-        {"todo_id": "B5", "title": "결과 정리", "status": "pending"},
-    ]
+    todos = _rebuild_todos()
 
     def _run() -> None:
         service = RebuildAssistantService()
-        temp_context = str(app_state.TEMP_CONTEXT_STORE.get(temp_session_id, "") or "") if temp_session_id else ""
         try:
             emit_event(
                 run_id,
@@ -45,13 +47,13 @@ def start_rebuild_assistant_run(
                     "user_input": goal[:200],
                     "mode": "module",
                     "session_id": session_id,
-                    "temp_session_id": temp_session_id,
+                    **run_meta,
                 },
             )
             emit_event(run_id, EVENT_TYPE_PLAN_CREATED, {"todos": todos})
 
             emit_event(run_id, EVENT_TYPE_TODO_STARTED, todos[0])
-            prepared = service.prepare_input(goal=goal, assets=assets, constraints=constraints, temp_context=temp_context)
+            prepared = prepare_input(service)
             emit_event(
                 run_id,
                 EVENT_TYPE_LOG,
@@ -121,3 +123,23 @@ def start_rebuild_assistant_run(
             )
 
     threading.Thread(target=_run, daemon=True).start()
+
+def start_rebuild_assistant_safe_bundle_run(
+    run_id: str,
+    session_id: str | None,
+    *,
+    goal: str,
+    safe_bundle: SafeAnalysisBundle,
+    constraints: list[str] | None = None,
+) -> None:
+    _spawn_rebuild_run(
+        run_id=run_id,
+        session_id=session_id,
+        goal=goal,
+        prepare_input=lambda service: service.prepare_safe_bundle_input(
+            goal=goal,
+            safe_bundle=safe_bundle,
+            constraints=constraints,
+        ),
+        run_meta={"safe_bundle_id": safe_bundle.bundle_id},
+    )
