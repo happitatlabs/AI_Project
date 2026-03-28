@@ -1,0 +1,71 @@
+{
+  "skill_id": "review_note_compactor_compact_repeated_review__d46a2954b0",
+  "created_at": "2026-03-23T12:40:06.507887+00:00",
+  "source": {
+    "generated_skill_id": "review_note_compactor_compact_repeated_review__d46a2954b0",
+    "packet_id": "review_note_compactor_compact_repeated_review__d46a2954b0",
+    "sandbox_validated": true
+  },
+  "proposed_production": {
+    "target_name": "",
+    "target_path": "skills/<manual_target_name>.json",
+    "skill_kind": "review_note_compactor",
+    "capabilities": [
+      "read_only",
+      "summary",
+      "formatting"
+    ],
+    "description": "review_note_compactor generated sandbox-only draft",
+    "inputs": [
+      "review_notes"
+    ],
+    "outputs": [
+      "compacted_notes",
+      "summary_text"
+    ]
+  },
+  "transform_notes": {
+    "required_manual_edits": [
+      "choose a production-safe target_name",
+      "replace the placeholder target_path",
+      "refine the production description",
+      "confirm allowed capabilities for production candidate",
+      "review inputs and outputs for production contract"
+    ],
+    "removed_fields": [
+      "sandbox_only",
+      "promotion_required",
+      "validation_summary",
+      "sandbox_result_summary",
+      "last_validation_report",
+      "last_sandbox_result",
+      "last_queue_entry"
+    ],
+    "adjusted_fields": [
+      "target_name left blank for manual decision",
+      "target_path uses a manual placeholder",
+      "description copied from generated draft and requires human revision",
+      "capabilities copied from sandbox draft and require confirmation",
+      "inputs and outputs copied from sandbox draft and require normalization"
+    ],
+    "naming_decision": "manual naming decision required",
+    "capability_review": "required before any production candidate is proposed",
+    "security_review": "required"
+  },
+  "risk_checks": {
+    "overwrite_risk": "none",
+    "naming_collision": false,
+    "core_skill_conflict": false
+  },
+  "promotion_preconditions": {
+    "review_decision_required": true,
+    "manual_confirmation_required": true,
+    "rollback_plan_required": true
+  },
+  "build_warnings": [],
+  "review_context": {
+    "decision": "approve_for_consideration",
+    "reviewer": "admin",
+    "reviewed_at": "2026-03-23T12:25:50.922228+00:00"
+  }
+}

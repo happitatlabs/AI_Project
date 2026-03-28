@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Any, Dict, Optional
 
 
 class ImageRequest(BaseModel):
@@ -24,6 +24,7 @@ class ImageRequest(BaseModel):
     sampler_name: str = Field("euler", description="샘플러 (예: euler, dpmpp_2m)")
     scheduler: str = Field("normal", description="스케줄러 (예: normal, karras)")
     denoise: float = Field(1.0, description="디노이징 강도 (1.0 = 완전 새로 그리기)")
+    provenance: Optional[Dict[str, Any]] = Field(None, description="출력 sidecar용 provenance 정보")
 
 
 class VideoRequest(BaseModel):
@@ -34,7 +35,7 @@ class VideoRequest(BaseModel):
     image_path: str = Field(..., description="입력 이미지 경로 (sandbox 내부 경로 권장)")
     motion_prompt: Optional[str] = Field(
         None,
-        description="(권장) 비디오용 모션 프롬프트: 카메라 워킹/움직임 중심",
+        description="(권장) 비디오용 모션 프롬프트. LOCAL_MOTION_LOOP에서는 무엇이 국소적으로 움직일지, AMBIENT_STILL_LOOP에서는 미세한 정적 루프 방향을 뜻함.",
     )
     prompt: Optional[str] = Field(
         None,
@@ -42,7 +43,7 @@ class VideoRequest(BaseModel):
     )
     mode: Optional[str] = Field(
         None,
-        description="비디오 생성 모드. 예: VIDEO_ONLY (Flux 이미지 생성 노드 제거 후 SVD만 실행).",
+        description="비디오 생성 모드. 예: LOCAL_MOTION_LOOP, AMBIENT_STILL_LOOP, VIDEO_ONLY. VIDEO_LOCKED_CAMERA는 deprecated alias.",
     )
     motion_bucket_id: int = Field(127, ge=0, le=255, description="SVD motion bucket id (기본 127)")
     workflow: Optional[str] = Field(None, description="비디오 워크플로우 JSON 파일명 (예: svd.json)")
@@ -52,3 +53,4 @@ class VideoRequest(BaseModel):
     loop_mode: str = Field("boomerang", description="루핑 모드: boomerang | crossfade")
     overlap_seconds: float = Field(0.35, ge=0.05, le=2.0, description="crossfade overlap(초)")
     fps: int = Field(8, ge=1, le=60, description="출력 fps (기본 8)")
+    provenance: Optional[Dict[str, Any]] = Field(None, description="출력 sidecar용 provenance 정보")

@@ -94,3 +94,69 @@ def extend_video_if_needed(
     except Exception as e:
         logger.exception("[VideoProcessor] processing failed: %s", e)
         return in_path
+
+
+def stabilize_video_drift(
+    input_path: str | Path,
+    *,
+    strength: float = 0.18,
+) -> Path:
+    """
+    Apply a conservative FFmpeg stabilization pass to reduce perceived camera drift.
+
+    On failure or disabled compute, returns original path.
+    """
+    in_path = Path(input_path).resolve()
+    if not in_path.exists():
+        return in_path
+
+    try:
+        return _get_compute().stabilize_video_drift(in_path, strength=strength)
+    except RuntimeError as e:
+        logger.warning(
+            "[VideoProcessor] stabilize_video_drift blocked or failed (hint: ENABLE_MEDIA_COMPUTE/ENABLE_FFMPEG): %s. Returning original: %s",
+            e,
+            in_path,
+        )
+        return in_path
+    except FileNotFoundError:
+        logger.warning(
+            "[VideoProcessor] ffmpeg missing during stabilize_video_drift; returning original: %s",
+            in_path,
+        )
+        return in_path
+    except Exception as e:
+        logger.exception("[VideoProcessor] stabilize_video_drift failed: %s", e)
+        return in_path
+
+
+def create_ambient_loop_from_image(
+    image_path: str | Path,
+    *,
+    output_path: str | Path,
+    target_duration: float = 12.0,
+    fps: int = 8,
+    strength: float = 0.18,
+    motion_profile: Optional[dict] = None,
+) -> Path:
+    """
+    Create a locked-camera ambient loop from a single image via the media compute adapter.
+    """
+    in_path = Path(image_path).resolve()
+    if not in_path.exists():
+        raise FileNotFoundError(f"image_path not found: {in_path}")
+    try:
+        return _get_compute().create_ambient_loop_from_image(
+            in_path,
+            output_path,
+            target_duration=target_duration,
+            fps=fps,
+            strength=strength,
+            motion_profile=motion_profile,
+        )
+    except RuntimeError as e:
+        logger.warning(
+            "[VideoProcessor] create_ambient_loop_from_image blocked or failed (hint: ENABLE_MEDIA_COMPUTE/ENABLE_FFMPEG): %s",
+            e,
+        )
+        raise

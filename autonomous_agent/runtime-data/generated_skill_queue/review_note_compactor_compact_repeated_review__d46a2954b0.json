@@ -1,0 +1,11 @@
+{
+  "skill_id": "review_note_compactor_compact_repeated_review__d46a2954b0",
+  "queued_at": "2026-03-23T06:55:24.903292+00:00",
+  "purpose": "compact repeated review notes for manual review",
+  "validation_summary": "validated: 0 warning(s)",
+  "sandbox_result_summary": "review notes compacted from 5 to 3",
+  "promotion_status": "pending_manual_review",
+  "sandbox_only": true,
+  "promotion_required": true,
+  "promoted": false
+}

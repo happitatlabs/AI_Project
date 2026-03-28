@@ -1,0 +1,128 @@
+{
+  "current_cycle": 162,
+  "recent_actions": [
+    {
+      "skill": "workspace_reporter",
+      "summary": "스킬 'workspace_reporter' 완료 (3/3 steps) → reports/workspace_reporter_20260322_145358.md",
+      "report_path": "reports/workspace_reporter_20260322_145358.md",
+      "executed_at": "2026-03-22T05:53:58Z"
+    },
+    {
+      "skill": "file_classifier",
+      "summary": "스킬 'file_classifier' 완료 (4/4 steps) → reports/file_classifier_20260322_145415.md",
+      "report_path": "reports/file_classifier_20260322_145415.md",
+      "executed_at": "2026-03-22T05:54:15Z"
+    },
+    {
+      "skill": "code_reviewer",
+      "summary": "스킬 'code_reviewer' 완료 (3/3 steps) → reports/code_reviewer_20260322_145429.md",
+      "report_path": "reports/code_reviewer_20260322_145429.md",
+      "executed_at": "2026-03-22T05:54:29Z"
+    },
+    {
+      "skill": "workspace_reporter",
+      "summary": "스킬 'workspace_reporter' 완료 (3/3 steps) → reports/workspace_reporter_20260322_145435.md",
+      "report_path": "reports/workspace_reporter_20260322_145435.md",
+      "executed_at": "2026-03-22T05:54:35Z"
+    },
+    {
+      "skill": "file_classifier",
+      "summary": "스킬 'file_classifier' 완료 (4/4 steps) → reports/file_classifier_20260322_145444.md",
+      "report_path": "reports/file_classifier_20260322_145444.md",
+      "executed_at": "2026-03-22T05:54:44Z"
+    },
+    {
+      "skill": "workspace_reporter",
+      "summary": "스킬 'workspace_reporter' 완료 (3/3 steps) → reports/workspace_reporter_20260322_145450.md",
+      "report_path": "reports/workspace_reporter_20260322_145450.md",
+      "executed_at": "2026-03-22T05:54:50Z"
+    },
+    {
+      "skill": "file_classifier",
+      "summary": "스킬 'file_classifier' 완료 (4/4 steps) → reports/file_classifier_20260322_145459.md",
+      "report_path": "reports/file_classifier_20260322_145459.md",
+      "executed_at": "2026-03-22T05:54:59Z"
+    },
+    {
+      "skill": "workspace_reporter",
+      "summary": "스킬 'workspace_reporter' 완료 (3/3 steps) → reports/workspace_reporter_20260322_145507.md",
+      "report_path": "reports/workspace_reporter_20260322_145507.md",
+      "executed_at": "2026-03-22T05:55:07Z"
+    },
+    {
+      "skill": "code_reviewer",
+      "summary": "스킬 'code_reviewer' 완료 (3/3 steps) → reports/code_reviewer_20260322_145521.md",
+      "report_path": "reports/code_reviewer_20260322_145521.md",
+      "executed_at": "2026-03-22T05:55:21Z"
+    },
+    {
+      "skill": "workspace_reporter",
+      "summary": "스킬 'workspace_reporter' 완료 (3/3 steps) → reports/workspace_reporter_20260322_145529.md",
+      "report_path": "reports/workspace_reporter_20260322_145529.md",
+      "executed_at": "2026-03-22T05:55:29Z"
+    }
+  ],
+  "recent_fallbacks": [
+    {
+      "skill": "report_only",
+      "summary": "[Summary] state changed -> report generated (reports/report_20260322_122019.md), archived 1 old file(s)",
+      "report_path": "reports/report_20260322_122019.md",
+      "executed_at": "2026-03-22T03:20:19Z"
+    },
+    {
+      "skill": "memory_analyzer",
+      "summary": "[Summary] 5 history entries analyzed -> memory analysis generated (reports/memory_analysis_20260322_122531.md), archi...",
+      "report_path": "reports/memory_analysis_20260322_122531.md",
+      "executed_at": "2026-03-22T03:25:31Z"
+    },
+    {
+      "skill": "report_only",
+      "summary": "[Summary] state changed -> report generated (reports/report_20260322_140855.md), archived 1 old file(s)",
+      "report_path": "reports/report_20260322_140855.md",
+      "executed_at": "2026-03-22T05:08:55Z"
+    },
+    {
+      "skill": "change_summarizer",
+      "summary": "[Summary] no change -> change summary skipped",
+      "report_path": null,
+      "executed_at": "2026-03-22T05:09:03Z"
+    },
+    {
+      "skill": "report_only",
+      "summary": "[Summary] state changed -> report generated (reports/report_20260322_140909.md), archived 1 old file(s)",
+      "report_path": "reports/report_20260322_140909.md",
+      "executed_at": "2026-03-22T05:09:09Z"
+    }
+  ],
+  "recent_scores": [
+    100,
+    100,
+    100,
+    100,
+    100,
+    95,
+    95,
+    95,
+    100,
+    95
+  ],
+  "trend": {
+    "trend": "stable",
+    "avg_score": 98.0,
+    "samples": 10,
+    "recent_scores": [
+      100,
+      100,
+      100,
+      100,
+      100,
+      95,
+      95,
+      95,
+      100,
+      95
+    ]
+  },
+  "last_run_at": "2026-03-22T05:55:29Z",
+  "last_success_at": "2026-03-22T05:55:29Z"
+}

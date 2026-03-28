@@ -1,0 +1,46 @@
+{
+  "skill_id": "review_note_compactor_compact_repeated_review__d46a2954b0",
+  "created_at": "2026-03-23T12:39:58.064506+00:00",
+  "draft": {
+    "purpose": "compact repeated review notes for manual review",
+    "skill_kind": "review_note_compactor",
+    "capabilities": [
+      "read_only",
+      "summary",
+      "formatting"
+    ],
+    "sandbox_only": true,
+    "promotion_required": true
+  },
+  "queue_record": {
+    "status": "queued_for_manual_promotion",
+    "promotion_status": "pending_manual_review",
+    "queued_at": "2026-03-23T06:55:24.903292+00:00"
+  },
+  "validation": {
+    "summary": "validated: 0 warning(s)",
+    "errors": [],
+    "warnings": []
+  },
+  "sandbox": {
+    "result": "passed",
+    "summary": "review notes compacted from 5 to 3",
+    "run_id": "generated_skill_run_11ba521e9c9f",
+    "execution_mode": "experimental_sandbox"
+  },
+  "review_decision": {
+    "decision": "approve_for_consideration",
+    "reviewer": "admin",
+    "reviewed_at": "2026-03-23T12:25:50.922228+00:00",
+    "rationale": "test",
+    "followup_required": false,
+    "notes": []
+  },
+  "promotion_assessment": {
+    "criteria_check_passed": true,
+    "blockers": [],
+    "warnings": [],
+    "overwrite_risk": "none",
+    "requires_manual_transform": true
+  }
+}

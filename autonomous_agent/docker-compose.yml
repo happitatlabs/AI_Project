@@ -1,0 +1,55 @@
+services:
+  agent-base:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: autonomous-agent:local
+    working_dir: /app
+    read_only: true
+    environment:
+      PYTHONPATH: /app
+      AUTONOMOUS_AGENT_RUNTIME_DIR: /runtime-data
+      AUTONOMOUS_AGENT_WORKSPACE: /workspace
+    volumes:
+      - ./:/workspace:ro
+      - ./runtime-data:/runtime-data
+      - ./runtime-data/reports:/app/reports
+      - ./runtime-data/archive:/app/archive
+      - ./runtime-data/history:/app/history
+      - ./runtime-data/logs:/app/logs
+      - ./runtime-data/generated_skills:/app/generated_skills
+      - ./runtime-data/agent_state.json:/app/agent_state.json
+      - ./runtime-data/pending_approvals.json:/app/pending_approvals.json
+      - ./runtime-data/agent.log:/app/agent.log
+    tmpfs:
+      - /tmp
+
+  agent-test:
+    extends:
+      service: agent-base
+    entrypoint: ["pytest"]
+    command:
+      - -p
+      - no:cacheprovider
+      - -q
+      - test_reports_and_metrics.py
+      - test_recent_actions_alignment.py
+      - test_memory_storage.py
+
+  agent-review:
+    extends:
+      service: agent-base
+    entrypoint: ["python"]
+    command: ["inspect_storage.py"]
+
+  agent-report:
+    extends:
+      service: agent-base
+    entrypoint: ["pytest"]
+    command:
+      - -p
+      - no:cacheprovider
+      - -q
+      - test_reports_and_metrics.py
+      - -k
+      - "workspace_reporter or report_only or skill_executor_saves_reports_directly_to_reports_dir"

@@ -1,0 +1,13 @@
+{
+  "skill_id": "proposal_summary_formatter_format_proposal_summary__b544242832",
+  "run_id": "generated_skill_run_7ac26442cca2",
+  "execution_mode": "experimental_sandbox",
+  "sandbox_result": "passed",
+  "output_summary": "proposal summary formatted",
+  "runtime_notes": [],
+  "generated_at": "2026-03-23T06:51:32.575738+00:00",
+  "output": {
+    "summary_text": "proposal_id=proposal-smoke-2 status=approved targets=2 change_type=config_change",
+    "output_summary": "proposal summary formatted"
+  }
+}

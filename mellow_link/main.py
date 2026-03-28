@@ -76,7 +76,7 @@ from mellow_link.utils import (
     is_port_active, DEFAULT_AVATAR_WS_PORT,
 )
 
-from mellow_link.dependencies import get_admin_user_for_flow_view, resolve_console_viewer
+from mellow_link.dependencies import get_admin_user_for_flow_view, get_admin_user_required
 from mellow_link.modules import get_module_registry
 
 
@@ -614,6 +614,7 @@ if FASTAPI_AVAILABLE:
     from mellow_link.routers.telegram import router as telegram_router
     from mellow_link.routers.autonomous import router as autonomous_router
     from mellow_link.routers.monitor import router as monitor_router
+    from mellow_link.routers.projects import router as projects_router
 
     app.include_router(auth_router)
     app.include_router(folders_router)
@@ -629,6 +630,7 @@ if FASTAPI_AVAILABLE:
     app.include_router(monitor_router)
     app.include_router(runs_router)
     app.include_router(runtime_router)
+    app.include_router(projects_router)
     for module in get_module_registry().list_modules():
         app.include_router(module.router)
 
@@ -636,7 +638,7 @@ if FASTAPI_AVAILABLE:
         """Use same static dir as mounted at startup (project_root or __file__)."""
         return Path(_static_dir) / name
 
-    @app.get("/dev-console", tags=["Dev"], response_class=HTMLResponse)
+    @app.get("/dev-console", tags=["Dev"], response_class=HTMLResponse, dependencies=[Depends(get_admin_user_required)])
     async def dev_console_view():
         """Dev Console UI (State-Centric 상세 뷰)."""
         html_path = _static_html_path("dev_console.html")
@@ -644,7 +646,7 @@ if FASTAPI_AVAILABLE:
             raise HTTPException(status_code=404, detail="dev_console.html not found")
         return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
 
-    @app.get("/dev-dashboard", tags=["Dev"], response_class=HTMLResponse)
+    @app.get("/dev-dashboard", tags=["Dev"], response_class=HTMLResponse, dependencies=[Depends(get_admin_user_required)])
     async def dev_dashboard_view():
         """Dev Dashboard UI (Run List + Timeline/Events 요약 뷰)."""
         html_path = _static_html_path("dev_dashboard.html")
@@ -652,7 +654,7 @@ if FASTAPI_AVAILABLE:
             raise HTTPException(status_code=404, detail="dev_dashboard.html not found")
         return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
 
-    @app.get("/operator-console", tags=["Dev"], response_class=HTMLResponse)
+    @app.get("/operator-console", tags=["Dev"], response_class=HTMLResponse, dependencies=[Depends(get_admin_user_required)])
     async def operator_console_view():
         """Operator Console UI (운영자 뷰: Chain Highlight, Compressed Status, Todo/Risk/Activity)."""
         html_path = _static_html_path("operator_console.html")
@@ -661,24 +663,15 @@ if FASTAPI_AVAILABLE:
         return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
 
     @app.get("/user-console", tags=["Dev"], response_class=HTMLResponse)
-    async def user_console_view(viewer=Depends(resolve_console_viewer)):
+    async def user_console_view():
         """User Console UI (사용자 뷰: Summary-first 진행/결과 표시)."""
-        html_path = _static_html_path("user_console.html")
-        if not html_path.exists():
-            raise HTTPException(status_code=404, detail="user_console.html not found")
-        html = html_path.read_text(encoding="utf-8")
-        role = str((viewer or {}).get("role") or "anonymous")
-        authenticated = "true" if bool((viewer or {}).get("authenticated")) else "false"
-        username = str((viewer or {}).get("username") or "anonymous").replace("'", "\\'")
-        inject = (
-            "<script>"
-            f"window.__CONSOLE_ROLE__='{role}';"
-            f"window.__CONSOLE_AUTHENTICATED__={authenticated};"
-            f"window.__CONSOLE_USERNAME__='{username}';"
-            "</script>"
+        return HTMLResponse(
+            content=(
+                "<!DOCTYPE html><html lang='ko'><head><meta charset='UTF-8'>"
+                "<meta http-equiv='refresh' content='0; url=/projects'>"
+                "<title>Redirecting</title></head><body></body></html>"
+            )
         )
-        html = html.replace("<head>", "<head>\n    " + inject, 1)
-        return HTMLResponse(content=html)
 
     # =========================================================================
     # Monitor endpoints that need special dependencies

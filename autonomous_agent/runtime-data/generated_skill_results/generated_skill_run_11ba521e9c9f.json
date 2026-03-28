@@ -1,0 +1,18 @@
+{
+  "skill_id": "review_note_compactor_compact_repeated_review__d46a2954b0",
+  "run_id": "generated_skill_run_11ba521e9c9f",
+  "execution_mode": "experimental_sandbox",
+  "sandbox_result": "passed",
+  "output_summary": "review notes compacted from 5 to 3",
+  "runtime_notes": [],
+  "generated_at": "2026-03-23T06:55:24.897067+00:00",
+  "output": {
+    "compacted_notes": [
+      "Needs tighter validation around sandbox-only metadata.",
+      "Promotion must remain manual-only.",
+      "Viewer output should stay read-only."
+    ],
+    "summary_text": "Needs tighter validation around sandbox-only metadata. | Promotion must remain manual-only. | Viewer output should stay read-only.",
+    "output_summary": "review notes compacted from 5 to 3"
+  }
+}

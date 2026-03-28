@@ -1,242 +1,96 @@
 # AI_Project
 
-Mellow-Link는 공통 실행 엔진 위에 유스케이스 모듈을 얹는 로컬 실행형 AI 플랫폼입니다.  
-기본 사용자 진입점은 `/runtime-console`이며, `/ui`는 모듈 허브와 run 콘솔 진입용 홈으로 유지됩니다.
+`AI_Project`는 여러 실험/보조 시스템을 포함하지만, 현재 상용 1차 기준 본체는 [`mellow_link`](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link)다.
 
-현재 이 프로젝트의 핵심 프레임은 `엔진 + 모듈`입니다.
+현재 제품 포지션은 다음과 같다.
 
-- 공통 엔진
-  - `core`
-  - `services`
-  - `routers`
-  - `static`
-  - `infra`
-- 실행 모듈
-  - `sql_analytics`
-  - `research_assistant`
-  - `rebuild_assistant`
-  - `ai_workflow_console`
+- 대표 제품: `레거시 현대화 분석`
+- 대표 사용자 흐름: `새 프로젝트 -> 분석 워크스페이스 -> 결과 패키지`
+- 대표 산출물: `진단 + 설계안 + 전환 초안`
 
-## 제품 동선
+## 현재 기준 시스템 구분
 
-현재 기준 기본 사용자 흐름은 아래와 같습니다.
+- [`mellow_link`](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link)
+  - 상용 1차 제품 본체
+  - 프로젝트 생성, run 추적, 결과 패키지, 대표 상품 모듈 포함
+- [`autonomous_agent`](/C:/Users/Hyein/ClaudeAI/AI_Project/autonomous_agent)
+  - 2차 이후 내부 자동화 계층
+  - 현재 사용자 제품 본체는 아님
+- [`mellow_chat_runtime`](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_chat_runtime)
+  - 별도 경량 runtime API
+  - 현 상용 1차 핵심 동선과는 분리
+- [`Open-LLM-VTuber`](/C:/Users/Hyein/ClaudeAI/AI_Project/Open-LLM-VTuber)
+  - 선택형 외부 인터페이스/부속 시스템
 
-1. 기본 채팅 진입은 `/runtime-console`에서 시작합니다.
-2. 런타임 UI는 `POST /runtime/turn`, `GET /runtime/status`만 사용합니다.
-3. 모듈 기반 작업은 `/ui`에서 시작하고, 시스템이 `run_id`를 생성합니다.
-4. 실행이 시작되면 `/user-console?run_id=...`로 이동합니다.
-5. 이후 `/runs`에서 같은 run에 다시 진입할 수 있습니다.
+## 기본 사용자 진입점
 
-핵심 URL:
+현재 제품 기준 기본 사용자 진입점은 아래와 같다.
 
-- `/runtime-console`: 기본 사용자 채팅 진입점
-- `/runtime-operator`: Runtime 최소 운영 상태 화면
-- `/ui`: 모듈 허브, 작업 시작
-- `/runs`: 실행 목록
-- `/user-console?run_id=...`: 사용자 진행/결과 뷰
-- `/operator-console?run_id=...`: 운영자 제어 뷰
-- `/dev-dashboard`: 다중 run 비교 뷰
-- `/dev-console?run_id=...`: 특정 run 디버깅 뷰
-- `/index.html`: deprecated legacy UI
+- `/`
+- `/ui`
+- `/projects/create`
 
-## 이 프로그램이 하는 일
+위 3개는 모두 `레거시 현대화 분석` 제품 홈/프로젝트 생성 흐름으로 연결된다.
 
-이 프로젝트는 단순 채팅 앱이 아니라, 실행을 만들고 추적하고 필요하면 운영/디버깅까지 이어지는 구조를 목표로 합니다.
+주요 사용자 화면:
 
-주요 기능:
+- `/projects/create`
+  - 새 프로젝트 생성
+- `/projects/{project_id}`
+  - 분석 워크스페이스
+- `/projects/{project_id}/result`
+  - 결과 패키지
 
-- 로컬 LLM 기반 실행 처리
-- 문서 업로드 후 분석 run 생성
-- 실행 상태, 진행률, activity, 결과 추적
-- 운영자 제어와 개발자 디버깅 화면 분리
-- 이미지/비디오/아바타 같은 선택 서비스 연동
+운영/개발 화면은 유지되지만 일반 사용자 동선에서는 숨긴다.
 
-## 구조
+## 현재 제품 실행 흐름
 
-### 공통 엔진
+1. 사용자가 프로젝트를 생성한다.
+2. 자산을 업로드한다.
+3. 익명화 전처리 공통 서비스가 원본을 격리하고 canonical anonymized source를 생성한다.
+4. 구조 추출은 canonical anonymized source 기준으로 수행된다.
+5. `SafeAnalysisBundle`이 만들어진다.
+6. [`rebuild_assistant`](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/modules/rebuild_assistant)가 `SafeAnalysisBundle`만 받아 분석을 수행한다.
+7. 결과 패키지 화면에서 `진단 / 설계안 / 전환 초안 / 부록`을 확인한다.
 
-공통 엔진은 인증, run 생성, 상태 추적, 서비스 연결, 공통 콘솔을 담당합니다.
+중요 원칙:
 
-주요 위치:
+- 공개 실행 경로에서 raw `assets` / `temp_session_id` 기반 입력은 사용하지 않는다.
+- `rebuild_assistant` 공개 실행선은 safe bundle 기반이다.
+- original content, original path, mapping 정보는 HTTP 응답/결과 패키지에 노출하지 않는다.
 
-- [mellow_link/main.py](/D:/AI_Project/mellow_link/main.py)
-- [mellow_link/core](/D:/AI_Project/mellow_link/core)
-- [mellow_link/services](/D:/AI_Project/mellow_link/services)
-- [mellow_link/routers](/D:/AI_Project/mellow_link/routers)
-- [mellow_link/static](/D:/AI_Project/mellow_link/static)
-- [mellow_link/infra](/D:/AI_Project/mellow_link/infra)
+## 핵심 문서
 
-### 실행 모듈
+활성 문서는 [`mellow_link/docs`](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs) 아래를 기준으로 본다.
 
-모듈은 `작업 시작 UI + 입력 스키마 + 실행 로직`만 다르게 가지고, run 추적과 콘솔은 공통 엔진을 그대로 공유합니다.
-
-- [mellow_link/modules/sql_analytics](/D:/AI_Project/mellow_link/modules/sql_analytics)
-  - 자연어 질문을 SQL 분석 run으로 변환
-- [mellow_link/modules/research_assistant](/D:/AI_Project/mellow_link/modules/research_assistant)
-  - 문서 업로드 후 문서 기반 분석 run 생성
-- [mellow_link/modules/rebuild_assistant](/D:/AI_Project/mellow_link/modules/rebuild_assistant)
-  - 레거시 기능을 분석해 재구성 전략과 구조화 초안 생성
-- [mellow_link/modules/ai_workflow_console](/D:/AI_Project/mellow_link/modules/ai_workflow_console)
-  - 생성/워크플로우 실행 관리용 시작점
-
-## 화면 책임
-
-### `/ui`
-
-모듈 허브입니다.
-
-- 모듈 선택
-- 각 모듈 시작점 진입
-- 성공 시 `/user-console`로 이동
-
-### `/runtime-console`
-
-기본 사용자 채팅 화면입니다.
-
-- `POST /runtime/turn` 호출
-- `GET /runtime/status` 상태 표시
-- 사용자 레벨 `turn.speech / passage / ooc / clarify`만 렌더링
-
-### `/runtime-operator`
-
-Runtime 최소 운영 화면입니다.
-
-- `GET /runtime/status`만 사용
-- `runtime.impl / system_state / degraded / last_error` 표시
-
-### `/runs`
-
-실행 목록 허브입니다.
-
-- 최근 run 목록
-- 상태 기준 재진입
-- 모듈/실행 유형 확인
-
-### `/user-console`
-
-사용자 진행/결과 화면입니다.
-
-- run 상태
-- 정규화된 3단계 진행률
-- 최근 activity
-- 중간 결과 / 최종 결과
-
-여기에는 raw debug, prompt, tool JSON, routing log를 노출하지 않습니다.
-
-### `/operator-console`
-
-운영자 제어 화면입니다.
-
-- 시작/재시도/취소/강제 종료
-- 현재 상태
-- 최소 요약
-
-### `/dev-dashboard`
-
-다중 run 비교 화면입니다.
-
-- run 목록
-- status / module / duration / summary preview
-- 필터 / 정렬
-
-### `/dev-console`
-
-특정 run 디버깅 화면입니다.
-
-- raw event log
-- step trace
-- prompt / response
-- tool usage
-- error detail
-
-### `/index.html`
-
-레거시 호환 화면입니다.
-
-- deprecated 상태
-- 신규 사용자 진입 금지
-- 과거 링크/호환 보호용
-- 제거 후보
-
-## 현재 상태
-
-현재 기준으로 상대적으로 안정화된 흐름은 아래와 같습니다.
-
-- `sql_analytics`
-  - 자연어 질문 -> SQL 분석 run 생성 -> `/user-console` 결과 확인
-- `research_assistant`
-  - 문서 업로드 -> 분석 run 생성 -> `/user-console` 결과 확인
-- `rebuild_assistant`
-  - 레거시 파일/입력 자산 -> 재구성 run 생성 -> `/user-console` 결과 확인
-
-최근 정리된 점:
-
-- `run_id` 중심 공통 콘솔 구조 정리
-- Runtime 전용 사용자/운영 화면 추가 (`/runtime-console`, `/runtime-operator`)
-- 기본 루트(`/`)를 `/runtime-console`로 전환
-- legacy `index.html`를 deprecated 호환 레이어로 격하
-- 사용자용 진행률을 모듈별 raw todo에서 정규화된 3단계로 통일
-- `research_assistant`는 범용 tool loop 대신 direct research inference 경로 사용
-- research retry는 같은 lifecycle 안에서 재시도하고, 종료 후에만 모델 unload
-- `rebuild_assistant`는 `status_permissions` / `search_filters` / `save_validation` feature mode를 분리해 구조화 결과를 생성
+- 전체 구조: [AI_PROJECT_STRUCTURE_AND_SPEC.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/AI_PROJECT_STRUCTURE_AND_SPEC.md)
+- 시스템 기준: [SYSTEM_ARCHITECTURE_GUIDEBOOK.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/SYSTEM_ARCHITECTURE_GUIDEBOOK.md)
+- 제품 구조 템플릿: [PRODUCT_STRUCTURE_TEMPLATE.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/PRODUCT_STRUCTURE_TEMPLATE.md)
+- 익명화 MVP 현황: [ANONYMIZATION_MVP_STATUS.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/ANONYMIZATION_MVP_STATUS.md)
+- 파일럿 보안/운영 안내: [PILOT_SECURITY_AND_OPERATIONS_NOTICE.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/PILOT_SECURITY_AND_OPERATIONS_NOTICE.md)
+- 문서 인덱스: [README.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/README.md)
 
 ## 빠른 시작
 
-1. Ollama를 실행합니다.
-2. `mellow_link/.env`에서 JWT 시크릿을 고정합니다.
-3. 필요하면 선택 서비스를 켜거나 끕니다.
-4. `python -m mellow_link.main` 또는 [launcher.py](/D:/AI_Project/launcher.py)로 서버를 실행합니다.
-5. 기본 UI는 `http://127.0.0.1:8000/runtime-console`로 접속합니다.
-6. 모듈 허브는 `http://127.0.0.1:8000/ui`에서 엽니다.
+1. Ollama를 실행한다.
+2. `mellow_link/.env`에서 필수 설정을 확인한다.
+3. 필요 시 `ANONYMIZATION_STORAGE_ROOT`를 명시한다.
+4. `python -m mellow_link.main` 또는 [launcher.py](/C:/Users/Hyein/ClaudeAI/AI_Project/launcher.py)로 서버를 실행한다.
+5. `http://127.0.0.1:8000/projects/create`로 접속한다.
 
 예시:
 
 ```env
 JWT_SECRET_KEY=32자_이상_랜덤_문자열
+ANONYMIZATION_STORAGE_ROOT=./mellow_link/data/anonymization
 VTUBER_RELAY_ENABLED=0
 AVATAR_AUTO_LAUNCH_ENABLED=0
 ENABLE_EDGE_TTS=0
 ```
 
-## Runtime 회귀 테스트
+## 현재 해석 기준
 
-Runtime 계약과 상태 회귀 방어선은 아래 두 파일입니다.
-
-- `mellow_chat_runtime/tests/test_runtime_api_contract.py`
-- `mellow_chat_runtime/tests/test_runtime_state_and_status.py`
-
-로컬 재현 명령:
-
-```powershell
-python -m pytest -q mellow_chat_runtime\tests\test_runtime_api_contract.py mellow_chat_runtime\tests\test_runtime_state_and_status.py
-```
-
-CI 기본 세트는 [runtime-core.yml](/D:/AI_Project/.github/workflows/runtime-core.yml)로 분리되어 있습니다.
-
-- Job 이름: `runtime-core`
-- 실행 이벤트: `pull_request`, `main` 브랜치 `push`
-- 목적: Runtime 계약/상태 회귀가 깨지면 바로 실패하도록 고정
-
-## 선택 서비스
-
-아래 서비스는 선택 사항입니다.
-
-- Ollama
-  - 필수
-- ComfyUI
-  - 이미지/비디오 생성 시 사용
-- Open-LLM-VTuber
-  - 음성/아바타 인터페이스용
-
-현재 `.env`에서 VTuber 관련 기능은 비활성화해 둘 수 있습니다.
-
-주요 위치:
-
-- [Open-LLM-VTuber](/D:/AI_Project/Open-LLM-VTuber)
-
-## 참고 문서
-
-- [AI_PROJECT_STRUCTURE_AND_SPEC.md](/D:/AI_Project/AI_PROJECT_STRUCTURE_AND_SPEC.md)
-- [SYSTEM_ARCHITECTURE_GUIDEBOOK.md](/D:/AI_Project/SYSTEM_ARCHITECTURE_GUIDEBOOK.md)
-- [TROUBLESHOOTING.md](/D:/AI_Project/TROUBLESHOOTING.md)
-- [SQL_ANALYTICS_DEMO.md](/D:/AI_Project/SQL_ANALYTICS_DEMO.md)
+- `mellow_link` = 지금 판매/데모하는 제품
+- `autonomous_agent` = 추후 안 보이게 붙일 내부 자동화
+- `mellow_chat_runtime` = 분리 운영 가능한 runtime 계층
+- `Open-LLM-VTuber` = 선택형 부속 인터페이스

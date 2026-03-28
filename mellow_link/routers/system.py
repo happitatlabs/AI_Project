@@ -57,7 +57,7 @@ async def favicon() -> FileResponse:
 @router.get("/ui", include_in_schema=False)
 async def serve_ui() -> FileResponse:
     """Serve the product home UI."""
-    return FileResponse(os.path.join(app_state.static_dir or ".", "ui_home.html"))
+    return FileResponse(os.path.join(app_state.static_dir or ".", "projects_create.html"))
 
 
 @router.get("/index.html", include_in_schema=False)
@@ -81,7 +81,7 @@ async def serve_runtime_operator() -> FileResponse:
 @router.get("/", tags=["System"], include_in_schema=False)
 async def root():
     """Root endpoint - redirect to /ui."""
-    return RedirectResponse(url="/runtime-console")
+    return RedirectResponse(url="/projects/create")
 
 
 # =============================================================================

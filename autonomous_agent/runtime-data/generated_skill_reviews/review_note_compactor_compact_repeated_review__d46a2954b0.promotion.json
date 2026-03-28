@@ -1,0 +1,14 @@
+{
+  "skill_id": "review_note_compactor_compact_repeated_review__d46a2954b0",
+  "promoted_at": "2026-03-23T14:27:42.004196+00:00",
+  "operator": "admin",
+  "decision": "executed",
+  "source_review_record": "review_note_compactor_compact_repeated_review__d46a2954b0.review",
+  "source_approval_record": "review_note_compactor_compact_repeated_review__d46a2954b0.approval",
+  "source_checklist_record": "review_note_compactor_compact_repeated_review__d46a2954b0.checklist",
+  "source_transform_template": "review_note_compactor_compact_repeated_review__d46a2954b0.transform",
+  "source_candidate_artifact": "review_note_compactor_compact_repeated_review__d46a2954b0.candidate",
+  "final_target_name": "review_note_compactor_v1",
+  "final_target_path": "skills/review_note_compactor_v1.json",
+  "notes": []
+}

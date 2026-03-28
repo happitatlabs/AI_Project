@@ -32,6 +32,30 @@ class MediaComputeAdapter(ABC):
         ...
 
     @abstractmethod
+    def stabilize_video_drift(
+        self,
+        input_path: str | Path,
+        *,
+        strength: float = 0.18,
+    ) -> Path:
+        """줌/드리프트 완화용 보수적 후처리. 실패 시 원본 경로 반환 또는 예외."""
+        ...
+
+    @abstractmethod
+    def create_ambient_loop_from_image(
+        self,
+        image_path: str | Path,
+        output_path: str | Path,
+        *,
+        target_duration: float = 12.0,
+        fps: int = 8,
+        strength: float = 0.18,
+        motion_profile: Optional[Dict[str, Any]] = None,
+    ) -> Path:
+        """정적 이미지를 고정 카메라 ambient loop 영상으로 생성."""
+        ...
+
+    @abstractmethod
     def transcode_video(
         self,
         input_path: str | Path,

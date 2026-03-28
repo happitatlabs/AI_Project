@@ -46,11 +46,11 @@
   ↓
 _normalize_workspace_path()
   ↓
-BASE_PATH (D:\AI_Project\mellow_link\workspace)
+BASE_PATH (C:\Users\Hyein\ClaudeAI\AI_Project\mellow_link\workspace)
   ↓
 resolve_for_read()
   ↓
-성공 메시지: "[경로 자동 교정] '.' → 'D:\AI_Project\mellow_link\workspace'"
+성공 메시지: "[경로 자동 교정] '.' → 'C:\Users\Hyein\ClaudeAI\AI_Project\mellow_link\workspace'"
 ```
 
 ### 이중 방어 메커니즘
@@ -79,11 +79,11 @@ _ensure_path_inside_workspace() → 실패
 ```
 입력: "."
   ↓
-_normalize_workspace_path(".") → D:\AI_Project\mellow_link\workspace
+_normalize_workspace_path(".") → C:\Users\Hyein\ClaudeAI\AI_Project\mellow_link\workspace
   ↓
 resolve_for_read(절대경로) → 성공
   ↓
-성공 메시지: "[경로 자동 교정] '.' → 'D:\AI_Project\mellow_link\workspace'"
+성공 메시지: "[경로 자동 교정] '.' → 'C:\Users\Hyein\ClaudeAI\AI_Project\mellow_link\workspace'"
   ↓
 정상 실행
 ```
@@ -94,13 +94,13 @@ resolve_for_read(절대경로) → 성공
 
 | 입력 | 정규화 결과 |
 |------|------------|
-| `"."` | `D:\AI_Project\mellow_link\workspace` |
-| `"./"` | `D:\AI_Project\mellow_link\workspace` |
-| `"workspace"` | `D:\AI_Project\mellow_link\workspace` |
-| `"workspace/"` | `D:\AI_Project\mellow_link\workspace` |
-| `"workspace/file.txt"` | `D:\AI_Project\mellow_link\workspace\file.txt` |
-| `"./file.txt"` | `D:\AI_Project\mellow_link\workspace\file.txt` |
-| `"file.txt"` | `D:\AI_Project\mellow_link\workspace\file.txt` |
+| `"."` | `C:\Users\Hyein\ClaudeAI\AI_Project\mellow_link\workspace` |
+| `"./"` | `C:\Users\Hyein\ClaudeAI\AI_Project\mellow_link\workspace` |
+| `"workspace"` | `C:\Users\Hyein\ClaudeAI\AI_Project\mellow_link\workspace` |
+| `"workspace/"` | `C:\Users\Hyein\ClaudeAI\AI_Project\mellow_link\workspace` |
+| `"workspace/file.txt"` | `C:\Users\Hyein\ClaudeAI\AI_Project\mellow_link\workspace\file.txt` |
+| `"./file.txt"` | `C:\Users\Hyein\ClaudeAI\AI_Project\mellow_link\workspace\file.txt` |
+| `"file.txt"` | `C:\Users\Hyein\ClaudeAI\AI_Project\mellow_link\workspace\file.txt` |
 
 ---
 
@@ -146,3 +146,4 @@ write_file("workspace/test.txt", "test")
 - 절대 경로가 이미 workspace 내부인 경우 중복 정규화는 발생하지 않음
 - 경로 정규화는 투명하게 수행되며, 사용자에게는 성공 메시지로 알림
 - 에러 메시지 대신 성공 메시지를 사용하여 루프 방지
+

@@ -1,0 +1,11 @@
+{
+  "skill_id": "runtime_state_summarizer_summarize_runtime_state__e261e1f671",
+  "queued_at": "2026-03-23T06:45:06.804351+00:00",
+  "purpose": "summarize runtime state for manual review",
+  "validation_summary": "validated: 0 warning(s)",
+  "sandbox_result_summary": "runtime state summarized with 2 marker(s)",
+  "promotion_status": "pending_manual_review",
+  "sandbox_only": true,
+  "promotion_required": true,
+  "promoted": false
+}

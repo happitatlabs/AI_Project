@@ -1,0 +1,178 @@
+{
+  "created_at": "2026-03-23T00:38:54.394609Z",
+  "source": "baseline",
+  "entries": [
+    {
+      "path": "agent/__init__.py",
+      "severity": "HIGH"
+    },
+    {
+      "path": "agent/daemon.py",
+      "severity": "HIGH"
+    },
+    {
+      "path": "agent/evaluator.py",
+      "severity": "HIGH"
+    },
+    {
+      "path": "agent/executor.py",
+      "severity": "HIGH"
+    },
+    {
+      "path": "agent/llm_adapter.py",
+      "severity": "HIGH"
+    },
+    {
+      "path": "agent/loop.py",
+      "severity": "HIGH"
+    },
+    {
+      "path": "agent/maintenance.py",
+      "severity": "HIGH"
+    },
+    {
+      "path": "agent/memory.py",
+      "severity": "HIGH"
+    },
+    {
+      "path": "agent/planner.py",
+      "severity": "HIGH"
+    },
+    {
+      "path": "agent/skill_executor.py",
+      "severity": "HIGH"
+    },
+    {
+      "path": "agent/skill_loader.py",
+      "severity": "HIGH"
+    },
+    {
+      "path": "agent/workspace_metrics.py",
+      "severity": "HIGH"
+    },
+    {
+      "path": "agent_goal.md",
+      "severity": "LOW"
+    },
+    {
+      "path": "backup_agent_goal.md",
+      "severity": "LOW"
+    },
+    {
+      "path": "config.json",
+      "severity": "HIGH"
+    },
+    {
+      "path": "docker-compose.yml",
+      "severity": "HIGH"
+    },
+    {
+      "path": "docker/readme.md",
+      "severity": "LOW"
+    },
+    {
+      "path": "dockerfile",
+      "severity": "HIGH"
+    },
+    {
+      "path": "generated_skills/skill_20260320_151909.md",
+      "severity": "LOW"
+    },
+    {
+      "path": "inspect_storage.py",
+      "severity": "HIGH"
+    },
+    {
+      "path": "local_signature.txt",
+      "severity": "LOW"
+    },
+    {
+      "path": "ops_checklist.md",
+      "severity": "LOW"
+    },
+    {
+      "path": "readme.md",
+      "severity": "LOW"
+    },
+    {
+      "path": "requirements.txt",
+      "severity": "HIGH"
+    },
+    {
+      "path": "review_pending.py",
+      "severity": "HIGH"
+    },
+    {
+      "path": "run_agent.py",
+      "severity": "HIGH"
+    },
+    {
+      "path": "run_daemon.py",
+      "severity": "HIGH"
+    },
+    {
+      "path": "run_maintenance.py",
+      "severity": "HIGH"
+    },
+    {
+      "path": "scripts/run_docker_review.ps1",
+      "severity": "HIGH"
+    },
+    {
+      "path": "scripts/verify_docker_review.ps1",
+      "severity": "HIGH"
+    },
+    {
+      "path": "self_artifacts.json",
+      "severity": "MEDIUM"
+    },
+    {
+      "path": "setup_windows_task.bat",
+      "severity": "HIGH"
+    },
+    {
+      "path": "skills/code_reviewer/skill.md",
+      "severity": "LOW"
+    },
+    {
+      "path": "skills/file_classifier/skill.md",
+      "severity": "LOW"
+    },
+    {
+      "path": "skills/workspace_reporter/skill.md",
+      "severity": "LOW"
+    },
+    {
+      "path": "start_local_agent.bat",
+      "severity": "HIGH"
+    },
+    {
+      "path": "start_local_agent.sh",
+      "severity": "HIGH"
+    },
+    {
+      "path": "test_llm.py",
+      "severity": "HIGH"
+    },
+    {
+      "path": "test_memory_storage.py",
+      "severity": "HIGH"
+    },
+    {
+      "path": "test_pending_approval.py",
+      "severity": "HIGH"
+    },
+    {
+      "path": "test_recent_actions_alignment.py",
+      "severity": "HIGH"
+    },
+    {
+      "path": "test_reports_and_metrics.py",
+      "severity": "HIGH"
+    },
+    {
+      "path": "test_skill_gen.py",
+      "severity": "HIGH"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 # pytest 재현용 명령 (동일 환경에서 57 passed 등 재현)
 
 **전제**:
-- 셸의 현재 디렉터리는 **저장소 루트**(`D:\AI_Project` 등)여야 합니다.
+- 셸의 현재 디렉터리는 **저장소 루트**(`C:\Users\Hyein\ClaudeAI\AI_Project` 등)여야 합니다.
 - **pytest**가 실행에 사용되는 Python 환경에 설치되어 있어야 합니다.  
   `.venv` 사용 시: `pip install pytest` 후 `python -m pytest` 또는 활성화된 venv에서 `pytest` 실행.
 
@@ -53,7 +53,7 @@ python -m pytest mellow_link/tests/test_path_manager.py mellow_link/tests/test_s
 ## 4. Windows PowerShell에서 (저장소 루트로 이동 후)
 
 ```powershell
-cd D:\AI_Project
+cd C:\Users\Hyein\ClaudeAI\AI_Project
 python -m pytest mellow_link/tests/test_path_manager.py -q --tb=line
 ```
 
@@ -67,3 +67,4 @@ python -m pytest mellow_link/tests/test_path_manager.py -q --tb=line
 - **No module named pytest**: `.venv` 등 현재 사용 중인 Python에 pytest가 없음.  
   - `pip install pytest` 후 `python -m pytest ...` 재실행,  
   - 또는 이미 pytest가 설치된 다른 환경에서 `pytest ...` 로 실행.
+

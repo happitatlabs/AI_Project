@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from mellow_link.media.adapters.base import MediaAIAdapter
+from mellow_link.services.runtime_config import get_comfyui_endpoint, get_output_directories, load_settings
+from mellow_link.services.runtime_readiness import assert_media_generation_ready
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +22,16 @@ class ComfyMediaAIAdapter(MediaAIAdapter):
         from mellow_link.media.schemas import ImageRequest
         if not isinstance(request, ImageRequest):
             request = ImageRequest(prompt=getattr(request, "prompt", str(request)))
-        svc = ImageService()
+        settings = load_settings()
+        await assert_media_generation_ready(settings)
+        endpoint = get_comfyui_endpoint(settings)
+        output_dirs = get_output_directories(settings)
+        svc = ImageService(
+            host=endpoint["host"],
+            port=endpoint["port"],
+            timeout=float(endpoint["timeout"]),
+            output_dir=output_dirs["images"],
+        )
         await svc.connect()
         try:
             return await svc._execute_generation(request, **kwargs)
@@ -29,7 +40,16 @@ class ComfyMediaAIAdapter(MediaAIAdapter):
 
     async def generate_video(self, request: Any, **kwargs: Any) -> Any:
         from mellow_link.media.services.video_service import VideoService
-        svc = VideoService()
+        settings = load_settings()
+        await assert_media_generation_ready(settings)
+        endpoint = get_comfyui_endpoint(settings)
+        output_dirs = get_output_directories(settings)
+        svc = VideoService(
+            host=endpoint["host"],
+            port=endpoint["port"],
+            timeout=float(endpoint["timeout"]),
+            output_dir=output_dirs["videos"],
+        )
         await svc.connect()
         try:
             return await svc._generate_video_impl(request, **kwargs)

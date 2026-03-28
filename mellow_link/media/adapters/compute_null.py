@@ -24,6 +24,26 @@ class NullMediaComputeAdapter(MediaComputeAdapter):
     ) -> Path:
         raise RuntimeError(_MSG)
 
+    def stabilize_video_drift(
+        self,
+        input_path: str | Path,
+        *,
+        strength: float = 0.18,
+    ) -> Path:
+        raise RuntimeError(_MSG)
+
+    def create_ambient_loop_from_image(
+        self,
+        image_path: str | Path,
+        output_path: str | Path,
+        *,
+        target_duration: float = 12.0,
+        fps: int = 8,
+        strength: float = 0.18,
+        motion_profile: Optional[dict] = None,
+    ) -> Path:
+        raise RuntimeError(_MSG)
+
     def transcode_video(self, input_path: str | Path, output_path: str | Path, **kwargs: Any) -> Path:
         raise RuntimeError(_MSG)
 

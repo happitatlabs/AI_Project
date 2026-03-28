@@ -210,7 +210,8 @@ Summary-first 출력
 6. View 전환 API 구조
 GET /dev-console?run_id={run_id}
 GET /operator-console?run_id={run_id}
-GET /user-console?run_id={run_id}
+GET /projects/{project_id}
+GET /projects/{project_id}/result
 
 공통 데이터 API:
 GET /runs/{run_id}/dev

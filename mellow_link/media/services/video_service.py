@@ -27,7 +27,18 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Iterable
 import aiohttp
 
 from mellow_link.media.schemas import VideoRequest
-from mellow_link.media.services.video_processor import extend_video_if_needed, probe_duration_seconds
+from mellow_link.media.services.video_processor import (
+    create_ambient_loop_from_image,
+    extend_video_if_needed,
+    probe_duration_seconds,
+    stabilize_video_drift,
+)
+from mellow_link.services.output_provenance import ensure_sidecar, write_sidecar_best_effort
+from mellow_link.services.runtime_config import (
+    get_motion_video_spike_settings,
+    get_output_directories,
+    get_video_generation_settings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +80,7 @@ class VideoService:
         self.host = host
         self.port = port
         self.timeout = float(timeout)
-        self.output_dir = (output_dir or Path("./outputs/videos")).resolve()
+        self.output_dir = (output_dir or get_output_directories()["videos"]).resolve()
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self._status: VideoStatus = VideoStatus.DISCONNECTED
@@ -115,7 +126,7 @@ class VideoService:
         except Exception as e:
             self._status = VideoStatus.ERROR
             logger.error(f"[VideoService] Connection failed: {e}")
-            raise
+            raise ConnectionError(f"Failed to connect to ComfyUI at {self._base_url}: {e}") from e
 
     async def disconnect(self) -> None:
         if self._ws_listener_task:
@@ -273,7 +284,7 @@ class VideoService:
 
     def _workflow_dir(self) -> Path:
         # repo structure: mellow_link/data/workflows
-        return (Path(__file__).resolve().parents[1] / "data" / "workflows").resolve()
+        return (Path(__file__).resolve().parents[2] / "data" / "workflows").resolve()
 
     def _find_video_workflow_file(self) -> Optional[Path]:
         d = self._workflow_dir()
@@ -295,6 +306,15 @@ class VideoService:
         if not self._session:
             raise ConnectionError("Not connected to ComfyUI")
         payload = {"prompt": prompt, "client_id": self._client_id}
+        try:
+            logger.info(
+                "[VideoService] Queueing workflow to %s (nodes=%s, client_id=%s)",
+                f"{self._base_url}/prompt",
+                len(prompt) if isinstance(prompt, dict) else "unknown",
+                self._client_id,
+            )
+        except Exception:
+            pass
         async with self._session.post(f"{self._base_url}/prompt", json=payload) as resp:
             if resp.status != 200:
                 raise VideoGenerationError(f"Failed to queue prompt: {await resp.text()}")
@@ -337,6 +357,15 @@ class VideoService:
         out: List[Path] = []
         prompt_history = history.get(prompt_id, {})
         outputs = prompt_history.get("outputs", {})
+        try:
+            logger.info(
+                "[VideoService] History fetched for prompt_id=%s (top_keys=%s, output_nodes=%s)",
+                prompt_id,
+                list(prompt_history.keys()) if isinstance(prompt_history, dict) else [],
+                list(outputs.keys()) if isinstance(outputs, dict) else [],
+            )
+        except Exception:
+            pass
         if not outputs:
             # 디버깅 포인트: workflow 노드/출력 키가 다르면 여기서 빈 결과가 나옴
             try:
@@ -351,11 +380,19 @@ class VideoService:
                 logger.warning("[VideoService] No outputs in history for prompt_id=%s", prompt_id)
 
         for _node_id, node_output in outputs.items():
-            # ComfyUI video outputs vary: "gifs", "videos", or "animations"
-            for key in ("videos", "gifs", "animations"):
+            # ComfyUI video outputs vary: "gifs", "videos", "animations", or SaveVideo under "images".
+            animated_flags = node_output.get("animated")
+            is_animated = bool(animated_flags[0]) if isinstance(animated_flags, list) and animated_flags else bool(animated_flags)
+            for key in ("videos", "gifs", "animations", "images"):
                 items = node_output.get(key)
                 if not isinstance(items, list):
                     continue
+                logger.info(
+                    "[VideoService] Found candidate output list on node=%s key=%s count=%s",
+                    _node_id,
+                    key,
+                    len(items),
+                )
                 for info in items:
                     if not isinstance(info, dict):
                         continue
@@ -364,6 +401,10 @@ class VideoService:
                     vtype = info.get("type", "output")
                     if not filename:
                         continue
+                    if key == "images":
+                        suffix = Path(filename).suffix.lower()
+                        if suffix not in {".mp4", ".webm", ".mkv", ".mov"} and not is_animated:
+                            continue
                     p = await self._download_file(filename, subfolder=subfolder, file_type=vtype)
                     if p:
                         out.append(p)
@@ -389,6 +430,22 @@ class VideoService:
             content = await resp.read()
         local_path = self.output_dir / filename
         local_path.write_bytes(content)
+        provenance = getattr(self, "_current_request_provenance", None)
+        if provenance:
+            write_sidecar_best_effort(
+                local_path,
+                artifact_type="video",
+                source=provenance.get("source", {}),
+                runtime=provenance.get("runtime", {}),
+                request=provenance.get("request", {}),
+            )
+            ensure_sidecar(
+                local_path,
+                artifact_type="video",
+                source=provenance.get("source", {}),
+                runtime=provenance.get("runtime", {}),
+                request=provenance.get("request", {}),
+            )
         return local_path
 
     # ---------------------------
@@ -434,8 +491,10 @@ class VideoService:
         Best-effort injection for typical nodes:
           - LoadImage.inputs.image
           - any node input named motion_bucket_id / motion_bucket
-          - any node input named text (when it contains %PROMPT%)
+          - any node input named text (when it contains %PROMPT% / %NEGATIVE_PROMPT%)
         """
+        resolved_width = int(width) if width else int(MAGIC_WIDTH)
+        resolved_height = int(height) if height else int(MAGIC_HEIGHT)
         load_image_node_id: Optional[str] = None
         for _nid, node in workflow.items():
             if not isinstance(node, dict):
@@ -449,15 +508,17 @@ class VideoService:
                 load_image_node_id = str(_nid)
             if prompt and isinstance(inputs.get("text"), str) and "%PROMPT%" in inputs["text"]:
                 inputs["text"] = inputs["text"].replace("%PROMPT%", prompt)
+            if isinstance(inputs.get("text"), str) and "%NEGATIVE_PROMPT%" in inputs["text"]:
+                inputs["text"] = inputs["text"].replace("%NEGATIVE_PROMPT%", "")
             if "motion_bucket_id" in inputs:
                 inputs["motion_bucket_id"] = int(motion_bucket_id)
             if "motion_bucket" in inputs:
                 inputs["motion_bucket"] = int(motion_bucket_id)
-            # 🎯 The Magic Number: 1216x704 고정 (가능한 노드에 width/height 주입)
+            # Width/height follow the request for local-motion workflows; legacy SVD falls back to MAGIC_*.
             if "width" in inputs:
-                inputs["width"] = int(MAGIC_WIDTH)
+                inputs["width"] = resolved_width
             if "height" in inputs:
-                inputs["height"] = int(MAGIC_HEIGHT)
+                inputs["height"] = resolved_height
 
         # --- (요구사항) SVD 직접 연결 보장 ---
         #  - 14번 노드(또는 SVD 관련 노드)의 init_image를 강제로 1번 LoadImage에 연결
@@ -495,13 +556,165 @@ class VideoService:
         return workflow
 
     def _normalize_mode(self, mode: Any) -> str:
-        if mode is None:
-            return ""
+        if mode is None or str(mode).strip() == "":
+            runtime = self._runtime_video_settings()
+            return str(runtime.get("default_mode") or "LOCAL_MOTION_LOOP").strip().upper()
         # Enum 지원 (mode.name)
         name = getattr(mode, "name", None)
         if isinstance(name, str) and name:
-            return name.strip().upper()
-        return str(mode).strip().upper()
+            normalized = name.strip().upper()
+        else:
+            normalized = str(mode).strip().upper()
+        if normalized == "VIDEO_LOCKED_CAMERA":
+            return "AMBIENT_STILL_LOOP"
+        return normalized
+
+    def _resolve_motion_bucket_id(self, requested_motion_bucket_id: int, prompt_text: str) -> int:
+        text = str(prompt_text or "").strip().lower()
+        if any(token in text for token in ("locked", "static", "fixed", "tripod", "lock-off", "locked-off", "고정", "정지")):
+            return min(int(requested_motion_bucket_id), 1)
+        if any(token in text for token in ("zoom", "push", "dolly")):
+            return 80
+        if "pan" in text:
+            return 110
+        if any(token in text for token in ("handheld", "dynamic", "run", "shake", "격렬")):
+            return 170
+        return int(requested_motion_bucket_id)
+
+    def _ambient_loop_profile(self, prompt_text: str) -> Dict[str, Any]:
+        text = str(prompt_text or "").strip()
+        lowered = text.lower()
+
+        def has_any(*tokens: str) -> bool:
+            return any(token in lowered for token in tokens)
+
+        strength = 0.56
+        if has_any("subtle", "gentle", "faint", "soft", "잔잔", "미세", "약하게", "은은"):
+            strength -= 0.08
+        if has_any("visible", "alive", "lively", "clear", "pronounced", "strong", "살아", "더 움직", "뚜렷", "강하게"):
+            strength += 0.12
+        if has_any("dramatic", "intense", "격렬", "강렬"):
+            strength += 0.08
+
+        light_pulse = 0.66
+        haze_drift = 0.42
+        foliage_shimmer = 0.46
+        fabric_shimmer = 0.40
+        local_emphasis = 0.88
+        global_balance = 0.10
+
+        if has_any("light", "glow", "beam", "sunbeam", "shadow", "reflection", "window", "windowlight", "빛", "광선", "햇살", "창빛", "반사", "그림자"):
+            light_pulse += 0.24
+        if has_any("fog", "haze", "mist", "smoke", "dust", "안개", "연무", "먼지", "아지랑이"):
+            haze_drift += 0.28
+        if has_any("grass", "reed", "leaf", "leaves", "tree", "foliage", "flower", "wheat", "풀", "갈대", "잎", "나무", "꽃", "억새"):
+            foliage_shimmer += 0.36
+        if has_any("curtain", "fabric", "cloth", "veil", "drape", "flag", "ribbon", "커튼", "천", "직물", "옷자락", "깃발", "리본"):
+            fabric_shimmer += 0.36
+        if has_any("local", "localized", "isolated", "one area", "부분", "국소", "일부", "한쪽", "특정 영역"):
+            local_emphasis += 0.14
+            global_balance -= 0.06
+        if has_any("whole frame", "overall", "everywhere", "room-wide", "전체", "전역", "장면 전체"):
+            global_balance += 0.12
+            local_emphasis -= 0.08
+
+        region_style = "window_light"
+        if has_any("forest", "field", "grass", "reed", "leaf", "tree", "foliage", "풀", "갈대", "잎", "숲"):
+            region_style = "foliage"
+        elif has_any("curtain", "fabric", "cloth", "veil", "drape", "커튼", "천", "직물"):
+            region_style = "fabric"
+        elif has_any("reflection", "water", "ripple", "mirror", "pond", "반사", "수면", "파문", "거울"):
+            region_style = "reflection"
+
+        profile = {
+            "direction_text": text,
+            "overall_strength": max(0.34, min(strength, 0.82)),
+            "light_pulse": max(0.0, min(light_pulse, 1.0)),
+            "haze_drift": max(0.0, min(haze_drift, 1.0)),
+            "foliage_shimmer": max(0.0, min(foliage_shimmer, 1.0)),
+            "fabric_shimmer": max(0.0, min(fabric_shimmer, 1.0)),
+            "local_motion_emphasis": max(0.15, min(local_emphasis, 0.95)),
+            "global_motion_balance": max(0.05, min(global_balance, 0.45)),
+            "region_style": region_style,
+            "visibility_mode": "visibility_first",
+        }
+        return profile
+
+    def _runtime_video_settings(self) -> Dict[str, Any]:
+        return get_video_generation_settings()
+
+    def _runtime_motion_spike_settings(self) -> Dict[str, Any]:
+        return get_motion_video_spike_settings()
+
+    def _use_local_locked_camera_backend(self, mode: str) -> bool:
+        runtime = self._runtime_video_settings()
+        backend = str(runtime.get("locked_camera_backend", "ambient_loop") or "ambient_loop").strip().lower()
+        return str(mode or "").strip().upper() == "AMBIENT_STILL_LOOP" and backend == "ambient_loop"
+
+    def _select_video_workflow_name(self, requested_workflow: Optional[str], mode: str) -> Optional[str]:
+        runtime = self._runtime_video_settings()
+        motion_spike = self._runtime_motion_spike_settings()
+        normalized = str(mode or "").strip().upper()
+        if normalized == "LOCAL_MOTION_LOOP":
+            return str(
+                runtime.get("local_motion_workflow")
+                or motion_spike.get("workflow")
+                or requested_workflow
+                or "ltx_2b_v0_9_ckpt_i2v_lowmem.json"
+            )
+        if normalized == "AMBIENT_STILL_LOOP":
+            return str(runtime.get("locked_camera_workflow") or requested_workflow or "svd_xt_locked_camera.json")
+        if runtime.get("locked_camera_mode"):
+            if requested_workflow and str(requested_workflow).strip().lower() == "svd_xt_main.json":
+                return str(runtime.get("locked_camera_workflow") or "svd_xt_locked_camera.json")
+            if not requested_workflow:
+                return str(runtime.get("locked_camera_workflow") or "svd_xt_locked_camera.json")
+        return requested_workflow
+
+    def _apply_locked_camera_overrides(
+        self,
+        workflow: Dict[str, Any],
+        *,
+        mode: str,
+        motion_bucket_id: int,
+    ) -> Dict[str, Any]:
+        runtime = self._runtime_video_settings()
+        normalized = str(mode or "").strip().upper()
+        if not (runtime.get("locked_camera_mode") or normalized == "AMBIENT_STILL_LOOP"):
+            return workflow
+
+        locked_motion_bucket = min(int(runtime.get("motion_bucket_id", 1) or 1), int(motion_bucket_id))
+        locked_frames = int(runtime.get("video_frames", 21) or 21)
+        raw_fps = int(runtime.get("raw_fps", 7) or 7)
+        output_fps = int(runtime.get("output_fps", 8) or 8)
+        augmentation = float(runtime.get("augmentation_level", 0.0) or 0.0)
+        sampler_steps = int(runtime.get("sampler_steps_locked", 14) or 14)
+        sampler_cfg = float(runtime.get("sampler_cfg_locked", 1.5) or 1.5)
+
+        if "14" in workflow and isinstance(workflow.get("14"), dict):
+            inputs = workflow["14"].get("inputs")
+            if isinstance(inputs, dict):
+                inputs["motion_bucket_id"] = int(locked_motion_bucket)
+                inputs["augmentation_level"] = float(augmentation)
+                inputs["video_frames"] = int(locked_frames)
+                inputs["fps"] = int(raw_fps)
+                inputs["width"] = int(MAGIC_WIDTH)
+                inputs["height"] = int(MAGIC_HEIGHT)
+
+        if "19" in workflow and isinstance(workflow.get("19"), dict):
+            inputs = workflow["19"].get("inputs")
+            if isinstance(inputs, dict):
+                inputs["steps"] = int(sampler_steps)
+                inputs["cfg"] = float(sampler_cfg)
+
+        if "24" in workflow and isinstance(workflow.get("24"), dict):
+            inputs = workflow["24"].get("inputs")
+            if isinstance(inputs, dict):
+                inputs["frame_rate"] = int(output_fps)
+                inputs["pingpong"] = False
+                inputs["loop_count"] = 0
+
+        return workflow
 
     def _is_video_output_node(self, node: Dict[str, Any]) -> bool:
         ct = (node.get("class_type") or "").lower()
@@ -589,6 +802,8 @@ class VideoService:
         Generate a video. get_media_ai().generate_video()로 위임.
         ENABLE_MEDIA_AI=0이면 RuntimeError.
         """
+        if self.is_available() and self._session and self._ws:
+            return await self._generate_video_impl(request, on_progress=on_progress)
         from mellow_link.media.adapters.factory import get_media_ai
         return await get_media_ai().generate_video(request, on_progress=on_progress)
 
@@ -597,6 +812,9 @@ class VideoService:
         ComfyUI 실제 동영상 생성 로직. 어댑터(ComfyMediaAIAdapter)에서만 호출.
         호출 전 connect() 완료된 상태여야 함.
         """
+        mode = self._normalize_mode(getattr(request, "mode", None))
+        if self._use_local_locked_camera_backend(mode):
+            return await self._generate_locked_camera_ambient_loop(request, on_progress=on_progress)
         if not self.is_available() or not self._session or not self._ws:
             raise VideoGenerationError("VideoService not connected")
 
@@ -611,6 +829,7 @@ class VideoService:
             self._execution_error = None
             self._execution_outputs = {}
             self._current_prompt_id = None
+            self._current_request_provenance = getattr(request, "provenance", None)
 
             # Upload input image to ComfyUI
             local_image = Path(request.image_path).resolve()
@@ -636,13 +855,17 @@ class VideoService:
             if prompt_text is None or not str(prompt_text).strip():
                 raise VideoGenerationError("VideoRequest.motion_prompt 또는 VideoRequest.prompt 는 필수입니다. (빈 값/누락 불가)")
             prompt_text = str(prompt_text).strip()
-            mode = self._normalize_mode(getattr(request, "mode", None))
+            effective_motion_bucket_id = self._resolve_motion_bucket_id(
+                int(getattr(request, "motion_bucket_id", 40) or 40),
+                prompt_text,
+            )
 
             # Resolve workflow
             prompt: Dict[str, Any]
             workflow_path: Optional[Path] = None
-            if request.workflow:
-                workflow_path = self._workflow_dir() / request.workflow
+            selected_workflow = self._select_video_workflow_name(getattr(request, "workflow", None), mode)
+            if selected_workflow:
+                workflow_path = self._workflow_dir() / selected_workflow
                 if not workflow_path.exists():
                     workflow_path = None
             if workflow_path is None:
@@ -652,22 +875,48 @@ class VideoService:
                 import copy
 
                 workflow_name = await self.load_workflow(workflow_path)
+                runtime_video = self._runtime_video_settings()
+                logger.info(
+                    "[VideoService] Using workflow file=%s mode=%s motion_bucket_id=%s prompt=%r locked_camera_mode=%s stabilize_zoom_drift=%s",
+                    str(workflow_path),
+                    mode,
+                    effective_motion_bucket_id,
+                    prompt_text[:220],
+                    bool(runtime_video.get("locked_camera_mode", False)),
+                    bool(runtime_video.get("stabilize_zoom_drift", False)),
+                )
                 prompt = copy.deepcopy(self._workflows[workflow_name])
                 prompt = self._inject_image_and_motion(
                     prompt,
                     comfy_input_image_name=comfy_name,
-                    motion_bucket_id=request.motion_bucket_id,
+                    motion_bucket_id=effective_motion_bucket_id,
                     prompt=prompt_text,
-                    width=int(MAGIC_WIDTH),
-                    height=int(MAGIC_HEIGHT),
+                    width=int(getattr(request, "width", MAGIC_WIDTH) or MAGIC_WIDTH),
+                    height=int(getattr(request, "height", MAGIC_HEIGHT) or MAGIC_HEIGHT),
+                )
+                prompt = self._apply_locked_camera_overrides(
+                    prompt,
+                    mode=mode,
+                    motion_bucket_id=effective_motion_bucket_id,
                 )
                 # --- (요구사항) 모드 선택: VIDEO_ONLY면 Flux 관련 노드 제거 후 실행 ---
-                if mode == "VIDEO_ONLY":
+                if mode in {"VIDEO_ONLY", "AMBIENT_STILL_LOOP"}:
                     prompt = self._strip_flux_nodes_for_video_only(prompt)
+                    logger.info(
+                        "[VideoService] %s workflow pruned (remaining_nodes=%s)",
+                        mode,
+                        len(prompt) if isinstance(prompt, dict) else "unknown",
+                    )
             else:
+                logger.warning(
+                    "[VideoService] Workflow file not found. Falling back to placeholder SVD workflow "
+                    "(mode=%s, motion_bucket_id=%s)",
+                    mode,
+                    effective_motion_bucket_id,
+                )
                 prompt = self._build_svd_placeholder_prompt(
                     comfy_input_image_name=comfy_name,
-                    motion_bucket_id=request.motion_bucket_id,
+                    motion_bucket_id=effective_motion_bucket_id,
                 )
 
             # Start / queued progress
@@ -713,14 +962,18 @@ class VideoService:
                 prompt_id=prompt_id,
                 generation_time_ms=(time.time() - start_time) * 1000,
             )
+            logger.info("[VideoService] Downloaded video outputs for prompt_id=%s -> %s", prompt_id, [str(v) for v in videos])
 
             # Post-process: extend to target duration if needed (best-effort)
             raw_video = videos[0]
             try:
+                runtime_video = self._runtime_video_settings()
                 tgt = float(getattr(request, "target_duration", 12.0))
-                fps = int(getattr(request, "fps", 8))
+                fps = int(getattr(request, "fps", runtime_video.get("output_fps", 8)))
                 loop_mode = str(getattr(request, "loop_mode", "boomerang"))
                 overlap = float(getattr(request, "overlap_seconds", 0.35))
+                stabilize = bool(runtime_video.get("stabilize_zoom_drift", False))
+                stabilization_strength = float(runtime_video.get("stabilization_strength", 0.18) or 0.18)
 
                 # ffprobe/ffmpeg는 subprocess를 쓰므로 이벤트 루프 블로킹 방지
                 raw_d = await asyncio.to_thread(probe_duration_seconds, raw_video)
@@ -746,9 +999,36 @@ class VideoService:
                         overlap_seconds=overlap,
                     )
                     try:
-                        if Path(looped).resolve() != Path(raw_video).resolve():
-                            logger.info("[VideoService] Post-process applied: %s", looped)
-                            return str(Path(looped).resolve())
+                        final_output = Path(looped).resolve()
+                        if stabilize:
+                            stabilized = await asyncio.to_thread(
+                                stabilize_video_drift,
+                                final_output,
+                                strength=stabilization_strength,
+                            )
+                            stabilized_path = Path(stabilized).resolve()
+                            if stabilized_path != final_output:
+                                logger.info("[VideoService] Drift stabilization applied: %s", stabilized_path)
+                                final_output = stabilized_path
+                        if final_output != Path(raw_video).resolve():
+                            logger.info("[VideoService] Post-process applied: %s", final_output)
+                            provenance = getattr(self, "_current_request_provenance", None)
+                            if provenance:
+                                write_sidecar_best_effort(
+                                    final_output,
+                                    artifact_type="video",
+                                    source=provenance.get("source", {}),
+                                    runtime=provenance.get("runtime", {}),
+                                    request=provenance.get("request", {}),
+                                )
+                                ensure_sidecar(
+                                    final_output,
+                                    artifact_type="video",
+                                    source=provenance.get("source", {}),
+                                    runtime=provenance.get("runtime", {}),
+                                    request=provenance.get("request", {}),
+                                )
+                            return str(final_output)
                     except Exception:
                         pass
 
@@ -763,8 +1043,142 @@ class VideoService:
                 logger.exception("[VideoService] Post-process skipped: %s", e)
 
             # Return raw video path
+            provenance = getattr(self, "_current_request_provenance", None)
+            if provenance:
+                write_sidecar_best_effort(
+                    Path(raw_video).resolve(),
+                    artifact_type="video",
+                    source=provenance.get("source", {}),
+                    runtime=provenance.get("runtime", {}),
+                    request=provenance.get("request", {}),
+                )
+                ensure_sidecar(
+                    Path(raw_video).resolve(),
+                    artifact_type="video",
+                    source=provenance.get("source", {}),
+                    runtime=provenance.get("runtime", {}),
+                    request=provenance.get("request", {}),
+                )
             return str(Path(raw_video).resolve())
+        except Exception as e:
+            logger.exception("[VideoService] Video generation failed: %s", e)
+            raise
         finally:
+            self._current_request_provenance = None
+            if on_progress and on_progress in self._progress_callbacks:
+                try:
+                    self._progress_callbacks.remove(on_progress)
+                except Exception:
+                    pass
+
+    async def _generate_locked_camera_ambient_loop(self, request: VideoRequest, on_progress: Optional[Any] = None) -> str:
+        runtime_video = self._runtime_video_settings()
+        local_image = Path(request.image_path).resolve()
+        if not local_image.exists():
+            raise FileNotFoundError(f"VideoRequest.image_path not found: {local_image}")
+
+        if on_progress:
+            self._progress_callbacks.append(on_progress)
+        self._current_request_provenance = getattr(request, "provenance", None)
+        try:
+            target_duration = float(getattr(request, "target_duration", 12.0))
+            fps = int(getattr(request, "fps", runtime_video.get("output_fps", 8)) or runtime_video.get("output_fps", 8))
+            strength = float(runtime_video.get("ambient_motion_strength", runtime_video.get("stabilization_strength", 0.18)) or 0.18)
+            stabilize = False
+            stabilization_strength = float(runtime_video.get("stabilization_strength", 0.18) or 0.18)
+            motion_prompt = getattr(request, "motion_prompt", None) or getattr(request, "prompt", None) or ""
+            motion_profile = self._ambient_loop_profile(str(motion_prompt))
+            motion_profile["overall_strength"] = max(
+                float(motion_profile.get("overall_strength", strength) or strength),
+                strength,
+            )
+            motion_profile["visibility_mode"] = str(
+                runtime_video.get("ambient_visibility_mode", motion_profile.get("visibility_mode", "visibility_first"))
+                or "visibility_first"
+            )
+            motion_profile["debug_visualization"] = bool(runtime_video.get("ambient_debug_visualization", False))
+            motion_profile["min_patch_alpha"] = float(runtime_video.get("ambient_min_patch_alpha", 0.14) or 0.14)
+            motion_profile["min_patch_shift_px"] = float(runtime_video.get("ambient_min_patch_shift_px", 6.0) or 6.0)
+            motion_profile["min_light_pulse"] = float(runtime_video.get("ambient_min_light_pulse", 0.55) or 0.55)
+
+            base_name = f"{local_image.stem}_ambient_loop_{int(round(target_duration))}s.mp4"
+            output_path = (self.output_dir / base_name).resolve()
+            logger.info(
+                "[VideoService] Using local ambient-still-loop backend image=%s output=%s duration=%s fps=%s profile=%s stabilize=%s (ambient backend disables deshake to preserve local motion)",
+                local_image,
+                output_path,
+                target_duration,
+                fps,
+                motion_profile,
+                stabilize,
+            )
+
+            for cb in list(self._progress_callbacks):
+                try:
+                    res = cb(5.0, "Ambient loop queued")
+                    if asyncio.iscoroutine(res):
+                        await res
+                except Exception:
+                    pass
+
+            composed = await asyncio.to_thread(
+                create_ambient_loop_from_image,
+                local_image,
+                output_path=output_path,
+                target_duration=target_duration,
+                fps=fps,
+                strength=strength,
+                motion_profile=motion_profile,
+            )
+
+            final_output = Path(composed).resolve()
+            if stabilize:
+                stabilized = await asyncio.to_thread(
+                    stabilize_video_drift,
+                    final_output,
+                    strength=stabilization_strength,
+                )
+                stabilized_path = Path(stabilized).resolve()
+                if stabilized_path != final_output:
+                    logger.info("[VideoService] Ambient loop stabilization applied: %s", stabilized_path)
+                    final_output = stabilized_path
+
+            for cb in list(self._progress_callbacks):
+                try:
+                    res = cb(95.0, "Ambient loop rendered")
+                    if asyncio.iscoroutine(res):
+                        await res
+                except Exception:
+                    pass
+
+            provenance = getattr(self, "_current_request_provenance", None)
+            if provenance:
+                runtime_payload = dict(provenance.get("runtime", {}))
+                runtime_payload["video_backend"] = "ambient_loop"
+                runtime_payload["locked_camera_mode"] = True
+                request_payload = dict(provenance.get("request", {}))
+                request_payload["ambient_motion_strength"] = strength
+                request_payload["ambient_loop_direction"] = str(motion_prompt)
+                request_payload["ambient_motion_profile"] = motion_profile
+                request_payload["ambient_debug_visualization"] = bool(runtime_video.get("ambient_debug_visualization", False))
+                request_payload["ambient_visibility_mode"] = str(runtime_video.get("ambient_visibility_mode", "visibility_first"))
+                write_sidecar_best_effort(
+                    final_output,
+                    artifact_type="video",
+                    source=provenance.get("source", {}),
+                    runtime=runtime_payload,
+                    request=request_payload,
+                )
+                ensure_sidecar(
+                    final_output,
+                    artifact_type="video",
+                    source=provenance.get("source", {}),
+                    runtime=runtime_payload,
+                    request=request_payload,
+                )
+            return str(final_output)
+        finally:
+            self._current_request_provenance = None
             if on_progress and on_progress in self._progress_callbacks:
                 try:
                     self._progress_callbacks.remove(on_progress)

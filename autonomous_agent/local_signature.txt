@@ -1,0 +1,5 @@
+AGENT_LOCAL_VERIFICATION_TOKEN
+host: localhost
+verified_by: user
+note: 이 파일이 생성물에 포함되어 있으면, 로컬 파일 시스템에 접근 가능한 환경에서 실행된 것임
+created: 2026-03-20

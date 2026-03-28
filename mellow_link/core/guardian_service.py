@@ -62,7 +62,7 @@ def _log_system(event: str, detail: str = "") -> None:
         pass
 
 
-# PolicyGuardian 정책 결정 (스펙: docs/AI/41_POLICY_GUARDIAN_SPEC.md)
+# PolicyGuardian 정책 결정 (스펙: docs/41_POLICY_GUARDIAN_SPEC.md)
 PolicyDecision = Literal["APPROVE", "REJECT", "NEED_AI_REVIEW"]
 
 
@@ -1046,7 +1046,7 @@ def get_guardian_service(
 
     싱글톤: 한 번 선택된 구현체는 프로세스 수명 동안 유지됩니다.
     런타임에 env를 바꿔도 반영되지 않으며, 반영하려면 프로세스 재시작이 필요합니다.
-    (납품 환경에서는 재시작 전까지 일관된 정책 유지로 안전.) 스펙: docs/AI/41_POLICY_GUARDIAN_SPEC.md
+    (납품 환경에서는 재시작 전까지 일관된 정책 유지로 안전.) 스펙: docs/41_POLICY_GUARDIAN_SPEC.md
     """
     global _guardian_instance
     if _guardian_instance is None:
