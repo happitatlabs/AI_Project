@@ -1,0 +1,26 @@
+{
+  "skill_id": "review_note_compactor_compact_repeated_review__d46a2954b0",
+  "target_name": "review_note_compactor_v1",
+  "target_path": "skills/review_note_compactor_v1.json",
+  "reviewed_description": "review_note_compactor generated sandbox-only draft",
+  "reviewed_capabilities": [
+    "read_only",
+    "summary",
+    "formatting"
+  ],
+  "reviewed_inputs": [
+    "review_notes"
+  ],
+  "reviewed_outputs": [
+    "compacted_notes",
+    "summary_text"
+  ],
+  "source_packet_id": "review_note_compactor_compact_repeated_review__d46a2954b0.packet",
+  "source_transform_template": "review_note_compactor_compact_repeated_review__d46a2954b0.transform",
+  "source_approval_record": "review_note_compactor_compact_repeated_review__d46a2954b0.approval",
+  "manual_transform_completed_by": "admin",
+  "manual_transform_completed_at": "2026-03-23T14:27:42.003198+00:00",
+  "overwrite_risk": "none",
+  "rollback_reference": null,
+  "notes": []
+}

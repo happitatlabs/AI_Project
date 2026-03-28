@@ -30,9 +30,10 @@ from sqlalchemy.orm import Session
 from mellow_link import app_state
 from mellow_link.core import SystemState, TransitionResult
 from mellow_link.infra import (
-    get_db, User, UserRole, AgentFolder, ChatSession,
+    get_db, User, UserRole, AgentFolder, ChatSession, TempResource, get_current_user_optional,
 )
 from mellow_link.services import get_vtuber_relay, get_rag_service
+from mellow_link.services.project_assets import cleanup_staged_upload, make_temp_file_id, stage_temp_upload
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,8 @@ class ChatRequest(BaseModel):
 async def upload_temp_document(
     file: UploadFile = File(...),
     session_id: str = Form(...),
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user_optional),
 ):
     """
     Upload a document for temporary/ephemeral chat context.
@@ -79,8 +82,12 @@ async def upload_temp_document(
         raise HTTPException(status_code=400, detail="session_id is required")
 
     try:
+        resource = None
+        temp_file_id = None
+        staged_paths = None
         content_bytes = await file.read()
         filename = file.filename
+        content_type = (file.content_type or "").strip()
 
         if not content_bytes or len(content_bytes) == 0:
             raise HTTPException(status_code=400, detail="Empty file")
@@ -91,6 +98,31 @@ async def upload_temp_document(
 
         if not extracted_text or len(extracted_text.strip()) < 5:
             raise HTTPException(status_code=400, detail="텍스트를 추출할 수 없는 파일입니다.")
+
+        temp_file_id = make_temp_file_id()
+        resource = TempResource(
+            user_id=getattr(user, "id", None),
+            temp_session_id=session_id,
+            temp_file_id=temp_file_id,
+            original_filename=filename,
+            file_size=len(content_bytes),
+            content_type=content_type,
+            status="UPLOADING",
+            stage_status="failed",
+        )
+        db.add(resource)
+        db.flush()
+        staged_paths = stage_temp_upload(
+            session_id=session_id,
+            temp_file_id=temp_file_id,
+            content_bytes=content_bytes,
+            extracted_text=extracted_text,
+        )
+        resource.file_path = staged_paths["file_path"]
+        resource.extracted_relative_path = staged_paths["extracted_relative_path"]
+        resource.status = "READY"
+        resource.stage_status = "staged"
+        db.commit()
 
         if session_id in app_state.TEMP_CONTEXT_STORE:
             app_state.TEMP_CONTEXT_STORE[session_id] += f"\n\n--- [{filename}] ---\n{extracted_text}"
@@ -105,13 +137,29 @@ async def upload_temp_document(
             "message": f"'{filename}' 업로드 완료. 텍스트 {len(extracted_text)}자 추출됨.",
             "session_id": session_id,
             "filename": filename,
+            "temp_file_id": temp_file_id,
             "extracted_chars": len(extracted_text),
+            "extracted_text": extracted_text,
             "total_chars": stored_length,
         }
 
     except HTTPException:
+        db.rollback()
         raise
     except Exception as e:
+        db.rollback()
+        if temp_file_id:
+            cleanup_staged_upload(session_id, temp_file_id)
+        if 'resource' in locals() and resource is not None and getattr(resource, "temp_file_id", None):
+            try:
+                resource.file_path = ""
+                resource.extracted_relative_path = ""
+                resource.status = "FAILED"
+                resource.stage_status = "failed"
+                db.add(resource)
+                db.commit()
+            except Exception:
+                db.rollback()
         logger.error(f"[TempUpload] Error: {e}")
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Temp upload failed: {str(e)}")

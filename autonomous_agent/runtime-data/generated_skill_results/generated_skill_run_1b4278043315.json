@@ -1,0 +1,21 @@
+{
+  "skill_id": "runtime_state_summarizer_summarize_runtime_state__e261e1f671",
+  "run_id": "generated_skill_run_1b4278043315",
+  "execution_mode": "experimental_sandbox",
+  "sandbox_result": "passed",
+  "output_summary": "runtime state summarized with 2 marker(s)",
+  "runtime_notes": [],
+  "generated_at": "2026-03-23T06:45:06.799347+00:00",
+  "output": {
+    "summary_lines": [
+      "transaction_id: txn-smoke-1",
+      "proposal_id: proposal-smoke-1",
+      "execution_mode: experimental_sandbox",
+      "state: apply_succeeded",
+      "marker_count: 2",
+      "terminal_marker: apply_succeeded"
+    ],
+    "summary_text": "transaction_id: txn-smoke-1\nproposal_id: proposal-smoke-1\nexecution_mode: experimental_sandbox\nstate: apply_succeeded\nmarker_count: 2\nterminal_marker: apply_succeeded",
+    "output_summary": "runtime state summarized with 2 marker(s)"
+  }
+}

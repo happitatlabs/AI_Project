@@ -1,0 +1,52 @@
+{
+  "skill_id": "proposal_summary_formatter_format_proposal_summary__b544242832",
+  "created_at": "2026-03-23T06:51:32.564734+00:00",
+  "generated_by": "manual_smoke_test",
+  "purpose": "format proposal summary for manual review",
+  "status": "queued_for_manual_promotion",
+  "sandbox_only": true,
+  "promotion_required": true,
+  "allowed_inputs": [
+    "proposal"
+  ],
+  "allowed_outputs": [
+    "summary_text"
+  ],
+  "validation_summary": "validated: 0 warning(s)",
+  "sandbox_result_summary": "proposal summary formatted",
+  "skill_definition": {
+    "name": "proposal_summary_formatter",
+    "description": "proposal_summary_formatter generated sandbox-only draft",
+    "when_to_use": "Use when a sandbox-only proposal_summary_formatter summary is needed",
+    "input": "proposal",
+    "output": "summary_text",
+    "steps": [
+      "format_proposal_summary"
+    ],
+    "risk_level": "safe",
+    "behavior_class": "report",
+    "skill_kind": "proposal_summary_formatter",
+    "capabilities": [
+      "read_only",
+      "summary",
+      "formatting"
+    ]
+  },
+  "last_validation_report": {
+    "validated_at": "2026-03-23T06:51:32.575738+00:00",
+    "validation_passed": true,
+    "validation_errors": [],
+    "validation_warnings": []
+  },
+  "last_sandbox_result": {
+    "run_id": "generated_skill_run_7ac26442cca2",
+    "sandbox_result": "passed",
+    "output_summary": "proposal summary formatted",
+    "runtime_notes": []
+  },
+  "last_queue_entry": {
+    "queued_at": "2026-03-23T06:51:32.581801+00:00",
+    "promotion_status": "pending_manual_review",
+    "promoted": false
+  }
+}

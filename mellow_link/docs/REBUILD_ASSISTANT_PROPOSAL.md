@@ -1,6 +1,27 @@
 Rebuild Assistant Module Proposal
 Overview
 
+Status note (2026-03-25)
+
+This document is an early proposal. The current implementation has moved to a project-scoped safe bundle flow.
+
+Current public execution line:
+
+project -> anonymization -> SafeAnalysisBundle -> rebuild_assistant -> result package
+
+Current differences from this proposal:
+
+- public raw `assets` / `temp_session_id` execution is no longer the default path
+- anonymization is a shared service under `services/anonymization`
+- `rebuild_assistant` consumes `SafeAnalysisBundle` on the public execution line
+- the module is now surfaced through `새 프로젝트 / 분석 워크스페이스 / 결과 패키지`
+
+For current behavior, read these first:
+
+- `mellow_link/modules/rebuild_assistant/README.md`
+- `mellow_link/docs/ANONYMIZATION_MVP_STATUS.md`
+- `mellow_link/docs/AI_PROJECT_STRUCTURE_AND_SPEC.md`
+
 This document proposes a new module called rebuild_assistant, an AI-assisted legacy system reconstruction tool designed to run on top of the existing Mellow-Link runtime engine.
 
 The goal of this module is to:

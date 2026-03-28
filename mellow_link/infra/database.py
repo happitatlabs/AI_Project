@@ -171,11 +171,19 @@ class MessageFeedback(Base):
 class TempResource(Base):
     __tablename__ = "temp_resources"
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     temp_session_id = Column(String(255), nullable=False, index=True)
+    temp_file_id = Column(String(100), nullable=True, index=True)
+    original_filename = Column(String(500), nullable=True, default="")
     file_path = Column(String(1000), nullable=True)
+    extracted_relative_path = Column(String(1000), nullable=True, default="")
+    file_size = Column(Integer, default=0, nullable=False)
+    content_type = Column(String(255), nullable=True, default="")
     collection_name = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     status = Column(String(50), default="UPLOADING", nullable=False)
+    stage_status = Column(String(50), default="staged", nullable=False)
+    promoted_to_project_id = Column(String(40), nullable=True, index=True)
     retry_count = Column(Integer, default=0, nullable=False)
 
 class EventLog(Base):
@@ -252,6 +260,60 @@ class AgentRunEvent(Base):
     run = relationship("AgentRun", back_populates="events")
 
 
+class ModernizationProject(Base):
+    """Commercial v1 modernization project wrapper around a single run."""
+    __tablename__ = "modernization_projects"
+
+    id = Column(String(40), primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    session_id = Column(String(100), nullable=False, index=True)
+    run_id = Column(String(100), nullable=False, unique=True, index=True)
+    project_name = Column(String(255), nullable=False)
+    client_name = Column(String(255), nullable=False)
+    template_key = Column(String(100), nullable=False, default="default_modernization_v1")
+    template_mode = Column(String(20), nullable=False, default="recommended")
+    constraints_json = Column(Text, nullable=False, default="[]")
+    upload_session_id = Column(String(255), nullable=False)
+    asset_manifest_json = Column(Text, nullable=False, default="[]")
+    status = Column(String(50), nullable=False, default="running")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class ProjectAsset(Base):
+    __tablename__ = "project_assets"
+
+    id = Column(String(40), primary_key=True, index=True)
+    project_id = Column(String(40), ForeignKey("modernization_projects.id"), nullable=False, index=True)
+    source_temp_session_id = Column(String(255), nullable=False, index=True)
+    source_temp_file_id = Column(String(100), nullable=False, index=True)
+    original_filename = Column(String(500), nullable=False)
+    stored_relative_path = Column(String(1000), nullable=False)
+    extracted_relative_path = Column(String(1000), nullable=False)
+    file_size = Column(Integer, default=0, nullable=False)
+    content_type = Column(String(255), nullable=True, default="")
+    category_hint = Column(String(100), nullable=False, default="")
+    extracted_chars = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ProjectRunHistory(Base):
+    __tablename__ = "project_run_history"
+
+    id = Column(String(40), primary_key=True, index=True)
+    project_id = Column(String(40), ForeignKey("modernization_projects.id"), nullable=False, index=True)
+    run_id = Column(String(100), nullable=False, index=True)
+    sequence_no = Column(Integer, nullable=False)
+    trigger_kind = Column(String(20), nullable=False, default="reanalysis")
+    asset_manifest_json = Column(Text, nullable=False, default="[]")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "sequence_no", name="uq_project_run_history_project_sequence"),
+        UniqueConstraint("project_id", "run_id", name="uq_project_run_history_project_run"),
+    )
+
+
 # =========================
 # Helper Functions
 # =========================
@@ -266,6 +328,14 @@ def init_db():
         "ALTER TABLE chat_messages ADD COLUMN evolution_payload TEXT",
         "ALTER TABLE agent_runs ADD COLUMN module_id VARCHAR(100) NOT NULL DEFAULT 'engine'",
         "ALTER TABLE agent_runs ADD COLUMN run_kind VARCHAR(100) NOT NULL DEFAULT 'generic'",
+        "ALTER TABLE temp_resources ADD COLUMN user_id INTEGER",
+        "ALTER TABLE temp_resources ADD COLUMN temp_file_id VARCHAR(100)",
+        "ALTER TABLE temp_resources ADD COLUMN original_filename VARCHAR(500) DEFAULT ''",
+        "ALTER TABLE temp_resources ADD COLUMN extracted_relative_path VARCHAR(1000) DEFAULT ''",
+        "ALTER TABLE temp_resources ADD COLUMN file_size INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE temp_resources ADD COLUMN content_type VARCHAR(255) DEFAULT ''",
+        "ALTER TABLE temp_resources ADD COLUMN stage_status VARCHAR(50) NOT NULL DEFAULT 'staged'",
+        "ALTER TABLE temp_resources ADD COLUMN promoted_to_project_id VARCHAR(40)",
     ]:
         try:
             with engine.connect() as conn:
@@ -279,6 +349,14 @@ def init_db():
         with engine.connect() as conn:
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_run_events_run_ts ON agent_run_events(run_id, ts)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_agent_runs_module_kind ON agent_runs(module_id, run_kind)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_modernization_projects_user_created ON modernization_projects(user_id, created_at)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_modernization_projects_status ON modernization_projects(status)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_temp_resources_session_file ON temp_resources(temp_session_id, temp_file_id)"))
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_temp_resources_temp_file_id ON temp_resources(temp_file_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_project_assets_project_created ON project_assets(project_id, created_at)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_project_assets_source_file ON project_assets(source_temp_file_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_project_run_history_project_sequence ON project_run_history(project_id, sequence_no)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_project_run_history_project_created ON project_run_history(project_id, created_at)"))
             conn.commit()
     except Exception:
         pass  # index already exists

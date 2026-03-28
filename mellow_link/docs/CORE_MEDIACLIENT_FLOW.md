@@ -2,7 +2,7 @@
 
 ## 목적
 
-이 문서는 [MEDIA_SERVICE_OPENAPI_V1.yaml](/D:/AI_Project/mellow_link/docs/MEDIA_SERVICE_OPENAPI_V1.yaml)을 기준으로, `core`가 별도 `media-service`를 호출할 때 필요한 `MediaClient` 인터페이스와 호출 흐름을 정의한다.
+이 문서는 [MEDIA_SERVICE_OPENAPI_V1.yaml](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/MEDIA_SERVICE_OPENAPI_V1.yaml)을 기준으로, `core`가 별도 `media-service`를 호출할 때 필요한 `MediaClient` 인터페이스와 호출 흐름을 정의한다.
 
 범위:
 - core 내부 추상화
@@ -467,3 +467,4 @@ core가 구현해야 할 것:
 구현 마감 표현은 아래부터 가능하다:
 
 `core가 local media 구현을 더 이상 직접 사용하지 않고 remote media-service client로 전환 완료`
+
