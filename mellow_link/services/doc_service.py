@@ -38,6 +38,7 @@ class DocumentType(Enum):
     """Supported document output types."""
     PDF = "pdf"
     DOCX = "docx"
+    PPTX = "pptx"
     HTML = "html"
     MARKDOWN = "md"
 
@@ -241,6 +242,13 @@ class DocumentService:
                     request.title,
                     request.style_options
                 )
+            elif request.output_type == DocumentType.PPTX:
+                result = await self._generate_pptx(
+                    request.content,
+                    output_path,
+                    request.title,
+                    request.style_options
+                )
             elif request.output_type == DocumentType.PDF:
                 result = await self._generate_pdf(
                     request.content,
@@ -303,6 +311,8 @@ class DocumentService:
 
             doc = Document()
 
+            normalized_content = self._strip_duplicate_title_heading(content, title)
+
             # Add title
             doc.add_heading(title, level=0)
 
@@ -312,17 +322,23 @@ class DocumentService:
             font.name = options.get("font_name", "Calibri")
             font.size = Pt(options.get("font_size", 11))
 
-            # Add content paragraphs
-            paragraphs = content.split('\n\n')
-            for para in paragraphs:
-                if para.strip():
-                    p = doc.add_paragraph(para.strip())
+            # Add structured content from markdown-like result package
+            for block in self._parse_markdown_outline(normalized_content):
+                if block["kind"] == "heading":
+                    doc.add_heading(block["text"], level=min(block["level"], 4))
+                    continue
+                if block["kind"] == "paragraph":
+                    p = doc.add_paragraph(block["text"])
                     p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+                    continue
+                if block["kind"] == "bullets":
+                    for item in block["items"]:
+                        doc.add_paragraph(item, style="List Bullet")
 
             doc.save(str(output_path))
 
             # Estimate page count
-            return max(1, len(content) // 3000)
+            return max(1, len(normalized_content) // 3000)
 
         # CRITICAL: Run in executor to avoid blocking async loop
         page_count = await loop.run_in_executor(self._executor, _create_docx)
@@ -330,6 +346,64 @@ class DocumentService:
         return DocumentResult(
             output_path=output_path,
             output_type=DocumentType.DOCX,
+            page_count=page_count,
+            file_size_bytes=output_path.stat().st_size
+        )
+
+    async def _generate_pptx(
+        self,
+        content: str,
+        output_path: Path,
+        title: str,
+        options: Dict[str, Any]
+    ) -> DocumentResult:
+        """
+        Generate PPTX document using python-pptx.
+
+        CRITICAL: Uses run_in_executor to run in thread pool.
+        """
+        loop = asyncio.get_event_loop()
+
+        def _create_pptx() -> int:
+            """CPU-bound PPTX creation - runs in thread pool."""
+            try:
+                from pptx import Presentation
+                from pptx.util import Pt
+            except ImportError:
+                raise DocumentGenerationError(
+                    "python-pptx not installed. Run: pip install python-pptx"
+                )
+
+            prs = Presentation()
+
+            title_slide = prs.slides.add_slide(prs.slide_layouts[0])
+            title_slide.shapes.title.text = title
+            subtitle = title_slide.placeholders[1]
+            subtitle.text = options.get("subtitle", "결과 패키지 요약 프레젠테이션")
+
+            normalized_content = self._strip_duplicate_title_heading(content, title)
+            sections = self._markdown_sections_for_slides(normalized_content)
+            for section_title, lines in sections:
+                chunks = self._chunk_slide_lines(lines, size=7)
+                for index, chunk in enumerate(chunks):
+                    slide = prs.slides.add_slide(prs.slide_layouts[1])
+                    slide.shapes.title.text = section_title if index == 0 else f"{section_title} ({index + 1})"
+                    text_frame = slide.placeholders[1].text_frame
+                    text_frame.clear()
+                    for line_index, line in enumerate(chunk):
+                        paragraph = text_frame.paragraphs[0] if line_index == 0 else text_frame.add_paragraph()
+                        paragraph.text = line
+                        paragraph.font.size = Pt(options.get("font_size", 20))
+                        paragraph.level = 1 if line.startswith("- ") else 0
+
+            prs.save(str(output_path))
+            return max(1, len(prs.slides))
+
+        page_count = await loop.run_in_executor(self._executor, _create_pptx)
+
+        return DocumentResult(
+            output_path=output_path,
+            output_type=DocumentType.PPTX,
             page_count=page_count,
             file_size_bytes=output_path.stat().st_size
         )
@@ -521,6 +595,7 @@ class DocumentService:
         doc_type_map = {
             "pdf": DocumentType.PDF,
             "docx": DocumentType.DOCX,
+            "pptx": DocumentType.PPTX,
             "html": DocumentType.HTML,
             "md": DocumentType.MARKDOWN,
             "markdown": DocumentType.MARKDOWN,
@@ -548,6 +623,97 @@ class DocumentService:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         return self.output_dir / f"{safe_name}_{timestamp}.{doc_type.value}"
+
+    def _parse_markdown_outline(self, content: str) -> List[Dict[str, Any]]:
+        """Parse simple markdown headings and bullet groups into outline blocks."""
+        blocks: List[Dict[str, Any]] = []
+        paragraph_lines: List[str] = []
+        bullet_lines: List[str] = []
+
+        def flush_paragraph() -> None:
+            nonlocal paragraph_lines
+            if paragraph_lines:
+                blocks.append({"kind": "paragraph", "text": " ".join(paragraph_lines).strip()})
+                paragraph_lines = []
+
+        def flush_bullets() -> None:
+            nonlocal bullet_lines
+            if bullet_lines:
+                blocks.append({"kind": "bullets", "items": bullet_lines[:]})
+                bullet_lines = []
+
+        for raw_line in content.splitlines():
+            line = raw_line.strip()
+            if not line:
+                flush_paragraph()
+                flush_bullets()
+                continue
+            if line.startswith("#"):
+                flush_paragraph()
+                flush_bullets()
+                level = len(line) - len(line.lstrip("#"))
+                blocks.append({"kind": "heading", "level": max(1, level), "text": line[level:].strip()})
+                continue
+            if line.startswith("- "):
+                flush_paragraph()
+                bullet_lines.append(line[2:].strip())
+                continue
+            if line in ("[필요 자료]", "[이유]"):
+                flush_paragraph()
+                flush_bullets()
+                blocks.append({"kind": "heading", "level": 4, "text": line})
+                continue
+            paragraph_lines.append(line)
+
+        flush_paragraph()
+        flush_bullets()
+        return blocks
+
+    def _strip_duplicate_title_heading(self, content: str, title: str) -> str:
+        """Remove the first H1 when it duplicates the explicit document title."""
+        lines = content.splitlines()
+        if not lines:
+            return content
+        normalized_title = (title or "").strip()
+        for index, raw_line in enumerate(lines):
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith("# ") and line[2:].strip() == normalized_title:
+                return "\n".join(lines[:index] + lines[index + 1 :]).lstrip("\n")
+            break
+        return content
+
+    def _markdown_sections_for_slides(self, content: str) -> List[tuple[str, List[str]]]:
+        """Group markdown-like content into slide sections using ## headings."""
+        sections: List[tuple[str, List[str]]] = []
+        current_title = "요약"
+        current_lines: List[str] = []
+
+        for raw_line in content.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("# "):
+                continue
+            if line.startswith("## "):
+                if current_lines:
+                    sections.append((current_title, current_lines[:]))
+                current_title = line[3:].strip()
+                current_lines = []
+                continue
+            if line.startswith("### "):
+                current_lines.append(line[4:].strip() + ":")
+                continue
+            current_lines.append(line)
+
+        if current_lines:
+            sections.append((current_title, current_lines))
+        return sections
+
+    def _chunk_slide_lines(self, lines: List[str], size: int = 7) -> List[List[str]]:
+        """Split section lines into slide-sized chunks."""
+        if not lines:
+            return [["내용 없음"]]
+        return [lines[index:index + size] for index in range(0, len(lines), size)]
 
     async def health_check(self) -> Dict[str, Any]:
         """Perform health check."""

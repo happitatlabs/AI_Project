@@ -101,6 +101,7 @@
                         <button id="startBtn" type="submit" class="rounded-2xl bg-amber-300 px-5 py-3 text-sm font-semibold text-stone-950 hover:bg-amber-200">분석 시작</button>
                         <span id="formStatus" class="text-sm text-stone-400">입력 후 분석을 시작하세요.</span>
                     </div>
+                    <div id="formWarning" class="hidden rounded-2xl border border-amber-300/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100"></div>
                     <div id="formError" class="hidden rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200"></div>
                 </form>
             </div>
@@ -267,6 +268,17 @@
             el.textContent = message;
         }
 
+        function setFormWarning(message) {
+            const el = document.getElementById('formWarning');
+            if (!message) {
+                el.classList.add('hidden');
+                el.textContent = '';
+                return;
+            }
+            el.classList.remove('hidden');
+            el.textContent = message;
+        }
+
         function setFormStatus(message, isError) {
             const el = document.getElementById('formStatus');
             el.className = 'text-sm ' + (isError ? 'text-rose-300' : 'text-stone-400');
@@ -288,6 +300,56 @@
                     '<div class="mt-1 text-xs text-stone-500">size: ' + asset.size + ' bytes</div>' +
                     '</div>';
             }).join('');
+        }
+
+        function firstNonEmptyLine(text) {
+            return String(text || '')
+                .split(/\r?\n/)
+                .map(function (line) { return line.trim(); })
+                .find(Boolean) || '';
+        }
+
+        function mergeConstraintLines(existingText, incomingText) {
+            const seen = new Set();
+            const merged = [];
+            function appendLines(raw) {
+                String(raw || '')
+                    .split(/\r?\n/)
+                    .map(function (line) { return line.trim(); })
+                    .filter(Boolean)
+                    .forEach(function (line) {
+                        if (seen.has(line)) return;
+                        seen.add(line);
+                        merged.push(line);
+                    });
+            }
+            appendLines(existingText);
+            appendLines(incomingText);
+            return merged.join('\n');
+        }
+
+        function applyAssetAutofill(assetName, extractedText) {
+            const normalizedName = String(assetName || '').trim().toLowerCase();
+            const text = String(extractedText || '').trim();
+            if (!normalizedName || !text) return [];
+
+            const changes = [];
+            if (normalizedName === 'goal.txt') {
+                const goalLine = firstNonEmptyLine(text);
+                const projectNameInput = document.getElementById('projectName');
+                if (goalLine && projectNameInput && !String(projectNameInput.value || '').trim()) {
+                    projectNameInput.value = goalLine;
+                    changes.push('프로젝트명 자동 채움');
+                }
+            }
+            if (normalizedName === 'constraints.txt') {
+                const constraintsEl = document.getElementById('constraints');
+                if (constraintsEl) {
+                    constraintsEl.value = mergeConstraintLines(constraintsEl.value, text);
+                    changes.push('제약 조건 자동 병합');
+                }
+            }
+            return changes;
         }
 
         async function uploadFiles() {
@@ -321,6 +383,10 @@
                     temp_file_id: payload.temp_file_id,
                     size: file.size,
                 });
+                const autofillChanges = applyAssetAutofill(file.name, payload.extracted_text || '');
+                if (autofillChanges.length) {
+                    document.getElementById('uploadStatus').textContent = file.name + ' 업로드 완료 · ' + autofillChanges.join(', ');
+                }
             }
             renderAssets();
             input.value = '';
@@ -366,6 +432,7 @@
         async function createProject(event) {
             event.preventDefault();
             setFormError('');
+            setFormWarning('');
             if (!getToken()) {
                 setFormError('먼저 로그인하세요.');
                 return;
@@ -402,6 +469,10 @@
                 setFormError(payload.detail || '프로젝트 생성 실패');
                 setFormStatus('입력 후 분석을 시작하세요.', true);
                 return;
+            }
+            if (payload.warnings && payload.warnings.length) {
+                setFormWarning(payload.warnings.join(' '));
+                sessionStorage.setItem('projectWarnings:' + payload.project_id, JSON.stringify(payload.warnings));
             }
             window.location.href = '/projects/' + encodeURIComponent(payload.project_id);
         }

@@ -92,7 +92,10 @@ def truncate_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     
     # 크기 초과 시 긴 필드 자르기
     truncated = payload.copy()
+    preserve_structured_result = isinstance(truncated.get("structured_result"), dict)
     for key, value in truncated.items():
+        if key == "structured_result" and preserve_structured_result:
+            continue
         if isinstance(value, str) and len(value) > 500:
             truncated[key] = value[:500] + "[TRUNCATED]"
         elif isinstance(value, (dict, list)):
@@ -103,6 +106,21 @@ def truncate_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     # 여전히 크면 전체 메시지 자르기
     final_str = json.dumps(truncated, ensure_ascii=False)
     if len(final_str) > MAX_PAYLOAD_SIZE:
+        if preserve_structured_result:
+            compact = {}
+            for key, value in truncated.items():
+                if key == "structured_result":
+                    compact[key] = value
+                elif key in {"success", "module_id", "run_kind", "primary_feature_mode", "secondary_feature_mode", "confidence", "needs_more_input", "scope_limited"}:
+                    compact[key] = value
+                elif isinstance(value, str):
+                    compact[key] = value[:120] + "[TRUNCATED]" if len(value) > 120 else value
+                else:
+                    compact[key] = value
+            final_compact_str = json.dumps(compact, ensure_ascii=False)
+            if len(final_compact_str) <= len(payload_str):
+                return compact
+            return payload
         return {"message": truncated.get("message", "")[:MAX_PAYLOAD_SIZE - 50] + "[TRUNCATED]"}
     
     return truncated

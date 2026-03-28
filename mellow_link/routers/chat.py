@@ -139,6 +139,7 @@ async def upload_temp_document(
             "filename": filename,
             "temp_file_id": temp_file_id,
             "extracted_chars": len(extracted_text),
+            "extracted_text": extracted_text,
             "total_chars": stored_length,
         }
 

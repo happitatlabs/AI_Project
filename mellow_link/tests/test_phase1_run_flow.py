@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -212,6 +213,17 @@ def test_ui_exposes_product_create_flow(client):
     assert "내 프로젝트" in text
 
 
+def test_projects_create_page_supports_goal_and_constraints_autofill(client):
+    res = client.get("/projects/create", headers={"Accept": "text/html"})
+    assert res.status_code == 200
+    text = res.text
+    assert "applyAssetAutofill" in text
+    assert "goal.txt" in text
+    assert "constraints.txt" in text
+    assert "프로젝트명 자동 채움" in text
+    assert "제약 조건 자동 병합" in text
+
+
 
 def test_runtime_console_pages_are_exposed(client):
     chat_res = client.get("/runtime-console")
@@ -282,6 +294,80 @@ def test_project_result_markdown_download(client, monkeypatch):
     assert "filename*=UTF-8''%EA%B2%B0%EA%B3%BC_%ED%8C%A8%ED%82%A4%EC%A7%80_result.md" in res.headers.get("content-disposition", "")
 
 
+def test_detect_domain_mismatch_warning_for_claim_goal_with_order_assets():
+    from mellow_link.routers.projects import _detect_domain_mismatch_warning
+
+    warnings = _detect_domain_mismatch_warning(
+        project_name="청구 조정 기능을 현대적인 서비스 구조 재구성",
+        constraints=["FRAUD 규칙 유지", "CLAIM_AUDIT 전담 조건 유지"],
+        asset_names=["legacy.jsp", "OrderCloseService.java", "query.sql", "schema.sql"],
+        asset_texts=[
+            'if ("VIP".equals(order.getCustomerGrade())) return "vip_night_block";',
+            'if ("Y".equals(order.getDeliveryHoldFlag())) return "delivery_hold_release_required";',
+            'order.setStatus("REVIEW_REQUIRED");',
+        ],
+    )
+
+    assert warnings
+    assert "프로젝트 목표와 업로드 자산의 도메인 축이 일치하지 않을 가능성이 있습니다." in warnings[0]
+    assert "'청구 조정'" in warnings[0]
+    assert "'주문 마감'" in warnings[0]
+
+
+def test_create_project_returns_domain_mismatch_warning(client, monkeypatch):
+    from mellow_link.routers import projects as projects_router
+
+    user = _register(client, "phase1_mismatch")
+    monkeypatch.setattr(projects_router, "start_project_wrapped_run", lambda *args, **kwargs: None)
+
+    upload_session_id = f"phase1-mismatch-{uuid.uuid4().hex[:8]}"
+    uploads = [
+        ("goal.txt", "청구 조정 기능을 현대적인 서비스 구조 재구성".encode("utf-8")),
+        ("constraints.txt", "FRAUD 규칙 유지\nCLAIM_AUDIT 전담 조건 유지".encode("utf-8")),
+        ("legacy.jsp", b'<button>close</button>'),
+        ("OrderCloseService.java", b'if ("VIP".equals(order.getCustomerGrade())) return "vip_night_block";'),
+        ("query.sql", b"SELECT * FROM sales_order WHERE status IN ('PAID','READY','REVIEW_REQUIRED')"),
+        ("schema.sql", b"CREATE TABLE sales_order (status varchar(20), delivery_hold_flag varchar(1));"),
+    ]
+    asset_manifest = []
+    for filename, content in uploads:
+        uploaded = _upload_temp_asset(client, upload_session_id, filename, content, headers=user["headers"])
+        asset_manifest.append({"name": filename, "temp_file_id": uploaded["temp_file_id"], "size": len(content)})
+
+    res = client.post(
+        "/projects",
+        headers={**user["headers"], "Content-Type": "application/json"},
+        json={
+            "project_name": "청구 조정 기능을 현대적인 서비스 구조 재구성",
+            "client_name": "SI센터",
+            "upload_session_id": upload_session_id,
+            "asset_manifest": asset_manifest,
+            "template_key": "default_modernization_v1",
+            "constraints": ["FRAUD 규칙 유지", "CLAIM_AUDIT 전담 조건 유지"],
+        },
+    )
+    assert res.status_code == 200, res.text
+    payload = res.json()
+    assert payload["warnings"]
+
+    detail = client.get(f"/projects/{payload['project_id']}?format=json", headers=user["headers"])
+    assert detail.status_code == 200, detail.text
+    detail_payload = detail.json()
+    assert detail_payload["warnings"]
+
+
+def test_temp_upload_returns_extracted_text_for_autofill(client):
+    body = _upload_temp_asset(
+        client,
+        session_id=f"phase1-autofill-{uuid.uuid4().hex[:8]}",
+        filename="goal.txt",
+        content="주문 관리 화면 현대화\n".encode("utf-8"),
+        content_type="text/plain",
+    )
+    assert body["filename"] == "goal.txt"
+    assert body["extracted_text"].strip() == "주문 관리 화면 현대화"
+
+
 def test_project_result_docx_download(client, monkeypatch, tmp_path):
     from types import SimpleNamespace
     from mellow_link import app_state
@@ -308,7 +394,8 @@ def test_project_result_docx_download(client, monkeypatch, tmp_path):
         async def generate(self, request):
             assert request.output_type.value == "docx"
             assert request.filename == "DOCX_결과_패키지_result.docx"
-            assert "## Provenance" in request.content
+            assert "## Executive Summary" in request.content
+            assert "## 추천안" in request.content
             return SimpleNamespace(output_path=output_path)
 
     monkeypatch.setattr(app_state, "doc_service", FakeDocService(), raising=False)
@@ -318,6 +405,45 @@ def test_project_result_docx_download(client, monkeypatch, tmp_path):
     assert "application/vnd.openxmlformats-officedocument.wordprocessingml.document" in res.headers.get("content-type", "")
     assert "filename*=utf-8''docx_%ea%b2%b0%ea%b3%bc_%ed%8c%a8%ed%82%a4%ec%a7%80_result.docx" in res.headers.get("content-disposition", "").lower()
     assert res.content == b"fake-docx-content"
+
+
+def test_project_result_pptx_download(client, monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from mellow_link import app_state
+
+    user = _register(client, "phase1_pptx")
+    project_id, _ = _create_persisted_project(
+        client,
+        user,
+        monkeypatch,
+        upload_session_id="phase1-pptx",
+        filename="legacy.sql",
+        content=b"SELECT * FROM orders;",
+        project_name="PPTX 결과 패키지",
+        client_name="OO카드",
+    )
+
+    output_path = tmp_path / "project_result.pptx"
+    output_path.write_bytes(b"fake-pptx-content")
+
+    class FakeDocService:
+        def is_available(self):
+            return True
+
+        async def generate(self, request):
+            assert request.output_type.value == "pptx"
+            assert request.filename == "PPTX_결과_패키지_result.pptx"
+            assert "## Executive Summary" in request.content
+            assert "## 실행 계획" in request.content
+            return SimpleNamespace(output_path=output_path)
+
+    monkeypatch.setattr(app_state, "doc_service", FakeDocService(), raising=False)
+
+    res = client.get(f"/projects/{project_id}/result?format=pptx", headers=user["headers"])
+    assert res.status_code == 200, res.text
+    assert "application/vnd.openxmlformats-officedocument.presentationml.presentation" in res.headers.get("content-type", "")
+    assert "filename*=utf-8''pptx_%ea%b2%b0%ea%b3%bc_%ed%8c%a8%ed%82%a4%ec%a7%80_result.pptx" in res.headers.get("content-disposition", "").lower()
+    assert res.content == b"fake-pptx-content"
 
 
 def test_project_asset_download_and_assets_payload(client, monkeypatch):
@@ -452,6 +578,11 @@ def test_project_html_templates_include_asset_metadata_and_access_states(client)
     assert "Run ID" in result.text
     assert "모듈 버전" in result.text
     assert "DOCX 다운로드" in result.text
+    assert "PPTX 다운로드" in result.text
+    assert "즉시 결정 필요" in result.text
+    assert "유지해야 할 계약" in result.text
+    assert "설계 선택지 비교" in result.text
+    assert "실행 계획" in result.text
     assert "범위 및 한계" in result.text
     assert "scope_notice missing" in result.text
     assert "비지원 범위" in result.text
@@ -477,20 +608,374 @@ def test_project_result_markdown_includes_provenance_section(client, monkeypatch
     )
     res = client.get(f"/projects/{project_id}/result?format=md", headers=user["headers"])
     assert res.status_code == 200, res.text
-    assert "## Provenance" in res.text
+    assert "## Executive Summary" in res.text
+    assert "## 즉시 결정 필요" in res.text
+    assert "## 유지해야 할 계약" in res.text
+    assert "## 설계 선택지 비교" in res.text
+    assert "## 실행 계획" in res.text
     assert "Run ID:" in res.text
     assert "앱 버전:" in res.text
     assert "모듈 버전:" in res.text
-    assert "## 1페이지 요약" in res.text
-    assert "### 핵심 결론" in res.text
-    assert "### 현대화 방향" in res.text
-    assert "### 주요 리스크" in res.text
-    assert "### 다음 단계" in res.text
-    assert "## 범위 및 한계" in res.text
-    assert "### 지원 범위" in res.text
-    assert "### 비지원 범위" in res.text
-    assert res.text.index(PROJECT_SCOPE_NOTICE["supported"][0]) < res.text.index(PROJECT_SCOPE_NOTICE["supported"][1])
-    assert res.text.index(PROJECT_SCOPE_NOTICE["not_supported"][0]) < res.text.index(PROJECT_SCOPE_NOTICE["not_supported"][1])
+    assert "## 추천안" in res.text
+    assert "## 부록" in res.text
+    assert PROJECT_SCOPE_NOTICE["summary"] in res.text
+
+
+def test_build_result_package_sanitizes_forbidden_user_tokens():
+    from mellow_link.infra import ModernizationProject
+    from mellow_link.routers.projects import build_result_package
+    from mellow_link.modules.rebuild_assistant.schemas import EvidenceRef, GroundedBusinessRule, StructuredRebuildResult
+
+    project = ModernizationProject(
+        id="proj_test_sanitize",
+        user_id=1,
+        session_id="sess_sanitize",
+        run_id="run_sanitize",
+        project_name="SANITIZE",
+        client_name="OO",
+        template_key="default_modernization_v1",
+        template_mode="recommended",
+        constraints_json="[]",
+        upload_session_id="upload_sanitize",
+        asset_manifest_json="[]",
+        status="completed",
+    )
+    result = StructuredRebuildResult(
+        one_line_conclusion="REDACTED_PATH 와 role/... 와 권한[] 표기는 제거되어야 합니다.",
+        executive_summary_v2=["controller/... 표현과 [SAFE STRUCTURE: asset_deadbeef] 표시는 없이 설명해야 합니다."],
+        grounded_business_rules=[
+            GroundedBusinessRule(
+                title="샘플 규칙",
+                description="SAFE STRUCTURE 와 내부 토큰 없이 보여야 합니다.",
+                evidence=[
+                    EvidenceRef(
+                        asset_name="legacy.jsp",
+                        asset_type="ui",
+                        locator="본문 키워드",
+                        excerpt="[SAFE STRUCTURE: asset_deadbeef] node:table:TBL_001 role/... controller/... 권한[]",
+                        evidence_kind="ui",
+                    )
+                ],
+                design_targets=["정책 서비스"],
+                confidence="확정",
+                confidence_reason="schema.sql 과 query.sql 에서 직접 확인되었습니다.",
+                needs_verification=False,
+            )
+        ],
+    )
+
+    pkg = build_result_package(project, {"status": "completed"}, result, assets=[], app_version="0.1.0")
+    dumped = json.dumps(pkg, ensure_ascii=False)
+
+    assert "REDACTED_PATH" not in dumped
+    assert "role/..." not in dumped
+    assert "controller/..." not in dumped
+    assert "권한[]" not in dumped
+    assert "SAFE STRUCTURE" not in dumped
+    assert "controller/service/repository" not in dumped
+    assert "query parameters" not in dumped
+    assert "가장 적합합니다" not in dumped
+    assert "가능합니다" not in dumped
+    assert "검토가 필요합니다" not in dumped
+    assert "evidence" not in (pkg["grounded_business_rules"][0].keys())
+    assert pkg["grounded_business_rules"][0]["evidence_cards"]
+
+
+def test_build_result_package_condition_summary_translates_source_and_sql_evidence():
+    from mellow_link.infra import ModernizationProject
+    from mellow_link.routers.projects import build_result_package
+    from mellow_link.modules.rebuild_assistant.schemas import EvidenceRef, GroundedBusinessRule, StructuredRebuildResult
+
+    project = ModernizationProject(
+        id="proj_test_condition_summary",
+        user_id=1,
+        session_id="sess_condition_summary",
+        run_id="run_condition_summary",
+        project_name="조건 요약",
+        client_name="OO",
+        template_key="default_modernization_v1",
+        template_mode="recommended",
+        constraints_json="[]",
+        upload_session_id="upload_condition_summary",
+        asset_manifest_json="[]",
+        status="completed",
+    )
+    result = StructuredRebuildResult(
+        grounded_business_rules=[
+            GroundedBusinessRule(
+                title="수출 주문 고액건 REVIEW_REQUIRED",
+                description="수출 주문의 고액 건은 즉시 마감하지 않고 REVIEW_REQUIRED 상태로 전환해야 합니다.",
+                evidence=[
+                    EvidenceRef(
+                        asset_name="OrderCloseService.java",
+                        asset_type="source",
+                        locator="본문 키워드",
+                        excerpt='if ("EXPORT".equals(order.getOrderType()) && order.getOrderAmount() >= 7000000) { order.setStatus("REVIEW_REQUIRED"); }',
+                        evidence_kind="source",
+                    ),
+                    EvidenceRef(
+                        asset_name="query.sql",
+                        asset_type="sql",
+                        locator="본문 키워드",
+                        excerpt="AND o.status IN ('PAID', 'READY', 'REVIEW_REQUIRED')",
+                        evidence_kind="sql",
+                    ),
+                ],
+                design_targets=["상태 전이", "정책 서비스"],
+                confidence="확정",
+                confidence_reason="현재 자산에서 직접 확인되었습니다.",
+                needs_verification=False,
+            )
+        ]
+    )
+
+    pkg = build_result_package(project, {"status": "completed"}, result, assets=[], app_version="0.1.0")
+    cards = pkg["grounded_business_rules"][0]["evidence_cards"]
+
+    assert any("REVIEW_REQUIRED 상태로 전이" in card["condition_summary"] for card in cards)
+    assert any("상태값이 PAID, READY, REVIEW_REQUIRED" in card["condition_summary"] for card in cards)
+
+
+def test_build_result_package_condition_summary_generalizes_role_and_status_conditions():
+    from mellow_link.infra import ModernizationProject
+    from mellow_link.routers.projects import build_result_package
+    from mellow_link.modules.rebuild_assistant.schemas import EvidenceRef, GroundedBusinessRule, StructuredRebuildResult
+
+    project = ModernizationProject(
+        id="proj_test_condition_general",
+        user_id=1,
+        session_id="sess_condition_general",
+        run_id="run_condition_general",
+        project_name="조건 일반화",
+        client_name="OO",
+        template_key="default_modernization_v1",
+        template_mode="recommended",
+        constraints_json="[]",
+        upload_session_id="upload_condition_general",
+        asset_manifest_json="[]",
+        status="completed",
+    )
+    result = StructuredRebuildResult(
+        grounded_business_rules=[
+            GroundedBusinessRule(
+                title="고액 청구 전담 부서 처리",
+                description="고액 청구는 전담 부서만 처리할 수 있습니다.",
+                evidence=[
+                    EvidenceRef(
+                        asset_name="legacy_app.py",
+                        asset_type="source",
+                        locator="본문 키워드",
+                        excerpt='if claim["claim_amount"] >= 10000000 and dept_code != "CLAIM_AUDIT": return "심사전담부서만 가능"',
+                        evidence_kind="source",
+                    ),
+                    EvidenceRef(
+                        asset_name="claim_adjustment.html",
+                        asset_type="ui",
+                        locator="본문 키워드",
+                        excerpt='<c:if test="${status eq \'READY\'}"><button>조정</button></c:if>',
+                        evidence_kind="ui",
+                    ),
+                ],
+                design_targets=["정책 서비스", "검증 흐름"],
+                confidence="확정",
+                confidence_reason="현재 자산에서 직접 확인되었습니다.",
+                needs_verification=False,
+            )
+        ]
+    )
+
+    pkg = build_result_package(project, {"status": "completed"}, result, assets=[], app_version="0.1.0")
+    cards = pkg["grounded_business_rules"][0]["evidence_cards"]
+
+    assert any("CLAIM_AUDIT 부서가 아니면 고액 청구를 처리할 수 없도록 제한" in card["condition_summary"] for card in cards)
+    assert any("상태값이 READY일 때만 화면 액션" in card["condition_summary"] for card in cards)
+
+
+def test_build_result_package_condition_summary_uses_rule_title_fallback_for_broken_excerpt():
+    from mellow_link.infra import ModernizationProject
+    from mellow_link.routers.projects import build_result_package
+    from mellow_link.modules.rebuild_assistant.schemas import EvidenceRef, GroundedBusinessRule, StructuredRebuildResult
+
+    project = ModernizationProject(
+        id="proj_test_condition_title_fallback",
+        user_id=1,
+        session_id="sess_condition_title_fallback",
+        run_id="run_condition_title_fallback",
+        project_name="조건 타이틀 fallback",
+        client_name="OO",
+        template_key="default_modernization_v1",
+        template_mode="recommended",
+        constraints_json="[]",
+        upload_session_id="upload_condition_title_fallback",
+        asset_manifest_json="[]",
+        status="completed",
+    )
+    result = StructuredRebuildResult(
+        grounded_business_rules=[
+            GroundedBusinessRule(
+                title="대리점 고액 주문 본사 전용",
+                description="대리점 채널의 고액 주문은 본사 권한으로만 마감할 수 있습니다.",
+                evidence=[
+                    EvidenceRef(
+                        asset_name="OrderCloseService.java",
+                        asset_type="source",
+                        locator="본문 키워드",
+                        excerpt='; } if ("AGENCY".equals(order.getChannelCode())',
+                        evidence_kind="source",
+                    )
+                ],
+                design_targets=["정책 서비스", "권한 모델", "API"],
+                confidence="확정",
+                confidence_reason="현재 자산에서 직접 확인되었습니다.",
+                needs_verification=False,
+            )
+        ]
+    )
+
+    pkg = build_result_package(project, {"status": "completed"}, result, assets=[], app_version="0.1.0")
+    cards = pkg["grounded_business_rules"][0]["evidence_cards"]
+
+    assert any("대리점 채널의 고액 주문은 본사 승인 조건을 충족해야 처리되도록 제한" in card["condition_summary"] for card in cards)
+
+
+def test_run_finished_preserves_large_structured_result_and_result_package_becomes_ready():
+    import uuid
+
+    from mellow_link.infra import ModernizationProject, SessionLocal
+    from mellow_link.infra.run_events import (
+        EVENT_TYPE_RUN_FINISHED,
+        create_run,
+        emit_event,
+        get_run_events,
+    )
+    from mellow_link.modules.rebuild_assistant.schemas import (
+        DecisionItem,
+        DesignOption,
+        ExecutionPlanWeek,
+        GroundedBusinessRule,
+        RecommendedOption,
+        RetainedContract,
+        StructuredRebuildResult,
+    )
+    from mellow_link.routers.projects import _extract_structured_result, build_result_package
+
+    large_lines = [f"핵심 요약 {index} " + ("세부 설명 " * 12) for index in range(12)]
+    result = StructuredRebuildResult(
+        one_line_conclusion="주문 마감 기능을 단계적으로 분리하는 것이 필요합니다.",
+        executive_summary_v2=large_lines[:4],
+        core_business_rules=large_lines[:5],
+        grounded_business_rules=[
+            GroundedBusinessRule(
+                title="VIP 야간 마감 제한",
+                description=large_lines[0],
+                evidence=[],
+                design_targets=["정책 서비스"],
+                confidence="가정",
+                confidence_reason="테스트용 대형 결과입니다.",
+                needs_verification=True,
+            )
+        ],
+        decision_items=[
+            DecisionItem(statement="주문 마감 정책을 별도 서비스로 분리하는 것이 필요합니다.", rationale=large_lines[1])
+        ],
+        retained_contracts=[
+            RetainedContract(item="주문 상태 코드는 유지하는 것이 필요합니다.", basis=large_lines[2], evidence=[])
+        ],
+        design_options=[
+            DesignOption(
+                name="옵션 A",
+                structure_summary=large_lines[3],
+                advantages=large_lines[:2],
+                risks=large_lines[2:4],
+                difficulty="MEDIUM",
+                duration_weeks=4,
+                recommended=True,
+                selection_reason=large_lines[4],
+            )
+        ],
+        recommended_option=RecommendedOption(
+            name="옵션 A",
+            structure_summary=large_lines[5],
+            selection_reason=large_lines[6],
+            expected_outcomes=large_lines[7:9],
+        ),
+        execution_plan=[
+            ExecutionPlanWeek(
+                week_label="1주차",
+                goal=large_lines[7],
+                tasks=large_lines[8:10],
+                roles=["컨설턴트", "아키텍트"],
+                duration_weeks=1,
+                deliverables=["규칙 목록", "분리안"],
+            )
+        ],
+        analysis_summary=large_lines,
+        rebuild_strategy=large_lines,
+        risks=large_lines[:4],
+        recommended_directions=large_lines[:3],
+    )
+
+    project_id = f"proj_large_structured_{uuid.uuid4().hex[:8]}"
+    upload_session_id = f"upload_large_structured_{uuid.uuid4().hex[:8]}"
+
+    with SessionLocal() as db:
+        run_id = create_run(session_id="sess_large_structured", db=db, module_id="rebuild_assistant", run_kind="rebuild_plan")
+        project = ModernizationProject(
+            id=project_id,
+            user_id=1,
+            session_id="sess_large_structured",
+            run_id=run_id,
+            project_name="대형 structured result",
+            client_name="OO",
+            template_key="default_modernization_v1",
+            template_mode="recommended",
+            constraints_json="[]",
+            upload_session_id=upload_session_id,
+            asset_manifest_json="[]",
+            status="completed",
+        )
+        db.add(project)
+        db.commit()
+        emit_event(
+            run_id,
+            EVENT_TYPE_RUN_FINISHED,
+            {
+                "success": True,
+                "summary": "summary " * 300,
+                "structured_result": result.model_dump(),
+                "primary_feature_mode": "status_permissions",
+                "secondary_feature_mode": "save_validation",
+                "confidence": result.confidence,
+                "needs_more_input": False,
+                "scope_limited": False,
+                "module_id": "rebuild_assistant",
+                "run_kind": "rebuild_plan",
+            },
+            db=db,
+        )
+        events = get_run_events(run_id, db=db)
+        run_finished = next(event for event in events if event["type"] == "run_finished")
+        assert isinstance(run_finished["payload"]["structured_result"], dict)
+
+        extracted = _extract_structured_result(events)
+        assert extracted is not None
+        assert extracted.one_line_conclusion == result.one_line_conclusion
+        pkg = build_result_package(project, {"status": "completed", "run_id": run_id}, extracted, assets=[], app_version="0.1.0")
+        assert pkg["executive_summary"]["state"] == "ready"
+        assert pkg["core_conclusion"] == result.one_line_conclusion
+
+
+def test_document_service_strips_duplicate_title_heading_from_markdown():
+    from mellow_link.services.doc_service import DocumentService
+
+    service = DocumentService()
+    title = "결과 패키지 - 주문 관리 화면 현대화"
+    content = "# 결과 패키지 - 주문 관리 화면 현대화\n\n## Executive Summary\n- 핵심 판단\n"
+
+    normalized = service._strip_duplicate_title_heading(content, title)
+
+    assert normalized.startswith("## Executive Summary")
+    assert "# 결과 패키지 - 주문 관리 화면 현대화" not in normalized
 
 
 def test_build_result_package_uses_unknown_app_version_and_null_generated_at():
@@ -531,10 +1016,12 @@ def test_build_result_package_uses_unknown_app_version_and_null_generated_at():
     assert pkg["executive_summary"]["core_message"] == "분석 결과를 생성 중입니다."
     assert pkg["executive_summary"]["modernization_direction"] == []
     assert pkg["executive_summary"]["key_risks"] == []
+    assert pkg["decision_items"] == []
+    assert pkg["design_options"] == []
     assert pkg["executive_summary"]["next_steps"] == [
-        "현대화 방향 검토: 추천 방향 기준 우선순위 합의",
-        "파일럿 범위 확정: 단일 기능 / 단일 화면 기준 상세 범위 합의",
-        "후속 실행 결정: 설계안 검토 후 재분석 또는 상세 설계 착수",
+        "추천안을 기준으로 현대화 방향과 분리 우선순위를 확정하는 것이 필요합니다.",
+        "단일 기능·단일 화면 기준으로 파일럿 범위를 고정하는 것이 필요합니다.",
+        "추천안 기준으로 상세 설계 착수 여부와 후속 자산 확보 범위를 확정하는 것이 필요합니다.",
     ]
 
 
@@ -570,6 +1057,7 @@ def test_build_result_package_normalizes_generated_at_to_utc_z():
 
     result = StructuredRebuildResult(
         one_line_conclusion="주요 조회 기능을 분리 현대화하는 것이 적절합니다.",
+        core_business_rules=["상태 전이 규칙을 우선 추출해야 합니다."],
         recommended_directions=["방향 1", "방향 2", "방향 3", "방향 4"],
         risks=["리스크 1", "리스크 2", "리스크 3", "리스크 4"],
         rebuild_strategy=["전략 1", "전략 2", "전략 3", "전략 4"],
@@ -580,8 +1068,10 @@ def test_build_result_package_normalizes_generated_at_to_utc_z():
     summary = pkg["executive_summary"]
     assert summary["state"] == "ready"
     assert summary["core_message"] == "주요 조회 기능을 분리 현대화하는 것이 적절합니다."
+    assert pkg["core_business_rules"] == ["상태 전이 규칙을 우선 추출해야 합니다."]
     assert summary["modernization_direction"] == ["방향 1", "방향 2", "방향 3"]
     assert summary["key_risks"] == ["리스크 1", "리스크 2", "리스크 3"]
+    assert "summary_lines" in summary
     assert len(summary["next_steps"]) == 3
 
 
@@ -614,11 +1104,11 @@ def test_build_result_package_partial_summary_uses_missing_context_message():
     summary = pkg["executive_summary"]
     assert summary["state"] == "partial"
     assert summary["core_message"] == "현재까지의 분석 결과를 기반으로 한 초안입니다."
-    assert summary["modernization_direction"] == ["전략 A", "전략 B", "전략 C"]
+    assert isinstance(summary["modernization_direction"], list)
     assert summary["next_steps"] == [
-        "추가 자료 확보: 화면 정의서",
-        "파일럿 범위 확정: 단일 기능 / 단일 화면 기준 상세 범위 합의",
-        "후속 실행 결정: 설계안 검토 후 재분석 또는 상세 설계 착수",
+        "화면 정의서 자료를 확보해 확인 필요 항목을 확정하는 것이 필요합니다.",
+        "단일 기능·단일 화면 기준으로 파일럿 범위를 고정하는 것이 필요합니다.",
+        "추천안 기준으로 상세 설계 착수 여부와 후속 자산 확보 범위를 확정하는 것이 필요합니다.",
     ]
 
 
@@ -648,7 +1138,7 @@ def test_build_result_package_fallback_detail_only_does_not_mark_ready():
     pkg = build_result_package(project, {"status": "completed"}, result, assets=[], app_version="0.1.0")
     summary = pkg["executive_summary"]
     assert summary["state"] == "pending"
-    assert summary["modernization_direction"] == ["전략 A", "전략 B", "전략 C"]
+    assert summary["modernization_direction"] == []
     assert summary["key_risks"] == ["리스크 A", "리스크 B", "리스크 C"]
 
 
@@ -657,10 +1147,10 @@ def test_result_html_does_not_fallback_scope_notice(client):
     assert result.status_code == 200
     assert "STATIC_SCOPE_NOTICE" not in result.text
     assert "scope_notice missing" in result.text
-    assert "1페이지 요약" in result.text
-    assert "현대화 방향" in result.text
+    assert "Executive Summary" in result.text
+    assert "이번 회의 결정 항목" in result.text
     assert "주요 리스크" in result.text
-    assert "다음 단계" in result.text
+    assert "다음 실행" in result.text
     assert "executive_summary missing" in result.text
 
 

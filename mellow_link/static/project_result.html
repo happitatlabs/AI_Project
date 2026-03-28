@@ -20,12 +20,13 @@
             <div>
                 <p class="text-xs uppercase tracking-[0.28em] text-cyan-300/80">Result Package</p>
                 <h1 class="mt-2 text-3xl font-semibold">결과 패키지</h1>
-                <p class="mt-2 text-sm text-slate-400">진단, 설계안, 전환 초안을 하나의 설명 가능한 패키지로 묶어 제공합니다.</p>
+                <p class="mt-2 text-sm text-slate-400">컨설턴트가 회의에서 바로 판단할 수 있도록 근거, 결정 항목, 추천안, 실행 계획을 한 화면에 제공합니다.</p>
             </div>
             <nav class="flex flex-wrap gap-2 text-sm">
                 <a id="workspaceLink" href="#" class="rounded-full border border-white/10 px-4 py-2 hover:bg-white/5">워크스페이스</a>
                 <button id="downloadMdBtn" class="rounded-full border border-white/10 px-4 py-2 hover:bg-white/5">Markdown 다운로드</button>
                 <button id="downloadDocxBtn" class="rounded-full border border-white/10 px-4 py-2 hover:bg-white/5">DOCX 다운로드</button>
+                <button id="downloadPptxBtn" class="rounded-full border border-white/10 px-4 py-2 hover:bg-white/5">PPTX 다운로드</button>
                 <button id="printBtn" class="rounded-full border border-white/10 px-4 py-2 hover:bg-white/5">PDF 저장</button>
             </nav>
         </header>
@@ -43,7 +44,7 @@
             </section>
 
             <section class="print-card rounded-[2rem] border border-cyan-300/20 bg-cyan-500/5 p-6">
-                <p class="text-xs uppercase tracking-[0.24em] text-cyan-200">1페이지 요약</p>
+                <p class="text-xs uppercase tracking-[0.24em] text-cyan-200">Executive Summary</p>
                 <div id="executiveSummaryBox" class="mt-4"></div>
             </section>
 
@@ -53,13 +54,50 @@
                     <div id="conclusionBox" class="mt-4 text-base leading-8 text-slate-100"></div>
                 </div>
                 <div class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
-                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">추천 방향</p>
-                    <div id="directionBox" class="mt-4 space-y-3 text-sm text-slate-300"></div>
+                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">추천안</p>
+                    <div id="recommendedOptionBox" class="mt-4 space-y-3 text-sm text-slate-300"></div>
                 </div>
             </section>
 
             <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
-                <p class="text-xs uppercase tracking-[0.24em] text-slate-500">진단</p>
+                <p class="text-xs uppercase tracking-[0.24em] text-slate-500">핵심 업무 규칙</p>
+                <div id="coreRulesBox" class="mt-4 space-y-3 text-sm text-slate-300"></div>
+            </section>
+
+            <section class="grid gap-6 xl:grid-cols-2">
+                <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">즉시 결정 필요</p>
+                    <div id="decisionBox" class="mt-4 space-y-3 text-sm text-slate-300"></div>
+                </section>
+                <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">유지해야 할 계약</p>
+                    <div id="retainedBox" class="mt-4 space-y-3 text-sm text-slate-300"></div>
+                </section>
+            </section>
+
+            <section class="grid gap-6 xl:grid-cols-2">
+                <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">분리 우선순위</p>
+                    <div id="priorityBox" class="mt-4 space-y-3 text-sm text-slate-300"></div>
+                </section>
+                <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">확인 필요 항목</p>
+                    <div id="verificationBox" class="mt-4 space-y-3 text-sm text-slate-300"></div>
+                </section>
+            </section>
+
+            <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                <p class="text-xs uppercase tracking-[0.24em] text-slate-500">설계 선택지 비교</p>
+                <div id="optionsBox" class="mt-4 space-y-4 text-sm text-slate-300"></div>
+            </section>
+
+            <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                <p class="text-xs uppercase tracking-[0.24em] text-slate-500">실행 계획</p>
+                <div id="planBox" class="mt-4 space-y-4 text-sm text-slate-300"></div>
+            </section>
+
+            <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                <p class="text-xs uppercase tracking-[0.24em] text-slate-500">리스크</p>
                 <div id="diagnosisBox" class="mt-4 space-y-4 text-sm text-slate-300"></div>
             </section>
 
@@ -162,15 +200,113 @@
         function renderRules(rules, stateMessage) {
             const blocks = [];
             if (rules.status_permissions && rules.status_permissions.entities && rules.status_permissions.entities.length) {
-                blocks.push('<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4"><div class="text-xs uppercase tracking-[0.2em] text-slate-500">status_permissions</div><div class="mt-2">' + rules.status_permissions.entities.join(', ') + '</div></div>');
+                blocks.push('<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4"><div class="text-xs uppercase tracking-[0.2em] text-slate-500">권한 및 상태 규칙</div><div class="mt-2">' + rules.status_permissions.entities.join(', ') + '</div></div>');
             }
             if (rules.search_filters && rules.search_filters.entities && rules.search_filters.entities.length) {
-                blocks.push('<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4"><div class="text-xs uppercase tracking-[0.2em] text-slate-500">search_filters</div><div class="mt-2">' + rules.search_filters.entities.join(', ') + '</div></div>');
+                blocks.push('<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4"><div class="text-xs uppercase tracking-[0.2em] text-slate-500">조회 조건 규칙</div><div class="mt-2">' + rules.search_filters.entities.join(', ') + '</div></div>');
             }
             if (rules.save_validation && rules.save_validation.entities && rules.save_validation.entities.length) {
-                blocks.push('<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4"><div class="text-xs uppercase tracking-[0.2em] text-slate-500">save_validation</div><div class="mt-2">' + rules.save_validation.entities.join(', ') + '</div></div>');
+                blocks.push('<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4"><div class="text-xs uppercase tracking-[0.2em] text-slate-500">저장 검증 규칙</div><div class="mt-2">' + rules.save_validation.entities.join(', ') + '</div></div>');
             }
             return blocks.length ? blocks.join('') : '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + stateMessage + '</div>';
+        }
+
+        function renderGroundedRules(items, stateMessage) {
+            if (!items || !items.length) {
+                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + stateMessage + '</div>';
+            }
+            return items.map(function (item) {
+                const evidence = (item.evidence_cards || []).map(function (row) {
+                    return '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-xs text-slate-300">' +
+                        '<div class="font-medium text-slate-100">' + escapeHtml(row.asset_name || '-') + '</div>' +
+                        '<div class="mt-2 text-slate-400">' + escapeHtml(row.condition_summary || '-') + '</div>' +
+                        '<div class="mt-2 text-slate-500">설계 반영 위치: ' + escapeHtml((row.design_targets || []).join(', ') || '-') + '</div>' +
+                        '<div class="mt-1 text-slate-500">신뢰도: ' + escapeHtml(row.confidence || '-') + '</div>' +
+                        '</div>';
+                }).join('');
+                return '<div class="rounded-3xl border border-white/10 bg-black/20 px-4 py-4">' +
+                    '<div class="flex flex-wrap items-center justify-between gap-3">' +
+                        '<div class="text-base font-medium text-slate-100">' + escapeHtml(item.title || '-') + '</div>' +
+                        '<div class="rounded-full border border-cyan-300/20 bg-cyan-500/10 px-3 py-1 text-xs text-cyan-200">' + escapeHtml(item.confidence || '-') + '</div>' +
+                    '</div>' +
+                    '<div class="mt-3 text-sm leading-7 text-slate-200">' + escapeHtml(item.description || '-') + '</div>' +
+                    '<div class="mt-4 grid gap-3 md:grid-cols-2">' +
+                        '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-3"><div class="text-xs uppercase tracking-[0.2em] text-slate-500">설계 반영 위치</div><div class="mt-2 text-sm">' + escapeHtml((item.design_targets || []).join(', ') || '-') + '</div></div>' +
+                        '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-3"><div class="text-xs uppercase tracking-[0.2em] text-slate-500">신뢰도 근거</div><div class="mt-2 text-sm">' + escapeHtml(item.confidence_reason || '-') + '</div></div>' +
+                    '</div>' +
+                    '<div class="mt-4 text-xs uppercase tracking-[0.2em] text-slate-500">근거 자산</div>' +
+                    '<div class="mt-3 space-y-2">' + (evidence || '<div class="text-slate-500">근거 없음</div>') + '</div>' +
+                    '<div class="mt-4 text-xs text-slate-400">추가 검증 필요: ' + escapeHtml(item.needs_verification ? '예' : '아니오') + '</div>' +
+                    '</div>';
+            }).join('');
+        }
+
+        function renderCardList(items, stateMessage, titleKey, bodyKey, metaKey) {
+            if (!items || !items.length) {
+                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + stateMessage + '</div>';
+            }
+            return items.map(function (item) {
+                return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
+                    '<div class="font-medium text-slate-100">' + escapeHtml(item[titleKey] || '-') + '</div>' +
+                    '<div class="mt-2 text-sm leading-7 text-slate-300">' + escapeHtml(item[bodyKey] || '-') + '</div>' +
+                    (metaKey ? '<div class="mt-3 text-xs text-slate-500">' + escapeHtml(item[metaKey] || '-') + '</div>' : '') +
+                    '</div>';
+            }).join('');
+        }
+
+        function renderPriority(items, stateMessage) {
+            if (!items || !items.length) return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + stateMessage + '</div>';
+            return items.map(function (item) {
+                return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
+                    '<div class="font-medium text-slate-100">' + escapeHtml(String(item.priority || '-')) + '순위 · ' + escapeHtml(item.item || item.title || '-') + '</div>' +
+                    '<div class="mt-2 text-sm">' + escapeHtml(item.reason || '-') + '</div>' +
+                    '<div class="mt-3 grid gap-3 md:grid-cols-2 text-xs text-slate-400">' +
+                        '<div>영향 범위: ' + escapeHtml(item.impact_scope || '-') + '</div>' +
+                        '<div>선행 조건: ' + escapeHtml(item.prerequisite || '-') + '</div>' +
+                    '</div>' +
+                    '<div class="mt-3 text-xs text-slate-500">관련 규칙: ' + escapeHtml((item.linked_rules || []).join(', ') || '-') + '</div>' +
+                    '<div class="mt-1 text-xs text-slate-500">관련 계약: ' + escapeHtml((item.linked_contracts || []).join(', ') || '-') + '</div>' +
+                    '</div>';
+            }).join('');
+        }
+
+        function renderOptions(items, stateMessage) {
+            if (!items || !items.length) return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + stateMessage + '</div>';
+            return items.map(function (item) {
+                return '<div class="rounded-3xl border border-white/10 bg-black/20 px-4 py-4">' +
+                    '<div class="flex flex-wrap items-center justify-between gap-3">' +
+                        '<div class="text-base font-medium text-slate-100">' + escapeHtml(item.name || '-') + '</div>' +
+                        '<div class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300">' + escapeHtml(item.difficulty || '-') + ' · ' + escapeHtml(String(item.duration_weeks || 0)) + '주</div>' +
+                    '</div>' +
+                    '<div class="mt-3 text-sm leading-7 text-slate-200">' + escapeHtml(item.structure_summary || '-') + '</div>' +
+                    '<div class="mt-4 grid gap-4 md:grid-cols-2">' +
+                        '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">장점</div><div class="mt-2 space-y-2">' + (item.advantages || []).map(function (entry) { return '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm">' + escapeHtml(entry) + '</div>'; }).join('') + '</div></div>' +
+                        '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">리스크</div><div class="mt-2 space-y-2">' + (item.risks || []).map(function (entry) { return '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm">' + escapeHtml(entry) + '</div>'; }).join('') + '</div></div>' +
+                    '</div>' +
+                    '<div class="mt-4 text-xs text-slate-400">선택 근거: ' + escapeHtml(item.selection_reason || '-') + '</div>' +
+                    '<div class="mt-2 text-xs text-cyan-200">추천 여부: ' + escapeHtml(item.recommended ? '예' : '아니오') + '</div>' +
+                    '</div>';
+            }).join('');
+        }
+
+        function renderPlan(items, stateMessage) {
+            if (!items || !items.length) return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + stateMessage + '</div>';
+            return items.map(function (item) {
+                return '<div class="rounded-3xl border border-white/10 bg-black/20 px-4 py-4">' +
+                    '<div class="flex flex-wrap items-center justify-between gap-3">' +
+                        '<div class="text-base font-medium text-slate-100">' + escapeHtml(item.week_label || '-') + '</div>' +
+                        '<div class="text-xs text-slate-400">' + escapeHtml(String(item.duration_weeks || 0)) + '주</div>' +
+                    '</div>' +
+                    '<div class="mt-3 text-sm leading-7 text-slate-200">' + escapeHtml(item.goal || '-') + '</div>' +
+                    '<div class="mt-3 text-xs text-slate-500">관련 규칙: ' + escapeHtml((item.related_rules || []).join(', ') || '-') + '</div>' +
+                    '<div class="mt-1 text-xs text-slate-500">관련 계약: ' + escapeHtml((item.related_contracts || []).join(', ') || '-') + '</div>' +
+                    '<div class="mt-4 grid gap-4 md:grid-cols-3">' +
+                        '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">작업</div><div class="mt-2 space-y-2">' + (item.tasks || []).map(function (entry) { return '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm">' + escapeHtml(entry) + '</div>'; }).join('') + '</div></div>' +
+                        '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">인력</div><div class="mt-2 space-y-2">' + (item.roles || []).map(function (entry) { return '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm">' + escapeHtml(entry) + '</div>'; }).join('') + '</div></div>' +
+                        '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">산출물</div><div class="mt-2 space-y-2">' + (item.deliverables || []).map(function (entry) { return '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm">' + escapeHtml(entry) + '</div>'; }).join('') + '</div></div>' +
+                    '</div>' +
+                    '</div>';
+            }).join('');
         }
 
         function escapeHtml(value) {
@@ -292,10 +428,12 @@
                     '<div class="mt-3 text-sm leading-7 text-slate-100">' + escapeHtml(executive.core_message || '-') + '</div>' +
                 '</div>' +
                 '<div class="mt-4 grid gap-4 md:grid-cols-3">' +
-                    renderBulletGroup('현대화 방향', executive.modernization_direction || []) +
+                    renderBulletGroup('핵심 판단', executive.summary_lines || []) +
+                    renderBulletGroup('이번 회의 결정 항목', executive.decision_focus || []) +
                     renderBulletGroup('주요 리스크', executive.key_risks || []) +
-                    renderBulletGroup('다음 단계', executive.next_steps || []) +
+                    renderBulletGroup('다음 실행', executive.next_steps || []) +
                 '</div>' +
+                '<div class="mt-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-4"><div class="text-xs uppercase tracking-[0.2em] text-slate-500">추천안</div><div class="mt-2 text-sm text-slate-200">' + escapeHtml(executive.recommended_option || '-') + '</div></div>' +
                 '</div>';
         }
 
@@ -307,24 +445,29 @@
             document.getElementById('projectMeta').textContent = (pkg.project.client_name || '-') + ' · 상태 ' + (pkg.project.status || '-') + ' · 템플릿 ' + (pkg.project.template_key || '-');
             document.getElementById('executiveSummaryBox').innerHTML = renderExecutiveSummary(pkg.executive_summary || {});
             document.getElementById('conclusionBox').textContent = pkg.core_conclusion || '결과 생성 중';
-            document.getElementById('directionBox').innerHTML = listOrState(pkg.recommended_directions || [], pkg.diagnosis.state || '결과 생성 중');
+            document.getElementById('coreRulesBox').innerHTML = renderGroundedRules(pkg.grounded_business_rules || [], pkg.diagnosis.state || '결과 생성 중');
+            document.getElementById('recommendedOptionBox').innerHTML = renderCardList(pkg.recommended_option ? [pkg.recommended_option] : [], pkg.design.state || '결과 생성 중', 'name', 'structure_summary', 'selection_reason');
+            document.getElementById('decisionBox').innerHTML = renderCardList(pkg.decision_items || [], pkg.diagnosis.state || '결과 생성 중', 'statement', 'rationale', '');
+            document.getElementById('retainedBox').innerHTML = renderCardList(pkg.retained_contracts || [], pkg.diagnosis.state || '결과 생성 중', 'item', 'basis', '');
+            document.getElementById('priorityBox').innerHTML = renderPriority(pkg.priority_split_items || [], pkg.design.state || '결과 생성 중');
+            document.getElementById('verificationBox').innerHTML = renderCardList(pkg.verification_checkpoints || [], pkg.diagnosis.state || '결과 생성 중', 'item', 'reason', '');
+            document.getElementById('optionsBox').innerHTML = renderOptions(pkg.design_options || [], pkg.design.state || '결과 생성 중');
+            document.getElementById('planBox').innerHTML = renderPlan(pkg.execution_plan || [], pkg.design.state || '결과 생성 중');
 
             const diagnosisHtml = [];
-            diagnosisHtml.push('<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">analysis_summary</div><div class="mt-3">' + listOrState(pkg.diagnosis.analysis_summary || [], pkg.diagnosis.state) + '</div></div>');
-            diagnosisHtml.push('<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">risks</div><div class="mt-3">' + listOrState(pkg.diagnosis.risks || [], pkg.diagnosis.state) + '</div></div>');
-            diagnosisHtml.push('<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">missing_context</div><div class="mt-3">' + renderMissing(pkg.diagnosis.missing_context_details || [], pkg.diagnosis.state) + '</div></div>');
+            diagnosisHtml.push('<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">리스크</div><div class="mt-3">' + listOrState(pkg.diagnosis.risks || [], pkg.diagnosis.state) + '</div></div>');
+            diagnosisHtml.push('<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">확인 필요 자료</div><div class="mt-3">' + renderMissing(pkg.diagnosis.missing_context_details || [], pkg.diagnosis.state) + '</div></div>');
             document.getElementById('diagnosisBox').innerHTML = diagnosisHtml.join('');
 
             const design = pkg.design || {};
             const layer = design.layer_reconstruction || {};
             document.getElementById('designBox').innerHTML =
-                '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">rebuild_strategy</div><div class="mt-3">' + listOrState(design.rebuild_strategy || [], design.state) + '</div></div>' +
+                '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">설계 방향</div><div class="mt-3">' + listOrState(design.rebuild_strategy || [], design.state) + '</div></div>' +
                 '<div class="grid gap-4 md:grid-cols-3">' +
-                    renderLayerSection('database', layer.database) +
-                    renderLayerSection('backend', layer.backend) +
-                    renderLayerSection('frontend', layer.frontend) +
-                '</div>' +
-                '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">extracted_rules</div><div class="mt-3">' + renderRules(design.extracted_rules || {}, design.state) + '</div></div>';
+                    renderLayerSection('데이터 계약', layer.database) +
+                    renderLayerSection('API 및 정책', layer.backend) +
+                    renderLayerSection('화면 구조', layer.frontend) +
+                '</div>';
 
             const draft = pkg.transition_draft || {};
             const recomposition = draft.recomposition_draft || {};
@@ -376,6 +519,14 @@
         document.getElementById('downloadDocxBtn').addEventListener('click', async function () {
             try {
                 await downloadWithAuth('/projects/' + encodeURIComponent(projectId) + '/result?format=docx', 'project_result.docx');
+            } catch (error) {
+                document.getElementById('errorState').classList.remove('hidden');
+                document.getElementById('errorState').textContent = error.message || String(error);
+            }
+        });
+        document.getElementById('downloadPptxBtn').addEventListener('click', async function () {
+            try {
+                await downloadWithAuth('/projects/' + encodeURIComponent(projectId) + '/result?format=pptx', 'project_result.pptx');
             } catch (error) {
                 document.getElementById('errorState').classList.remove('hidden');
                 document.getElementById('errorState').textContent = error.message || String(error);

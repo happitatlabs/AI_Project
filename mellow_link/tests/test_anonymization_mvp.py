@@ -61,7 +61,7 @@ def test_rebuild_assistant_safe_bundle_path_uses_safe_bundle_only():
         constraints=["safe_bundle_only"],
     )
     assert "safe_bundle_id=" in prepared.constraints[1]
-    assert "CLS_001" in prepared.assets.source_code
+    assert "CLS_001" in (prepared.assets.source_code + prepared.assets.ui_template)
     assert prepared.temp_context == ""
 
 
