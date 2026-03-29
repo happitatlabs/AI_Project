@@ -137,6 +137,14 @@ class AppliedJudgmentTemplate(BaseModel):
     core_questions: list[str] = Field(default_factory=list)
 
 
+class PatternCandidate(BaseModel):
+    name: str
+    matched: bool = False
+    score: float = 0.0
+    reasons: list[str] = Field(default_factory=list)
+    rejected_reason: str = ""
+
+
 class PrioritySplitItem(BaseModel):
     priority: int
     item: str = ""
@@ -184,6 +192,9 @@ class ExecutionPlanWeek(BaseModel):
 
 
 class StructuredRebuildResult(BaseModel):
+    primary_judgment: str = ""
+    primary_judgment_reason: str = ""
+    pattern_candidates: list[PatternCandidate] = Field(default_factory=list)
     one_line_conclusion: str = ""
     core_business_rules: list[str] = Field(default_factory=list)
     executive_summary_v2: list[str] = Field(default_factory=list)

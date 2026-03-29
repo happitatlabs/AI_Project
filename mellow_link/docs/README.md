@@ -9,6 +9,15 @@
 
 ## 먼저 읽을 문서
 
+문서 우선순위는 아래로 해석한다.
+
+1. [DOCUMENT_DRIVEN_AI_EXECUTION_PIPELINE_RULES.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/DOCUMENT_DRIVEN_AI_EXECUTION_PIPELINE_RULES.md)
+2. [AI_AUGMENTATION_STRATEGY.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/AI_AUGMENTATION_STRATEGY.md)
+3. 상태 / 설명 / 제안 문서
+
+`Contract` 문서가 없으면 실행하지 않는다.  
+`rebuild_assistant` 관련 실행 후에는 [REBUILD_ASSISTANT_RESULT_STATUS_2026-03-28.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/REBUILD_ASSISTANT_RESULT_STATUS_2026-03-28.md)를 반드시 갱신한다.
+
 1. 구조/제품 기준
    - [AI_PROJECT_STRUCTURE_AND_SPEC.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/AI_PROJECT_STRUCTURE_AND_SPEC.md)
    - [PRODUCT_STRUCTURE_TEMPLATE.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/PRODUCT_STRUCTURE_TEMPLATE.md)
@@ -37,6 +46,14 @@
   - 판단 템플릿 3종과 실샘플 최신 통과 상태, 남은 polish 항목
 - [AI_AUGMENTATION_STRATEGY.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/AI_AUGMENTATION_STRATEGY.md)
   - deterministic 분석 엔진과 AI 보정의 역할 경계, 투입 지점, 금지 원칙
+- [DOCUMENT_DRIVEN_AI_EXECUTION_PIPELINE_RULES.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/DOCUMENT_DRIVEN_AI_EXECUTION_PIPELINE_RULES.md)
+  - Draft / Contract / Locked 기준과 문서 기반 실행 루프 운영 규칙
+- [REBUILD_ASSISTANT_JUDGMENT_TEMPLATE_EXPANSION_CONTRACT_2026-03-29.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/REBUILD_ASSISTANT_JUDGMENT_TEMPLATE_EXPANSION_CONTRACT_2026-03-29.md)
+  - `query_filter`, `amount_threshold` 1차 확장 작업용 Contract
+- [REBUILD_ASSISTANT_PATTERN_SELECTION_CONTRACT_2026-03-29.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/REBUILD_ASSISTANT_PATTERN_SELECTION_CONTRACT_2026-03-29.md)
+  - 패턴 후보 수집, 우선순위 선택, fallback, 디버깅 기준 Contract
+- [REBUILD_ASSISTANT_POLISH_LAYER_CONTRACT_2026-03-29.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/REBUILD_ASSISTANT_POLISH_LAYER_CONTRACT_2026-03-29.md)
+  - `structured_result` 위에 얹는 표현 전용 후처리 레이어 Contract
 - [mellow_link/modules/rebuild_assistant/README.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/modules/rebuild_assistant/README.md)
   - 대표 상품 실행 방식과 입력/출력 계약 요약
 - [REBUILD_ASSISTANT_PROPOSAL.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/REBUILD_ASSISTANT_PROPOSAL.md)

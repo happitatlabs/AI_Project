@@ -23,6 +23,7 @@ from .schemas import (
     GroundedBusinessRule,
     LayeredListResult,
     MissingContextItem,
+    PatternCandidate,
     PrioritySplitItem,
     RebuildAssetsPayload,
     RecommendedOption,
@@ -58,6 +59,9 @@ class PreparedRebuildInput:
     scope_limited: bool = False
     missing_context: list[str] | None = None
     signals: FeatureSignals = field(default_factory=FeatureSignals)
+    selected_primary_judgment: str = ""
+    selected_primary_judgment_reason: str = ""
+    pattern_candidates: list[PatternCandidate] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if self.missing_context is None:
@@ -409,8 +413,14 @@ class RebuildAssistantService:
         secondary = prepared.signals.secondary_feature_mode
         primary_template = self._primary_template(prepared, applied_templates or [])
         primary_template_id = primary_template.template_id if primary_template else ""
+        if self._should_force_amount_threshold_narrative(prepared, []):
+            primary_template_id = "amount_threshold"
 
-        if primary_template_id == "state_transition":
+        if primary_template_id == "workflow":
+            database = [
+                f"예시: {concept} 승인 트리거, 승인 주체, 단계별 승인 상태를 워크플로우 기준 컬럼으로 분리합니다.",
+            ]
+        elif primary_template_id == "state_transition":
             database = [
                 f"예시: {concept} 상태 컬럼, 처리 가능 상태, 전이 결과 반영 기준을 읽기/쓰기 경계로 분리합니다.",
             ]
@@ -418,26 +428,44 @@ class RebuildAssistantService:
             database = [
                 f"예시: {concept} 승인 주체, 부서별 처리 권한, 예외 승인 경로를 정책 기준 컬럼으로 정리합니다.",
             ]
+        elif primary_template_id == "query_filter":
+            database = [
+                f"예시: {self._compose_concept_goal(concept, '조회 조건, 정렬 기준, 페이징 규칙을 조회 모델 경계로 분리합니다.')}",
+            ]
+        elif primary_template_id == "amount_threshold":
+            database = [
+                f"예시: {concept} 금액 구간, 한도 임계값, 고액 처리 기준을 정책 기준 컬럼으로 정리합니다.",
+            ]
         else:
             database = [
                 f"예시: {concept} 조회 경로와 저장 경로를 분리해 데이터 접근 책임을 명확히 합니다.",
             ]
-        if primary == "search_filters":
+        if primary_template_id == "workflow":
+            database.append("예시: 승인 단계, 승인 주체, 예외 승인 경로를 워크플로우 기준 컬럼으로 명시해 조회합니다.")
+        elif primary == "search_filters":
             database.append("예시: 조회 조건 매핑 규칙을 두고 WHERE 절은 바인딩 파라미터로만 조립합니다.")
         elif primary_template_id == "validation":
             database.append("예시: 저장 전 중복 여부와 상태 충돌을 확인하는 선행 검사 쿼리를 분리합니다.")
         elif primary_template_id == "access_control":
             database.append("예시: 승인 주체, 부서별 처리 권한, 예외 승인 경로를 정책 기준 컬럼으로 명시해 조회합니다.")
+        elif primary_template_id == "query_filter":
+            database.append("예시: 필터 조건과 정렬 기준은 조회 파라미터 규칙으로 명시해 조회합니다.")
+        elif primary_template_id == "amount_threshold":
+            database.append("예시: 금액 한도와 임계값 비교에 필요한 컬럼을 정책 기준으로 명시해 조회합니다.")
         elif primary_template_id == "state_transition" or primary == "status_permissions":
             database.append("예시: 상태 표시와 처리 가능 여부 계산에 필요한 컬럼을 읽기 전용 조회 구조로 묶어 관리합니다.")
         if secondary == "search_filters" and primary != "search_filters":
             database.append("예시: 보조 조회 신호를 반영해 조회 조건 매핑 규칙을 함께 둡니다.")
-        elif secondary == "save_validation" and primary_template_id not in {"state_transition", "access_control", "validation"} and primary != "save_validation":
+        elif secondary == "save_validation" and primary_template_id not in {"state_transition", "access_control", "validation", "query_filter", "amount_threshold"} and primary != "save_validation":
             database.append("예시: 보조 저장 신호를 반영해 중복 검사 쿼리를 추가합니다.")
         if not prepared.assets.database_schema and not prepared.assets.sql_queries:
             database = [f"DB 자산이 부족하므로 {concept} 데이터 접근 인터페이스와 파라미터 계약 초안만 제공합니다."]
 
-        if primary_template_id == "state_transition":
+        if primary_template_id == "workflow":
+            backend = [
+                f"예시: {concept} 승인 요청 API와 승인 처리 API를 분리해 워크플로우 기본 구조를 정리합니다.",
+            ]
+        elif primary_template_id == "state_transition":
             backend = [
                 f"예시: {concept} 상태 전이 API와 처리 가능 상태 판단 API를 분리해 기본 구조를 정리합니다.",
             ]
@@ -445,18 +473,35 @@ class RebuildAssistantService:
             backend = [
                 f"예시: {concept} 승인 판단 API와 일반 처리 API를 분리해 기본 구조를 정리합니다.",
             ]
+        elif primary_template_id == "query_filter":
+            backend = [
+                f"예시: {self._compose_concept_goal(concept, '조회 API와 결과 목록 API를 분리하고 조회 모델을 기준으로 기본 구조를 정리합니다.')}",
+            ]
+        elif primary_template_id == "amount_threshold":
+            backend = [
+                f"예시: {concept} 한도 판단 API와 일반 처리 API를 분리해 기본 구조를 정리합니다.",
+            ]
         else:
             backend = [
                 f"예시: {concept} 조회 API, 상세 API, 처리 API를 분리해 기본 구조를 정리합니다.",
             ]
-        if primary_template_id == "access_control":
+        if primary_template_id == "workflow":
+            backend.append("예시: 승인 트리거와 승인 주체를 별도 워크플로우 서비스에서 계산합니다.")
+            backend.append("예시: 승인, 반려, 보류, 예외 승인 경로를 단계별 워크플로우로 분리합니다.")
+        elif primary_template_id == "access_control":
             backend.append("예시: 승인 주체와 부서별 처리 권한을 정책 서비스에서 계산합니다.")
             backend.append("예시: 일반 처리 경로와 예외 승인 경로를 별도 승인 흐름으로 분리합니다.")
         elif primary_template_id == "state_transition" or primary == "status_permissions":
             backend.append("예시: 역할과 상태에 따른 처리 가능 여부를 정책 서비스에서 계산합니다.")
             backend.append("예시: 승인, 반려, 마감, 취소 같은 상태 전이 규칙을 별도 상태 전이 계층으로 분리합니다.")
+        elif primary_template_id == "query_filter":
+            backend.append("예시: 조회 조건 모델과 SQL 조건 매핑 규칙을 별도 조회 계층으로 분리합니다.")
+            backend.append("예시: 정렬과 페이징 기본값을 조회 정책으로 분리합니다.")
+        elif primary_template_id == "amount_threshold":
+            backend.append("예시: 금액 구간과 한도 비교를 별도 정책 서비스에서 계산합니다.")
+            backend.append("예시: 고액 처리와 한도 초과 결과를 정책 결과로 분리합니다.")
         elif primary == "search_filters":
-            backend[0] = f"예시: {concept} 검색 API와 상세 조회 API를 나눠 조회 구조를 정리합니다."
+            backend[0] = f"예시: {self._compose_concept_goal(concept, '검색 API와 상세 조회 API를 나눠 조회 구조를 정리합니다.')}"
             backend.append("예시: 조회 파라미터, 검색 조건, 정렬 규칙을 별도 조회 모델로 수집합니다.")
             backend.append("예시: SQL 조건 매핑 규칙과 조회 조건 해석을 분리합니다.")
         elif primary_template_id == "validation":
@@ -464,14 +509,18 @@ class RebuildAssistantService:
             backend.append("예시: 저장 처리 계층은 검증 완료 후 실제 저장만 담당하도록 분리합니다.")
         if secondary == "status_permissions" and primary_template_id not in {"state_transition", "access_control"} and primary != "status_permissions":
             backend.append("예시: 보조 정책 신호를 반영해 처리 가능 여부 판단 계층을 함께 둡니다.")
-        elif secondary == "search_filters" and primary_template_id not in {"state_transition", "access_control", "validation"} and primary != "search_filters":
+        elif secondary == "search_filters" and primary_template_id not in {"state_transition", "access_control", "validation", "query_filter", "amount_threshold"} and primary != "search_filters":
             backend.append("예시: 보조 조회 신호를 반영해 조회 조건 모델을 함께 둡니다.")
-        elif secondary == "save_validation" and primary_template_id not in {"state_transition", "access_control", "validation"} and primary != "save_validation":
+        elif secondary == "save_validation" and primary_template_id not in {"state_transition", "access_control", "validation", "query_filter", "amount_threshold"} and primary != "save_validation":
             backend.append("예시: 보조 저장 신호를 반영해 입력 검증 계층을 함께 둡니다.")
         if prepared.scope_limited:
             backend.insert(0, "전체 코드 생성 대신 단일 기능 endpoint 초안만 제공합니다.")
 
-        if primary_template_id == "state_transition":
+        if primary_template_id == "workflow":
+            frontend = [
+                f"예시: {concept} 화면을 승인 요청 영역, 승인 단계 안내 영역, 예외 처리 안내 영역으로 나눕니다.",
+            ]
+        elif primary_template_id == "state_transition":
             frontend = [
                 f"예시: {concept} 화면을 상태 표시 영역, 처리 가능 상태 안내 영역, 전이 액션 영역으로 나눕니다.",
             ]
@@ -479,24 +528,38 @@ class RebuildAssistantService:
             frontend = [
                 f"예시: {concept} 화면을 승인 주체 안내 영역, 처리 경로 안내 영역, 액션 영역으로 나눕니다.",
             ]
+        elif primary_template_id == "query_filter":
+            frontend = [
+                f"예시: {self._compose_concept_goal(concept, '화면을 검색 조건 영역, 결과 목록 영역, 정렬/페이징 영역으로 나눕니다.')}",
+            ]
+        elif primary_template_id == "amount_threshold":
+            frontend = [
+                f"예시: {concept} 화면을 한도 안내 영역, 처리 결과 안내 영역, 액션 영역으로 나눕니다.",
+            ]
         else:
             frontend = [
                 f"예시: {concept} 화면을 목록 영역, 상세 영역, 처리 영역으로 나눠 화면 골격을 구성합니다.",
             ]
-        if primary == "search_filters":
-            frontend[0] = f"예시: {concept} 화면을 검색 조건 영역과 결과 목록 영역으로 나눕니다."
+        if primary_template_id == "workflow":
+            frontend.append("예시: 승인 주체, 단계 상태, 예외 승인 안내를 워크플로우 결과에 따라 분리해 표시합니다.")
+        elif primary == "search_filters":
+            frontend[0] = f"예시: {self._compose_concept_goal(concept, '화면을 검색 조건 영역과 결과 목록 영역으로 나눕니다.')}"
             frontend.append("예시: 검색 필터와 조회 조건은 별도 화면 상태로 관리합니다.")
         elif primary_template_id == "access_control":
             frontend.append("예시: 승인 주체, 부서 책임, 처리 경로 안내를 정책 결과에 따라 분리해 표시합니다.")
+        elif primary_template_id == "query_filter":
+            frontend.append("예시: 조회 조건과 정렬/페이징 상태를 별도 화면 상태로 관리합니다.")
+        elif primary_template_id == "amount_threshold":
+            frontend.append("예시: 금액 한도 안내와 한도 초과 메시지를 정책 결과에 따라 분리해 표시합니다.")
         elif primary_template_id == "state_transition" or primary == "status_permissions":
             frontend.append("예시: 액션 버튼 노출 여부는 역할과 상태 규칙에 따라 분리해 계산합니다.")
         elif primary_template_id == "validation":
             frontend.append("예시: 입력 검증, 중복 경고, 제출 차단 규칙을 화면에서 분리해 처리합니다.")
-        if secondary == "search_filters" and primary_template_id not in {"state_transition", "access_control", "validation"} and primary != "search_filters":
+        if secondary == "search_filters" and primary_template_id not in {"state_transition", "access_control", "validation", "query_filter", "amount_threshold"} and primary != "search_filters":
             frontend.append("예시: 보조 조회 신호를 반영해 조회 조건 입력 영역을 함께 둡니다.")
-        elif secondary == "status_permissions" and primary_template_id not in {"state_transition", "access_control"} and primary != "status_permissions":
+        elif secondary == "status_permissions" and primary_template_id not in {"state_transition", "access_control", "query_filter", "amount_threshold"} and primary != "status_permissions":
             frontend.append("예시: 보조 정책 신호를 반영해 액션 노출 계산 영역을 함께 둡니다.")
-        elif secondary == "save_validation" and primary_template_id not in {"state_transition", "access_control", "validation"} and primary != "save_validation":
+        elif secondary == "save_validation" and primary_template_id not in {"state_transition", "access_control", "validation", "query_filter", "amount_threshold"} and primary != "save_validation":
             frontend.append("예시: 보조 저장 신호를 반영해 화면 입력 검증 로직을 함께 둡니다.")
 
         return LayeredListResult(database=database[:4], backend=backend[:4], frontend=frontend[:4])
@@ -790,6 +853,11 @@ class RebuildAssistantService:
         grounded_business_rules = self.build_grounded_business_rules(prepared, core_business_rules)
         retained_contracts = self.build_retained_contracts(prepared, grounded_business_rules)
         applied_templates = self.build_applied_templates(prepared, grounded_business_rules, retained_contracts)
+        pattern_candidates = self.collect_pattern_candidates(prepared, applied_templates)
+        primary_judgment, primary_judgment_reason, pattern_candidates = self.select_primary_judgment(prepared, pattern_candidates)
+        prepared.selected_primary_judgment = primary_judgment
+        prepared.selected_primary_judgment_reason = primary_judgment_reason
+        prepared.pattern_candidates = list(pattern_candidates)
         verification_checkpoints = self.build_verification_checkpoints(
             prepared,
             grounded_business_rules,
@@ -803,6 +871,9 @@ class RebuildAssistantService:
         recommended_option = self.pick_recommended_option(design_options, prepared, grounded_business_rules, retained_contracts, applied_templates)
         execution_plan = self.build_execution_plan(prepared, grounded_business_rules, retained_contracts, recommended_option, applied_templates)
         result = StructuredRebuildResult(
+            primary_judgment=primary_judgment,
+            primary_judgment_reason=primary_judgment_reason,
+            pattern_candidates=pattern_candidates,
             core_business_rules=core_business_rules,
             one_line_conclusion=self._build_conclusion_with_templates(prepared, confidence, grounded_business_rules, applied_templates),
             executive_summary_v2=self.build_executive_summary_v2(prepared, grounded_business_rules, recommended_option, applied_templates),
@@ -827,22 +898,336 @@ class RebuildAssistantService:
         )
         return self._sanitize_structured_result(result)
 
+    def build_polish_bundle(
+        self,
+        result: StructuredRebuildResult,
+        *,
+        audience: str = "manager",
+        delivery_mode: str = "client_report",
+        use_ai_rewrite: bool = False,
+    ):
+        from .postprocess.service import StructuredResultPolishService
+
+        return StructuredResultPolishService().polish_result(
+            result,
+            audience=audience,
+            delivery_mode=delivery_mode,
+            use_ai_rewrite=use_ai_rewrite,
+        )
+
     def _primary_template(self, prepared: PreparedRebuildInput, applied_templates: list[AppliedJudgmentTemplate]) -> AppliedJudgmentTemplate | None:
         if not applied_templates:
             return None
-        if self._has_explicit_state_transition_signal(prepared):
-            state_transition = next((item for item in applied_templates if item.template_id == "state_transition"), None)
-            if state_transition:
-                return state_transition
-        access_control = next((item for item in applied_templates if item.template_id == "access_control"), None)
-        if access_control and self._should_enrich_access_control(prepared, []):
-            return access_control
-        validation_signals = len(prepared.signals.save_validation)
-        if validation_signals >= 2:
-            validation = next((item for item in applied_templates if item.template_id == "validation"), None)
-            if validation:
-                return validation
-        return applied_templates[0]
+        primary_name = prepared.selected_primary_judgment
+        if not primary_name:
+            candidates = self.collect_pattern_candidates(prepared, applied_templates)
+            primary_name, _, candidates = self.select_primary_judgment(prepared, candidates)
+            prepared.selected_primary_judgment = primary_name
+            prepared.pattern_candidates = list(candidates)
+        selected = next((item for item in applied_templates if item.template_id == primary_name), None)
+        return selected or applied_templates[0]
+
+    def collect_pattern_candidates(
+        self,
+        prepared: PreparedRebuildInput,
+        applied_templates: list[AppliedJudgmentTemplate],
+    ) -> list[PatternCandidate]:
+        template_map = {item.template_id: item for item in applied_templates}
+        candidates: list[PatternCandidate] = []
+
+        def add(name: str, matched: bool, reasons: list[str]) -> None:
+            item = template_map.get(name)
+            score = float(item.score) if item else 0.0
+            enriched_reasons = [reason for reason in reasons if reason]
+            if item and item.matched_signal_types:
+                enriched_reasons.extend(f"matched_signal={signal}" for signal in item.matched_signal_types[:3])
+            candidates.append(
+                PatternCandidate(
+                    name=name,
+                    matched=matched,
+                    score=score,
+                    reasons=enriched_reasons,
+                )
+            )
+
+        workflow_actor = self._workflow_actor_signal_count(prepared)
+        workflow_stage = self._workflow_stage_signal_count(prepared)
+        workflow_gate = self._workflow_gate_signal_count(prepared)
+        workflow_progression = self._workflow_progression_signal_count(prepared)
+        add(
+            "workflow",
+            self._has_workflow_pattern(prepared),
+            [
+                f"actor_signals={workflow_actor}",
+                f"stage_signals={workflow_stage}",
+                f"gate_signals={workflow_gate}",
+                f"progression_signals={workflow_progression}",
+            ],
+        )
+        add(
+            "state_transition",
+            self._has_explicit_state_transition_signal(prepared),
+            [
+                f"explicit_state_transition={self._has_explicit_state_transition_signal(prepared)}",
+                f"primary_feature_mode={prepared.signals.primary_feature_mode}",
+            ],
+        )
+        query_filter_matched = prepared.signals.primary_feature_mode == "search_filters" or (
+            prepared.signals.secondary_feature_mode == "search_filters"
+            and len(prepared.signals.search_filters) >= 2
+            and not self._is_validation_primary(prepared)
+            and not self._has_explicit_state_transition_signal(prepared)
+            and not self._has_workflow_pattern(prepared)
+        )
+        add(
+            "query_filter",
+            query_filter_matched,
+            [
+                f"primary_feature_mode={prepared.signals.primary_feature_mode}",
+                f"secondary_feature_mode={prepared.signals.secondary_feature_mode}",
+                f"search_filter_signals={len(prepared.signals.search_filters)}",
+            ],
+        )
+        add(
+            "amount_threshold",
+            self._has_amount_threshold_focus(prepared),
+            [
+                f"amount_threshold_focus={self._has_amount_threshold_focus(prepared)}",
+                f"validation_signals={len(prepared.signals.save_validation)}",
+            ],
+        )
+        add(
+            "access_control",
+            bool(template_map.get("access_control")) and self._should_enrich_access_control(prepared, []),
+            [
+                f"access_control_score={float(template_map.get('access_control').score) if template_map.get('access_control') else 0.0}",
+                f"status_permission_signals={len(prepared.signals.status_permissions)}",
+            ],
+        )
+        add(
+            "validation",
+            self._is_validation_primary(prepared) or len(prepared.signals.save_validation) >= 2,
+            [
+                f"validation_primary={self._is_validation_primary(prepared)}",
+                f"save_validation_signals={len(prepared.signals.save_validation)}",
+                f"primary_feature_mode={prepared.signals.primary_feature_mode}",
+            ],
+        )
+        return candidates
+
+    def select_primary_judgment(
+        self,
+        prepared: PreparedRebuildInput,
+        pattern_candidates: list[PatternCandidate],
+    ) -> tuple[str, str, list[PatternCandidate]]:
+        candidate_map = {item.name: item for item in pattern_candidates}
+
+        def choose(name: str, reason: str) -> tuple[str, str]:
+            return name, reason
+
+        workflow = candidate_map.get("workflow")
+        state_transition = candidate_map.get("state_transition")
+        query_filter = candidate_map.get("query_filter")
+        amount_threshold = candidate_map.get("amount_threshold")
+        access_control = candidate_map.get("access_control")
+        validation = candidate_map.get("validation")
+
+        if workflow and workflow.matched:
+            selected_name, selected_reason = choose(
+                "workflow",
+                "승인 주체, 단계 구조, 의사결정 게이트가 성립해 workflow를 우선 선택했습니다.",
+            )
+        elif state_transition and state_transition.matched:
+            selected_name, selected_reason = choose(
+                "state_transition",
+                "명시적 상태 변경 신호가 확인되어 state_transition을 우선 선택했습니다.",
+            )
+        elif validation and validation.matched and prepared.signals.primary_feature_mode == "save_validation":
+            selected_name, selected_reason = choose(
+                "validation",
+                "저장 검증 신호가 주축이라 validation을 우선 선택했습니다.",
+            )
+        elif query_filter and query_filter.matched and not (amount_threshold and amount_threshold.matched):
+            selected_name, selected_reason = choose(
+                "query_filter",
+                "조회 조건, 필터, 정렬, 페이징 축이 금액 정책보다 강해 query_filter를 선택했습니다.",
+            )
+        elif amount_threshold and amount_threshold.matched:
+            selected_name, selected_reason = choose(
+                "amount_threshold",
+                "금액 구간과 한도 경계가 조회형/검증형보다 강해 amount_threshold를 선택했습니다.",
+            )
+        elif access_control and access_control.matched:
+            selected_name, selected_reason = choose(
+                "access_control",
+                "처리 권한과 승인 주체 축이 핵심이라 access_control을 선택했습니다.",
+            )
+        elif validation and validation.matched:
+            selected_name, selected_reason = choose(
+                "validation",
+                "다른 패턴 최소 조건이 부족해 validation을 fallback으로 선택했습니다.",
+            )
+        else:
+            selected_name, selected_reason = choose(
+                "validation",
+                "강한 패턴 후보가 없어 validation을 기본 fallback으로 선택했습니다.",
+            )
+
+        annotated: list[PatternCandidate] = []
+        for item in pattern_candidates:
+            rejected_reason = item.rejected_reason
+            if item.name == selected_name:
+                rejected_reason = ""
+            elif item.name == "query_filter" and item.matched and prepared.signals.primary_feature_mode == "save_validation":
+                rejected_reason = "저장 검증이 주축이라 query_filter 후보를 후순위로 내렸습니다."
+            elif item.name == "access_control" and item.matched and selected_name == "workflow":
+                rejected_reason = "승인 흐름의 단계성과 게이트가 더 강해 workflow를 우선 선택했습니다."
+            elif item.matched:
+                rejected_reason = f"{selected_name} 우선 규칙이 적용되어 탈락했습니다."
+            else:
+                rejected_reason = "최소 성립 조건 부족으로 탈락했습니다."
+            annotated.append(item.model_copy(update={"rejected_reason": rejected_reason}))
+        return selected_name, selected_reason, annotated
+
+    def _has_amount_threshold_focus(self, prepared: PreparedRebuildInput) -> bool:
+        lowered = self._combined_evidence_text(prepared).lower()
+        amount_hits = sum(
+            1
+            for token in (
+                "claim_amount",
+                "order_amount",
+                "amount >=",
+                "amount <=",
+                ">= 3000000",
+                ">= 5000000",
+                ">= 7000000",
+                ">= 10000000",
+                "3000000",
+                "5000000",
+                "7000000",
+                "10000000",
+                "금액",
+                "한도",
+                "threshold",
+                "limit",
+            )
+            if token in lowered
+        )
+        validation_hits = sum(
+            1
+            for token in ("duplicate", "exists", "blocked", "forbidden", "invalid", "delivery_hold", "중복", "차단", "선행", "save(")
+            if token in lowered
+        )
+        access_hits = sum(
+            1
+            for token in ("claim_audit", "hq_reviewer", "dept_code", "reviewer", "branch_manager")
+            if token in lowered
+        )
+        return (
+            amount_hits >= 2
+            and validation_hits == 0
+            and access_hits == 0
+            and not self._has_explicit_state_transition_signal(prepared)
+            and prepared.signals.primary_feature_mode != "search_filters"
+        )
+
+    def _workflow_signal_text(self, prepared: PreparedRebuildInput) -> str:
+        parts = [
+            prepared.assets.source_code,
+            prepared.assets.ui_template,
+            prepared.assets.sql_queries,
+            prepared.assets.database_schema,
+            prepared.assets.framework_info,
+            prepared.legacy_bundle,
+        ]
+        return "\n".join(part for part in parts if part).lower()
+
+    def _workflow_actor_signal_count(self, prepared: PreparedRebuildInput) -> int:
+        text = self._workflow_signal_text(prepared)
+        patterns = [
+            r"\bapproverrole\b",
+            r"\bapprover_role\b",
+            r"\bapproval_role\b",
+            r"\bapprover\b",
+            r"\breviewer\b",
+            r"\bdelegateapprover\b",
+            r"\bdelegate_approver\b",
+            r"(?:approverrole|approver_role|approval_role)\s*(?:==|=|!=|equals|eq)",
+            r"(?:approvalstep|approval_step|approvallevel|approval_level)[^\n]{0,80}(?:approver|reviewer|manager|finance)",
+        ]
+        korean_patterns = [
+            "승인자",
+            "결재자",
+            "대리 승인자",
+        ]
+        count = sum(1 for pattern in patterns if re.search(pattern, text))
+        count += sum(1 for token in korean_patterns if token in text)
+        role_literals = {
+            token
+            for token in ("manager", "finance", "hr", "director", "team_lead", "auditor")
+            if re.search(rf"""["']{re.escape(token)}["']""", text)
+        }
+        if role_literals:
+            count += 1
+        if len(role_literals) >= 2:
+            count += 1
+        return count
+
+    def _workflow_stage_signal_count(self, prepared: PreparedRebuildInput) -> int:
+        text = self._workflow_signal_text(prepared)
+        direct_groups = [
+            ("approvalstep", "approval_step", "approvallevel", "approval_level", "approvalstage", "approval_stage"),
+            ("단계", "순차", "다단계", "multi-step", "multistep"),
+            ("1차", "2차", "3차", "first approval", "second approval"),
+            ("sequential", "parallel", "병렬"),
+        ]
+        count = sum(1 for tokens in direct_groups if any(token in text for token in tokens))
+        if re.search(r"\bstep\b", text):
+            count += 1
+        if re.search(r"\bstage\b", text):
+            count += 1
+        if re.search(r"\blevel\b", text):
+            count += 1
+        if "getnextstep" in text or "nextstep" in text:
+            count += 1
+        if re.search(r"""["'](?:[a-z0-9]+_(?:approval|approved)[a-z0-9_]*|pending_delegate_assignment)["']""", text):
+            count += 1
+        return count
+
+    def _workflow_gate_signal_count(self, prepared: PreparedRebuildInput) -> int:
+        text = self._workflow_signal_text(prepared)
+        groups = [
+            ("approve(", ".approve(", "approved", "\"approved\"", "'approved'", "승인", "auto_approved", "자동 승인"),
+            ("reject", "rejected", "반려"),
+            ("hold", "on_hold", "보류"),
+            ("delegate", "delegated", "대리 승인", "위임"),
+            ("escalation", "escalate"),
+        ]
+        return sum(1 for tokens in groups if any(token in text for token in tokens))
+
+    def _workflow_progression_signal_count(self, prepared: PreparedRebuildInput) -> int:
+        text = self._workflow_signal_text(prepared)
+        groups = [
+            ("requested", "submitted", "request_status"),
+            ("approvalstep", "approval_step", "approvallevel", "approval_level", "getnextstep", "nextstep"),
+            ("delegate", "delegated", "pending_delegate_assignment"),
+            ("reject", "rejected", "hold", "on_hold"),
+        ]
+        return sum(1 for tokens in groups if any(token in text for token in tokens))
+
+    def _has_workflow_pattern(self, prepared: PreparedRebuildInput) -> bool:
+        actor_count = self._workflow_actor_signal_count(prepared)
+        stage_count = self._workflow_stage_signal_count(prepared)
+        gate_count = self._workflow_gate_signal_count(prepared)
+        progression_count = self._workflow_progression_signal_count(prepared)
+        satisfied = sum(
+            (
+                actor_count >= 1,
+                stage_count >= 1,
+                gate_count >= 1,
+            )
+        )
+        return satisfied >= 2 and progression_count >= 1
 
     def _ordered_templates_for_generation(
         self,
@@ -856,10 +1241,14 @@ class RebuildAssistantService:
             forced = next((item for item in applied_templates if item.template_id == "access_control"), None)
             if forced:
                 return [forced]
+        if grounded_rules and self._should_force_amount_threshold_narrative(prepared, grounded_rules):
+            forced = next((item for item in applied_templates if item.template_id == "amount_threshold"), None)
+            if forced:
+                return [forced]
         primary = self._primary_template(prepared, applied_templates)
         if not primary:
             return applied_templates
-        if primary.template_id in {"validation", "access_control", "state_transition"}:
+        if primary.template_id in {"workflow", "validation", "access_control", "state_transition", "query_filter", "amount_threshold"}:
             return [primary]
         return [primary] + [item for item in applied_templates if item.template_id != primary.template_id]
 
@@ -872,6 +1261,42 @@ class RebuildAssistantService:
             if token in lowered
         }
         return len(matched) >= 2
+
+    def _should_force_amount_threshold_narrative(
+        self,
+        prepared: PreparedRebuildInput,
+        grounded_rules: list[GroundedBusinessRule],
+    ) -> bool:
+        combined = self._combined_evidence_text(prepared).lower()
+        text = " ".join(
+            [
+                combined,
+                " ".join(f"{item.title} {item.description}" for item in grounded_rules),
+            ]
+        ).lower()
+        threshold_matches = re.findall(
+            r"(?:order_amount|claim_amount|amount|dailylimit|limit_amount)[^0-9]{0,24}(?:>=|>|<=|<|=)\s*(\d{4,})",
+            text,
+            flags=re.IGNORECASE,
+        )
+        amount_hits = self._amount_threshold_keyword_hit_count(text)
+        query_bias_hits = sum(
+            1
+            for token in ("request.getparameter", "@requestparam", "search", "filter", "paging", "page", "검색", "조회", "필터", "정렬", "페이징")
+            if token in combined
+        )
+        access_hits = sum(
+            1
+            for token in ("claim_audit", "hq_reviewer", "dept_code", "branch_manager", "fraud", "b99")
+            if token in text
+        )
+        return (
+            len(threshold_matches) >= 2
+            and amount_hits >= 3
+            and query_bias_hits == 0
+            and access_hits == 0
+            and not self._has_explicit_state_transition_signal(prepared)
+        )
 
     def build_recommended_directions(self, prepared: PreparedRebuildInput) -> list[str]:
         concept = self._primary_concept(prepared)
@@ -1074,10 +1499,16 @@ class RebuildAssistantService:
             lead_rule = self._normalize_conclusion_rule_anchor(lead_rule)
             if primary_template.template_id == "validation":
                 return f"{concept} 기능은 {lead_rule or '직접 확인된 차단 조건'}을 기준으로 차단 조건, 검증 순서, 저장 전 검증을 분리해 재구성하는 것이 필요합니다."
+            if primary_template.template_id == "workflow":
+                return f"{concept} 기능은 승인 트리거와 승인 단계 구조를 기준으로 승인 흐름, 의사결정 게이트, 예외 처리 경로를 분리하는 것이 필요합니다."
             if primary_template.template_id == "state_transition":
                 return f"{concept} 기능은 {lead_rule or '직접 확인된 상태 전이 규칙'}을 기준으로 상태 전이, 처리 가능 상태, 전이 조건을 분리하는 것이 필요합니다."
             if primary_template.template_id == "access_control":
                 return f"{concept} 기능은 {lead_rule or '직접 확인된 권한 규칙'}을 기준으로 승인 권한, 부서, 승인 주체 규칙을 정책 계층으로 분리하는 것이 필요합니다."
+            if primary_template.template_id == "query_filter":
+                return f"{concept} 기능은 {lead_rule or '직접 확인된 조회 조건 규칙'}을 기준으로 조회 조건, 필터 조합, 결과 목록 구성을 조회 모델로 분리하는 것이 필요합니다."
+            if primary_template.template_id == "amount_threshold":
+                return f"{concept} 기능은 {lead_rule or '직접 확인된 금액 한도 규칙'}을 기준으로 금액 구간, 한도 정책, 고액 처리 경계를 분리하는 것이 필요합니다."
         return self._build_conclusion(prepared, confidence)
 
     def _normalize_conclusion_rule_anchor(self, text: str) -> str:
@@ -1142,6 +1573,10 @@ class RebuildAssistantService:
         anchored = self._resolve_domain_anchor(prepared)
         if anchored:
             return anchored
+        if prepared.signals.primary_feature_mode == "search_filters":
+            return "조회/필터"
+        if self._has_amount_threshold_focus(prepared):
+            return "금액/한도"
         return prepared.signals.concepts[0] if prepared.signals.concepts else "legacy"
 
     def _rule_entities(self, prepared: PreparedRebuildInput) -> list[str]:
@@ -1571,8 +2006,12 @@ class RebuildAssistantService:
                         needs_verification=confidence != "확정",
                     )
                 )
+        grounded = self._ensure_workflow_grounded_rules(prepared, grounded)
         grounded = self._ensure_validation_grounded_rules(prepared, grounded, core_rules)
-        grounded = self._ensure_access_control_grounded_rules(prepared, grounded, core_rules)
+        if not self._has_workflow_pattern(prepared):
+            grounded = self._ensure_access_control_grounded_rules(prepared, grounded, core_rules)
+        grounded = self._ensure_query_filter_grounded_rules(prepared, grounded)
+        grounded = self._ensure_amount_threshold_grounded_rules(prepared, grounded)
         return self._sort_grounded_business_rules(prepared, grounded)
 
     def _is_validation_primary(self, prepared: PreparedRebuildInput) -> bool:
@@ -1613,6 +2052,66 @@ class RebuildAssistantService:
             return True
         return False
 
+    def _ensure_workflow_grounded_rules(
+        self,
+        prepared: PreparedRebuildInput,
+        grounded: list[GroundedBusinessRule],
+    ) -> list[GroundedBusinessRule]:
+        if not self._has_workflow_pattern(prepared):
+            return grounded
+        output = list(grounded)
+        defaults = [
+            (
+                "승인 트리거 조건",
+                "승인 흐름이 시작되는 트리거 조건은 별도 워크플로우 기준으로 분리해야 합니다.",
+                ("submit", "submitted", "approval", "trigger", "요청", "승인 시작", "기안"),
+                ["워크플로우 서비스", "API"],
+            ),
+            (
+                "승인 주체 정의",
+                "승인 주체와 결재 권한은 별도 승인 정책으로 유지해야 합니다.",
+                ("approver", "approverrole", "reviewer", "manager", "finance", "admin", "승인자", "결재자"),
+                ["워크플로우 서비스", "정책 서비스"],
+            ),
+            (
+                "승인 단계 구조",
+                "단계별 승인 순서와 조건부 승인 구조는 같은 워크플로우 계층으로 정리해야 합니다.",
+                ("approvalstep", "approval_step", "approvallevel", "approval_level", "step", "stage", "1차", "2차", "단계"),
+                ["워크플로우 서비스", "API"],
+            ),
+            (
+                "의사결정 분기 조건",
+                "승인, 반려, 보류, 자동 승인 분기 조건은 의사결정 게이트 기준으로 유지해야 합니다.",
+                ("approve", "reject", "hold", "pending", "auto_approved", "승인", "반려", "보류", "자동 승인"),
+                ["워크플로우 서비스", "API"],
+            ),
+            (
+                "예외 처리 흐름",
+                "대리 승인, 긴급 처리, 예외 승인 경로는 일반 승인 흐름과 분리해 관리해야 합니다.",
+                ("delegate", "delegat", "escalation", "urgent", "대리 승인", "긴급", "예외 승인"),
+                ["워크플로우 서비스", "정책 서비스"],
+            ),
+        ]
+        for title, description, keywords, design_targets in defaults:
+            if any(self._normalize_key(item.title) == self._normalize_key(title) for item in output):
+                continue
+            evidence = self._collect_evidence_refs(prepared, keywords, ("source", "ui", "sql", "constraint", "goal"))
+            if not evidence:
+                continue
+            confidence, confidence_reason = self._resolve_confidence(evidence)
+            output.append(
+                GroundedBusinessRule(
+                    title=title,
+                    description=description,
+                    evidence=evidence,
+                    design_targets=design_targets,
+                    confidence=confidence,
+                    confidence_reason=confidence_reason,
+                    needs_verification=confidence != "확정",
+                )
+            )
+        return output
+
     def _ensure_validation_grounded_rules(
         self,
         prepared: PreparedRebuildInput,
@@ -1652,7 +2151,8 @@ class RebuildAssistantService:
         grounded: list[GroundedBusinessRule],
         core_rules: list[str],
     ) -> list[GroundedBusinessRule]:
-        access_primary = self._should_enrich_access_control(prepared, grounded)
+        claim_access_focus = self._has_claim_access_control_focus(prepared, grounded)
+        access_primary = self._should_enrich_access_control(prepared, grounded) or claim_access_focus
         if not access_primary:
             return grounded
         output = list(grounded)
@@ -1724,13 +2224,122 @@ class RebuildAssistantService:
             self._normalize_key("권한 위임 가능 여부"),
             self._normalize_key("승인 요청 및 처리 흐름"),
         }
+        if claim_access_focus:
+            prioritized_titles = {
+                self._normalize_key("FRAUD 본사 심사 전용"),
+                self._normalize_key("지점장 300만원 한도"),
+                self._normalize_key("1천만원 이상 전담 부서 처리"),
+                self._normalize_key("B99 긴급건 본사 선승인"),
+            }
         if access_primary:
             prioritized = [
                 item for item in output
                 if self._normalize_key(item.title) in prioritized_titles
             ]
             if len(prioritized) >= 3:
-                return prioritized[:3]
+                return prioritized[:4] if claim_access_focus else prioritized[:3]
+        return output
+
+    def _ensure_query_filter_grounded_rules(
+        self,
+        prepared: PreparedRebuildInput,
+        grounded: list[GroundedBusinessRule],
+    ) -> list[GroundedBusinessRule]:
+        if prepared.signals.primary_feature_mode != "search_filters":
+            return grounded
+        output = list(grounded)
+        defaults = [
+            (
+                "조회 조건 분리",
+                "조회 조건과 필터 조합 규칙을 별도 조회 모델로 분리해야 합니다.",
+                ("query", "filter", "search", "where", "request.getparameter", "조회", "검색", "필터"),
+                ["조회 모델", "정책 서비스"],
+            ),
+            (
+                "정렬과 페이징 기본 규칙",
+                "정렬 기준과 페이징 기본 규칙을 별도 조회 정책으로 정리해야 합니다.",
+                ("order by", "sort", "paging", "page", "limit", "offset", "정렬", "페이징"),
+                ["조회 모델", "API"],
+            ),
+            (
+                "결과 목록 구성 규칙",
+                "결과 목록 구성과 필터 상태는 같은 조회 모델 기준으로 유지해야 합니다.",
+                ("table", "grid", "list", "results", "목록", "결과"),
+                ["조회 모델", "API"],
+            ),
+        ]
+        for title, description, keywords, design_targets in defaults:
+            if any(self._normalize_key(item.title) == self._normalize_key(title) for item in output):
+                continue
+            evidence = self._collect_evidence_refs(prepared, keywords, ("source", "ui", "sql", "constraint", "goal"))
+            if not evidence:
+                continue
+            confidence, confidence_reason = self._resolve_confidence(evidence)
+            output.append(
+                GroundedBusinessRule(
+                    title=title,
+                    description=description,
+                    evidence=evidence,
+                    design_targets=design_targets,
+                    confidence=confidence,
+                    confidence_reason=confidence_reason,
+                    needs_verification=confidence != "확정",
+                )
+            )
+        return output
+
+    def _ensure_amount_threshold_grounded_rules(
+        self,
+        prepared: PreparedRebuildInput,
+        grounded: list[GroundedBusinessRule],
+    ) -> list[GroundedBusinessRule]:
+        if not self._should_force_amount_threshold_narrative(prepared, grounded):
+            return grounded
+        output = list(grounded)
+        defaults = [
+            (
+                "금액 구간 기준",
+                "금액 구간별 처리 기준은 별도 한도 정책으로 유지해야 합니다.",
+                ("amount", "order_amount", "claim_amount", "금액", "한도", "threshold", "limit"),
+                ["정책 서비스", "API"],
+            ),
+            (
+                "한도 계산 규칙",
+                "한도 기준 필드와 금액 비교 규칙은 같은 정책 계산 기준으로 유지해야 합니다.",
+                ("dailylimit", "daily_limit", "limit_amount", "limit", "<=", ">=", "한도", "계산"),
+                ["정책 서비스", "API"],
+            ),
+            (
+                "고액 처리 경계",
+                "고액 처리 기준과 한도 초과 후속 경계는 같은 정책 결과로 정리해야 합니다.",
+                ("50000", "300000", "1000000", "고액", "한도 초과", "approval", "limit"),
+                ["정책 서비스", "API"],
+            ),
+            (
+                "차단/승인 경계",
+                "금액 기준에 따라 차단과 승인 경계를 분리해 정책 결과로 관리해야 합니다.",
+                ("approve", "approval", "차단", "승인", "본사 승인", "검토"),
+                ["정책 서비스", "API"],
+            ),
+        ]
+        for title, description, keywords, design_targets in defaults:
+            if any(self._normalize_key(item.title) == self._normalize_key(title) for item in output):
+                continue
+            evidence = self._collect_evidence_refs(prepared, keywords, ("source", "ui", "sql", "constraint", "goal"))
+            if not evidence:
+                continue
+            confidence, confidence_reason = self._resolve_confidence(evidence)
+            output.append(
+                GroundedBusinessRule(
+                    title=title,
+                    description=description,
+                    evidence=evidence,
+                    design_targets=design_targets,
+                    confidence=confidence,
+                    confidence_reason=confidence_reason,
+                    needs_verification=confidence != "확정",
+                )
+            )
         return output
 
     def _validation_candidate_rule_texts(
@@ -1826,6 +2435,16 @@ class RebuildAssistantService:
         )
         return sum(1 for keyword in keywords if keyword in lowered)
 
+    def _query_filter_keyword_hit_count(self, text: str) -> int:
+        lowered = (text or "").lower()
+        keywords = ("search", "filter", "query", "where", "order by", "sort", "paging", "page", "조회", "검색", "필터", "정렬", "페이징", "목록")
+        return sum(1 for keyword in keywords if keyword in lowered)
+
+    def _amount_threshold_keyword_hit_count(self, text: str) -> int:
+        lowered = (text or "").lower()
+        keywords = ("amount", "threshold", "limit", "order_amount", "claim_amount", "금액", "한도", "고액", "5000000", "7000000", "10000000", "본사 승인", "검토")
+        return sum(1 for keyword in keywords if keyword in lowered)
+
     def _access_control_rule_axis(self, text: str) -> str:
         lowered = (text or "").lower()
         if any(token in lowered for token in ("10000000", "1천만원", "3000000", "300만원", "고액", "한도", "claim_amount")):
@@ -1889,7 +2508,140 @@ class RebuildAssistantService:
         prepared: PreparedRebuildInput,
         grounded: list[GroundedBusinessRule],
     ) -> list[GroundedBusinessRule]:
-        if self._is_access_control_primary(prepared, grounded):
+        claim_access_focus = self._has_claim_access_control_focus(prepared, grounded)
+        if self._has_workflow_pattern(prepared):
+            scored: list[tuple[float, int, GroundedBusinessRule]] = []
+            for index, rule in enumerate(grounded):
+                text = " ".join(
+                    [
+                        rule.title,
+                        rule.description,
+                        " ".join(rule.design_targets),
+                        " ".join(evidence.excerpt for evidence in rule.evidence),
+                    ]
+                )
+                workflow_hits = self._workflow_keyword_hit_count(text)
+                access_hits = self._access_control_keyword_hit_count(text)
+                state_hits = self._state_keyword_hit_count(text)
+                validation_hits = self._validation_keyword_hit_count(text)
+                score = float(workflow_hits) * 4.6
+                if "승인 트리거" in rule.title:
+                    score += 5.0
+                if "승인 단계 구조" in rule.title:
+                    score += 6.0
+                if "의사결정 분기 조건" in rule.title:
+                    score += 5.0
+                if "예외 처리 흐름" in rule.title:
+                    score += 4.8
+                if "승인 주체 정의" in rule.title:
+                    score += 4.0
+                if any(token in rule.title for token in ("권한 위임 가능 여부", "승인 요청 및 처리 흐름")):
+                    score -= 4.0
+                if state_hits > 0 and workflow_hits == 0:
+                    score -= float(state_hits) * 2.8
+                if validation_hits > 0 and workflow_hits == 0:
+                    score -= float(validation_hits) * 2.2
+                if access_hits > 0 and workflow_hits == 0:
+                    score -= float(access_hits) * 1.6
+                scored.append((score, -index, rule))
+            ordered = [item for _, _, item in sorted(scored, key=lambda entry: (entry[0], entry[1]), reverse=True)]
+            filtered = [
+                item
+                for item in ordered
+                if self._workflow_keyword_hit_count(
+                    " ".join(
+                        [
+                            item.title,
+                            item.description,
+                            " ".join(item.design_targets),
+                            " ".join(evidence.excerpt for evidence in item.evidence),
+                        ]
+                    )
+                ) > 0
+            ]
+            return (filtered or ordered)[:5]
+        if prepared.signals.primary_feature_mode == "search_filters":
+            scored: list[tuple[float, int, GroundedBusinessRule]] = []
+            for index, rule in enumerate(grounded):
+                text = " ".join(
+                    [
+                        rule.title,
+                        rule.description,
+                        " ".join(rule.design_targets),
+                        " ".join(evidence.excerpt for evidence in rule.evidence),
+                    ]
+                )
+                query_hits = self._query_filter_keyword_hit_count(text)
+                state_hits = self._state_keyword_hit_count(text)
+                validation_hits = self._validation_keyword_hit_count(text)
+                score = float(query_hits) * 4.2
+                score += 1.2 if any("조회" in target or "API" in target for target in rule.design_targets) else 0.0
+                score += 1.0 if any(item.evidence_kind in {"source", "sql", "ui"} for item in rule.evidence) else 0.0
+                if state_hits > 0:
+                    score -= float(state_hits) * 3.0
+                if validation_hits > 0 and query_hits == 0:
+                    score -= float(validation_hits) * 1.8
+                scored.append((score, -index, rule))
+            ordered = [item for _, _, item in sorted(scored, key=lambda entry: (entry[0], entry[1]), reverse=True)]
+            filtered = [
+                item
+                for item in ordered
+                if self._query_filter_keyword_hit_count(
+                    " ".join(
+                        [
+                            item.title,
+                            item.description,
+                            " ".join(item.design_targets),
+                            " ".join(evidence.excerpt for evidence in item.evidence),
+                        ]
+                    )
+                ) > 0
+            ]
+            return (filtered or ordered)[:3]
+        if self._should_force_amount_threshold_narrative(prepared, grounded) and not claim_access_focus:
+            scored: list[tuple[float, int, GroundedBusinessRule]] = []
+            for index, rule in enumerate(grounded):
+                text = " ".join(
+                    [
+                        rule.title,
+                        rule.description,
+                        " ".join(rule.design_targets),
+                        " ".join(evidence.excerpt for evidence in rule.evidence),
+                    ]
+                )
+                amount_hits = self._amount_threshold_keyword_hit_count(text)
+                query_hits = self._query_filter_keyword_hit_count(text)
+                state_hits = self._state_keyword_hit_count(text)
+                validation_hits = self._validation_keyword_hit_count(text)
+                score = float(amount_hits) * 4.2
+                score += 1.2 if any("정책" in target or "API" in target for target in rule.design_targets) else 0.0
+                score += 1.0 if any(item.evidence_kind in {"source", "sql", "constraint"} for item in rule.evidence) else 0.0
+                if query_hits > 0:
+                    score -= float(query_hits) * 3.5
+                if state_hits > 0 and amount_hits == 0:
+                    score -= float(state_hits) * 1.5
+                if "검증" in rule.title or ("검증" in rule.description and amount_hits <= 1):
+                    score -= 3.0
+                if validation_hits > 0 and "한도 계산" not in rule.title and "금액 구간" not in rule.title and "고액 처리" not in rule.title:
+                    score -= 1.5
+                scored.append((score, -index, rule))
+            ordered = [item for _, _, item in sorted(scored, key=lambda entry: (entry[0], entry[1]), reverse=True)]
+            filtered = [
+                item
+                for item in ordered
+                if self._amount_threshold_keyword_hit_count(
+                    " ".join(
+                        [
+                            item.title,
+                            item.description,
+                            " ".join(item.design_targets),
+                            " ".join(evidence.excerpt for evidence in item.evidence),
+                        ]
+                    )
+                ) > 0
+            ]
+            return (filtered or ordered)[:3]
+        if claim_access_focus or self._is_access_control_primary(prepared, grounded):
             scored: list[tuple[float, int, GroundedBusinessRule]] = []
             for index, rule in enumerate(grounded):
                 text = " ".join(
@@ -1903,16 +2655,44 @@ class RebuildAssistantService:
                 access_hits = self._access_control_keyword_hit_count(text)
                 validation_hits = self._validation_keyword_hit_count(text)
                 state_hits = self._state_keyword_hit_count(text)
+                amount_hits = self._amount_threshold_keyword_hit_count(text)
                 axis = self._access_control_rule_axis(text)
                 score = float(access_hits) * 4.0
                 score += 2.5 if axis in {"amount", "approver", "route"} else 0.0
                 score += 1.0 if any(item.evidence_kind in {"source", "sql", "constraint"} for item in rule.evidence) else 0.0
+                if claim_access_focus:
+                    if any(token in text.lower() for token in ("branch_manager", "hq_reviewer", "claim_audit", "fraud", "b99", "본사", "지점장", "선승인", "심사")):
+                        score += 4.5
+                    if axis == "approver":
+                        score += 3.0
+                    elif axis == "route":
+                        score += 2.5
+                    elif axis == "amount" and access_hits > 0:
+                        score += 1.8
+                    if "금액 한도 검증" in rule.title:
+                        score -= 6.0
+                    if validation_hits > 0 and access_hits == 0:
+                        score -= float(validation_hits) * 3.0
+                    if amount_hits > 0 and access_hits == 0:
+                        score -= float(amount_hits) * 1.4
                 if access_hits == 0 and validation_hits > 0:
                     score -= float(validation_hits) * 2.5
                 if access_hits == 0 and state_hits > 0:
                     score -= float(state_hits) * 1.5
                 scored.append((score, -index, rule))
-            return [item for _, _, item in sorted(scored, key=lambda entry: (entry[0], entry[1]), reverse=True)]
+            ordered = [item for _, _, item in sorted(scored, key=lambda entry: (entry[0], entry[1]), reverse=True)]
+            if claim_access_focus:
+                prioritized = [
+                    item for item in ordered
+                    if any(
+                        token in f"{item.title} {item.description}".lower()
+                        for token in ("branch_manager", "hq_reviewer", "claim_audit", "fraud", "b99", "본사", "지점장", "선승인", "심사", "승인", "부서", "권한")
+                    )
+                    and "금액 한도 검증" not in item.title
+                ]
+                if len(prioritized) >= 3:
+                    return prioritized[:5]
+            return ordered
         if not self._is_validation_primary(prepared):
             return grounded
         scored: list[tuple[float, int, GroundedBusinessRule]] = []
@@ -1958,6 +2738,8 @@ class RebuildAssistantService:
             primary = self._primary_template(prepared, applied_templates)
             if primary and primary.template_id == "access_control":
                 return True
+        if self._should_force_amount_threshold_narrative(prepared, grounded):
+            return False
         if self._is_access_control_primary(prepared, grounded):
             return True
         if self._has_explicit_state_transition_signal(prepared) or self._is_validation_primary(prepared):
@@ -1965,6 +2747,36 @@ class RebuildAssistantService:
         if "access_control" not in self._candidate_template_ids(prepared, grounded):
             return False
         return prepared.signals.primary_feature_mode == "status_permissions" or self._count_access_control_biased_rules(grounded) >= 1
+
+    def _has_claim_access_control_focus(
+        self,
+        prepared: PreparedRebuildInput,
+        grounded: list[GroundedBusinessRule],
+    ) -> bool:
+        if self._primary_concept(prepared) != "청구 조정":
+            return False
+        combined = " ".join(
+            [
+                self._combined_evidence_text(prepared),
+                " ".join(f"{item.title} {item.description}" for item in grounded),
+            ]
+        ).lower()
+        actor_hits = sum(
+            1
+            for token in ("branch_manager", "hq_reviewer", "claim_audit", "reviewer", "manager", "본사", "지점장", "심사", "부서", "권한")
+            if token in combined
+        )
+        route_hits = sum(
+            1
+            for token in ("b99", "fraud", "선승인", "예외 승인", "긴급", "심사전담", "처리 경로")
+            if token in combined
+        )
+        amount_actor_hits = sum(
+            1
+            for token in ("3000000", "300만원", "10000000", "1천만원")
+            if token in combined
+        )
+        return actor_hits >= 2 and (route_hits >= 1 or amount_actor_hits >= 1)
 
     def build_applied_templates(
         self,
@@ -2000,10 +2812,22 @@ class RebuildAssistantService:
                 )
             )
         ordered = sorted(applied, key=lambda item: item.score, reverse=True)
-        if self._has_explicit_state_transition_signal(prepared):
+        if self._has_workflow_pattern(prepared):
+            workflow = next((item for item in ordered if item.template_id == "workflow"), None)
+            if workflow:
+                ordered = [workflow] + [item for item in ordered if item.template_id != "workflow"]
+        elif self._has_explicit_state_transition_signal(prepared):
             state_transition = next((item for item in ordered if item.template_id == "state_transition"), None)
             if state_transition:
                 ordered = [state_transition] + [item for item in ordered if item.template_id != "state_transition"]
+        elif prepared.signals.primary_feature_mode == "search_filters":
+            query_filter = next((item for item in ordered if item.template_id == "query_filter"), None)
+            if query_filter:
+                ordered = [query_filter] + [item for item in ordered if item.template_id != "query_filter"]
+        elif self._has_amount_threshold_focus(prepared):
+            amount_threshold = next((item for item in ordered if item.template_id == "amount_threshold"), None)
+            if amount_threshold:
+                ordered = [amount_threshold] + [item for item in ordered if item.template_id != "amount_threshold"]
         elif len(prepared.signals.save_validation) >= 2:
             validation = next((item for item in ordered if item.template_id == "validation"), None)
             if validation:
@@ -2017,17 +2841,28 @@ class RebuildAssistantService:
         signal_hits: dict[str, set[str]],
     ) -> None:
         status_score = float(prepared.signals.scores.get("status_permissions", 0.0))
+        search_score = float(prepared.signals.scores.get("search_filters", 0.0))
         validation_score = float(prepared.signals.scores.get("save_validation", 0.0))
         if status_score:
             scores["state_transition"] += min(3.2, status_score * 0.58)
             scores["access_control"] += min(3.0, status_score * 0.52)
             signal_hits["state_transition"].add("status_permissions")
             signal_hits["access_control"].add("status_permissions")
+            if self._has_workflow_pattern(prepared):
+                scores["workflow"] += min(3.4, status_score * 0.62)
+                signal_hits["workflow"].add("status_permissions")
+        if search_score:
+            scores["query_filter"] += min(3.2, search_score * 0.78)
+            signal_hits["query_filter"].add("search_filters")
         if validation_score:
             scores["validation"] += min(3.2, validation_score * 0.72)
             signal_hits["validation"].add("save_validation")
+        if self._has_amount_threshold_focus(prepared):
+            scores["amount_threshold"] += max(1.8, min(3.0, validation_score * 0.68))
+            signal_hits["amount_threshold"].add("amount_threshold")
         signal_text = " ".join(
             prepared.signals.status_permissions
+            + prepared.signals.search_filters
             + prepared.signals.save_validation
             + prepared.signals.technical
             + prepared.signals.concepts
@@ -2077,9 +2912,12 @@ class RebuildAssistantService:
         lowered = (text or "").lower()
         matches: list[tuple[JudgmentTemplateId, str]] = []
         keyword_map: dict[JudgmentTemplateId, tuple[str, ...]] = {
+            "workflow": ("approval", "approver", "approverrole", "reviewer", "approvalstep", "approvallevel", "reject", "hold", "delegate", "escalation", "승인", "반려", "보류", "대리 승인"),
             "state_transition": ("status", "state", "ready", "review_required", "closed", "cancelled", "전이", "상태", "마감"),
             "access_control": ("role", "dept", "org", "hq", "권한", "본사", "부서", "승인", "reviewer", "claim_audit", "agency", "지점장"),
             "validation": ("amount", "limit", "flag", "hold", "검증", "차단", "한도", "선행", "delivery_hold", "불가", "urgent", "fraud"),
+            "query_filter": ("search", "filter", "query", "where", "order by", "sort", "paging", "page", "검색", "조회", "필터", "정렬", "페이징"),
+            "amount_threshold": ("amount", "threshold", "limit", "claim_amount", "order_amount", "고액", "금액", "한도", "3000000", "5000000", "7000000", "10000000"),
         }
         for template_id, keywords in keyword_map.items():
             for keyword in keywords:
@@ -2088,15 +2926,44 @@ class RebuildAssistantService:
                     break
         return matches
 
+    def _workflow_keyword_hit_count(self, text: str) -> int:
+        lowered = (text or "").lower()
+        keywords = (
+            "approver",
+            "approverrole",
+            "approvalstep",
+            "approvallevel",
+            "reviewer",
+            "approve",
+            "approved",
+            "reject",
+            "hold",
+            "delegate",
+            "approval",
+            "승인",
+            "반려",
+            "보류",
+            "대리 승인",
+            "단계",
+            "예외 승인",
+        )
+        return sum(1 for keyword in keywords if keyword in lowered)
+
     def _template_ids_for_design_target(self, target: str) -> list[JudgmentTemplateId]:
         lowered = (target or "").lower()
         matched: list[JudgmentTemplateId] = []
         if any(token in lowered for token in ("상태 전이", "status", "transition")):
             matched.append("state_transition")
+        if any(token in lowered for token in ("승인 단계", "approval", "approver", "reject", "반려", "보류", "workflow", "대리 승인")):
+            matched.append("workflow")
         if any(token in lowered for token in ("권한", "policy", "예외 승인", "승인", "권한 모델")):
             matched.append("access_control")
         if any(token in lowered for token in ("검증", "validation", "선행", "save", "차단")):
             matched.append("validation")
+        if any(token in lowered for token in ("조회", "검색", "필터", "query", "sort", "paging", "정렬")):
+            matched.append("query_filter")
+        if any(token in lowered for token in ("금액", "한도", "amount", "threshold", "limit")):
+            matched.append("amount_threshold")
         return matched
 
     def _template_ids_for_rule(self, rule: GroundedBusinessRule) -> list[JudgmentTemplateId]:
@@ -2125,6 +2992,8 @@ class RebuildAssistantService:
     ) -> list[VerificationItem]:
         retained_keys = {self._normalize_key(item.item) for item in retained_contracts}
         items: list[VerificationItem] = []
+        primary_template = self._primary_template(prepared, applied_templates or [])
+        workflow_primary = bool(primary_template and primary_template.template_id == "workflow")
         access_control_primary = self._should_enrich_access_control(
             prepared,
             grounded_rules,
@@ -2142,6 +3011,10 @@ class RebuildAssistantService:
             )
         output: list[VerificationItem] = []
         for item in items:
+            if workflow_primary and any(
+                token in item.item for token in ("권한 위임 가능 여부", "승인 요청 및 처리 흐름", "상태 전이와 액션 노출 조건")
+            ):
+                continue
             if access_control_primary and any(
                 token in item.item for token in ("권한 위임 가능 여부", "승인 요청 및 처리 흐름")
             ):
@@ -2163,7 +3036,22 @@ class RebuildAssistantService:
                     evidence=[],
                 )
             )
-        if access_control_primary:
+        if workflow_primary:
+            workflow_defaults = [
+                (
+                    "대리 승인 범위와 병렬 승인 가능 조건을 확인하는 것이 필요합니다.",
+                    "승인 트리거와 승인 주체는 직접 확인되었지만 대리 승인 범위와 병렬 승인 조건은 추가 확인이 필요합니다.",
+                ),
+                (
+                    "승인 단계별 통지와 후속 처리 절차를 확인하는 것이 필요합니다.",
+                    "승인 단계 구조는 보이지만 단계별 통지와 후속 처리 절차는 현재 자산만으로 모두 확정할 수 없습니다.",
+                ),
+            ]
+            for item_text, reason in workflow_defaults:
+                if any(self._normalize_key(existing.item) == self._normalize_key(item_text) for existing in output):
+                    continue
+                output.append(VerificationItem(item=item_text, reason=reason, evidence=[]))
+        elif access_control_primary:
             access_defaults = [
                 (
                     "권한 위임 세부 범위를 확인하는 것이 필요합니다.",
@@ -2185,7 +3073,15 @@ class RebuildAssistantService:
         if not output:
             fallback_template = self._fallback_verification_template(prepared, grounded_rules)
             for template_id in ([fallback_template] if fallback_template else []):
-                if template_id == "state_transition":
+                if template_id == "workflow":
+                    output.append(
+                        VerificationItem(
+                            item="대리 승인 범위와 병렬 승인 가능 조건을 확인하는 것이 필요합니다.",
+                            reason="승인 트리거와 승인 주체는 직접 확인되었지만 대리 승인 범위와 병렬 승인 조건은 추가 확인이 필요합니다.",
+                            evidence=[],
+                        )
+                    )
+                elif template_id == "state_transition":
                     output.append(
                         VerificationItem(
                             item="상태 전이 이후 후속 승인 또는 운영 처리 절차를 확인하는 것이 필요합니다.",
@@ -2209,6 +3105,14 @@ class RebuildAssistantService:
                             evidence=[],
                         )
                     )
+                elif template_id == "amount_threshold":
+                    output.append(
+                        VerificationItem(
+                            item="한도 초과 이후 후속 처리 기준과 사용자 안내 기준을 확인하는 것이 필요합니다.",
+                            reason="금액 구간과 한도 경계는 직접 확인되었지만 한도 초과 이후 후속 처리 기준은 추가 확인이 필요합니다.",
+                            evidence=[],
+                        )
+                    )
         return self._dedupe_by_normalized_text(output, attr="item")
 
     def _fallback_verification_template(
@@ -2216,8 +3120,12 @@ class RebuildAssistantService:
         prepared: PreparedRebuildInput,
         grounded_rules: list[GroundedBusinessRule],
     ) -> JudgmentTemplateId | None:
+        if self._has_workflow_pattern(prepared):
+            return "workflow"
         if self._has_explicit_state_transition_signal(prepared):
             return "state_transition"
+        if self._should_force_amount_threshold_narrative(prepared, grounded_rules):
+            return "amount_threshold"
         if self._is_validation_primary(prepared):
             return "validation"
         if self._count_access_control_biased_rules(grounded_rules) >= 1:
@@ -2365,12 +3273,22 @@ class RebuildAssistantService:
         lowered = f"{rule.title} {description}".lower()
         if any(token in lowered for token in ("승인 주체", "hq_reviewer", "branch_manager", "reviewer", "본사 승인")):
             return "승인 주체 분리"
+        if any(token in lowered for token in ("approvalstep", "approval_level", "승인 단계", "다단계", "1차", "2차", "순차 승인")):
+            return "승인 단계 구조"
+        if any(token in lowered for token in ("approve", "reject", "hold", "반려", "보류", "자동 승인")):
+            return "의사결정 게이트"
+        if any(token in lowered for token in ("delegate", "대리 승인", "긴급", "예외 승인", "escalation")):
+            return "예외 승인 흐름"
         if any(token in lowered for token in ("처리 경로", "예외 승인", "선승인", "경로 분기", "route")):
             return "처리 경로 분기"
         if any(token in lowered for token in ("3000000", "10000000", "1천만원", "300만원", "한도")):
             return "금액 한도 제한"
         if any(token in lowered for token in ("claim_audit", "hq_reviewer", "권한", "승인")):
             return "승인 권한 제한"
+        if any(token in lowered for token in ("검색", "조회", "필터", "query", "sort", "paging", "정렬")):
+            return "조회 조건 분리"
+        if any(token in lowered for token in ("amount", "금액", "고액", "threshold", "limit")):
+            return "금액 한도 정책"
         if any(token in lowered for token in ("closed", "cancelled", "조정 불가", "상태")):
             return "상태 제한"
         return description or (rule.title or "").strip()
@@ -2383,8 +3301,11 @@ class RebuildAssistantService:
         primary = applied_templates[0].template_id if applied_templates else ""
         preferred_keywords = {
             "validation": ("중복", "차단", "검증 순서", "선행 조건", "한도"),
+            "workflow": ("승인", "approver", "approval", "단계", "delegate", "반려", "보류"),
             "access_control": ("claim_audit", "승인", "권한", "dept_code", "channel_code"),
             "state_transition": ("status", "review_required", "delivery_hold", "상태값"),
+            "query_filter": ("조회", "검색", "필터", "정렬", "페이징", "query"),
+            "amount_threshold": ("금액", "한도", "amount", "limit", "threshold"),
         }.get(primary, ())
         phrases: list[str] = []
         prioritized = []
@@ -2402,6 +3323,8 @@ class RebuildAssistantService:
                 fallback.append(text)
         if primary == "access_control":
             return prioritized[:2]
+        if primary in {"query_filter", "amount_threshold"}:
+            return prioritized[:2] or fallback[:2]
         for text in prioritized + fallback:
             if text and text not in phrases:
                 phrases.append(text)
@@ -2424,31 +3347,49 @@ class RebuildAssistantService:
     def _primary_template_axis_phrase(self, primary_template: AppliedJudgmentTemplate | None) -> str:
         if not primary_template:
             return ""
+        if primary_template.template_id == "workflow":
+            return "승인 트리거와 승인 단계"
         if primary_template.template_id == "state_transition":
             return "상태 전이"
         if primary_template.template_id == "access_control":
             return "승인 권한과 승인 주체"
         if primary_template.template_id == "validation":
             return "차단 조건과 검증 순서"
+        if primary_template.template_id == "query_filter":
+            return "조회 조건과 필터 규칙"
+        if primary_template.template_id == "amount_threshold":
+            return "금액 구간과 한도 규칙"
         return ""
 
     def _selection_axis_phrase(self, applied_templates: list[AppliedJudgmentTemplate]) -> str:
         primary_template = applied_templates[0] if applied_templates else None
         if primary_template:
+            if primary_template.template_id == "workflow":
+                return "승인 트리거, 승인 주체, 승인 단계 구조를 중심으로 통제할 수 있는 구조"
             if primary_template.template_id == "state_transition":
                 return "상태 전이와 처리 가능 상태를 중심으로 통제할 수 있는 구조"
             if primary_template.template_id == "access_control":
                 return "권한, 부서, 승인 주체를 중심으로 통제할 수 있는 구조"
             if primary_template.template_id == "validation":
                 return "차단 조건과 검증 순서를 중심으로 통제할 수 있는 구조"
+            if primary_template.template_id == "query_filter":
+                return "조회 조건, 필터 조합, 결과 목록을 중심으로 통제할 수 있는 구조"
+            if primary_template.template_id == "amount_threshold":
+                return "금액 구간과 한도 정책을 중심으로 통제할 수 있는 구조"
         axis_phrases = []
         for item in applied_templates[:2]:
             if item.template_id == "state_transition":
                 axis_phrases.append("상태 전이와 처리 가능 상태")
+            elif item.template_id == "workflow":
+                axis_phrases.append("승인 트리거와 승인 단계 구조")
             elif item.template_id == "access_control":
                 axis_phrases.append("승인 권한과 승인 주체")
             elif item.template_id == "validation":
                 axis_phrases.append("차단 조건과 검증 순서")
+            elif item.template_id == "query_filter":
+                axis_phrases.append("조회 조건과 필터 규칙")
+            elif item.template_id == "amount_threshold":
+                axis_phrases.append("금액 구간과 한도 규칙")
         if not axis_phrases:
             return "핵심 규칙과 데이터 계약을 함께 통제할 수 있는 구조"
         return f"{', '.join(axis_phrases)}를 함께 통제할 수 있는 구조"
@@ -2458,12 +3399,18 @@ class RebuildAssistantService:
         option_label = self._option_label(option_name)
         if ids[:2] == ["state_transition", "access_control"]:
             return f"다른 옵션보다 상태 전이와 권한 규칙을 하나의 정책 계층에서 함께 다뤄야 하므로 {option_label}를 우선 적용해야 합니다."
+        if ids and ids[0] == "workflow":
+            return f"다른 옵션보다 승인 트리거, 승인 주체, 단계별 의사결정 게이트를 같은 워크플로우 계층으로 고정해야 하므로 {option_label}를 우선 적용해야 합니다."
         if ids[:2] in (["validation", "access_control"], ["access_control", "validation"]):
             return f"다른 옵션보다 금액 한도와 승인 권한을 함께 분리해야 하므로 {option_label}를 우선 적용해야 합니다."
         if ids and ids[0] == "access_control":
             return f"다른 옵션보다 승인 주체, 부서 책임, 처리 경로를 같은 권한 정책으로 고정해야 하므로 {option_label}를 우선 적용해야 합니다."
         if ids and ids[0] == "validation":
             return f"다른 옵션보다 선행 차단 조건과 저장 전 검증 순서를 함께 고정해야 하므로 {option_label}를 우선 적용해야 합니다."
+        if ids and ids[0] == "query_filter":
+            return f"다른 옵션보다 조회 조건, 정렬, 페이징 규칙을 같은 조회 모델로 고정해야 하므로 {option_label}를 우선 적용해야 합니다."
+        if ids and ids[0] == "amount_threshold":
+            return f"다른 옵션보다 금액 구간과 한도 정책을 같은 정책 계층으로 고정해야 하므로 {option_label}를 우선 적용해야 합니다."
         return f"다른 옵션보다 핵심 규칙과 유지 계약을 함께 반영해야 하므로 {option_label}를 우선 적용해야 합니다."
 
     def _build_non_recommended_selection_reason(self, option_name: str, applied_templates: list[AppliedJudgmentTemplate]) -> str:
@@ -2473,8 +3420,14 @@ class RebuildAssistantService:
             return f"{label}는 화면 개선 효과는 빠르지만 핵심 규칙 분리를 뒤로 미루므로 후순위로 둬야 합니다."
         if ids[:2] == ["state_transition", "access_control"]:
             return f"{label}는 승인 경로 분리에는 장점이 있지만 상태 전이와 권한 규칙을 동시에 묶는 현재 우선순위보다 뒤에 두어야 합니다."
+        if ids and ids[0] == "workflow":
+            return f"{label}는 일부 승인 흐름에는 유효하지만 이번 승인 구조 중심 워크플로우보다 뒤에 두어야 합니다."
         if ids[:2] in (["validation", "access_control"], ["access_control", "validation"]):
             return f"{label}는 일부 예외 승인 규칙 정리에는 도움이 되지만 금액 한도와 승인 권한을 함께 분리하는 현재 우선순위보다 뒤에 두어야 합니다."
+        if ids and ids[0] == "query_filter":
+            return f"{label}는 일부 조회 흐름에는 유효하지만 이번 조회/필터 중심 구조보다 뒤에 두어야 합니다."
+        if ids and ids[0] == "amount_threshold":
+            return f"{label}는 일부 한도 정책에는 유효하지만 이번 금액/한도 중심 구조보다 뒤에 두어야 합니다."
         return f"{label}는 보조 구조로는 활용할 수 있지만 핵심 규칙과 유지 계약을 동시에 반영하는 현재 우선순위보다 뒤에 두어야 합니다."
 
     def _option_label(self, option_name: str) -> str:
@@ -2531,7 +3484,7 @@ class RebuildAssistantService:
             grounded_rules,
             retained_contracts,
             recommended_option,
-            self._ordered_templates_for_generation(prepared, applied_templates),
+            self._ordered_templates_for_generation(prepared, applied_templates, grounded_rules),
         )
 
     def _build_template_decision_items(
@@ -2545,7 +3498,15 @@ class RebuildAssistantService:
         items: list[DecisionItem] = []
         for template in applied_templates[:2]:
             lead_rule = template.matched_rule_titles[0] if template.matched_rule_titles else (grounded_rules[0].title if grounded_rules else "")
-            if template.template_id == "state_transition":
+            if template.template_id == "workflow":
+                items.append(
+                    DecisionItem(
+                        statement=f"{concept} 기능의 승인 트리거와 승인 주체 규칙을 별도 워크플로우 계층으로 분리하는 것이 필요합니다.",
+                        rationale=f"{lead_rule or '직접 확인된 승인 흐름 규칙'}을 처리 로직에서 분리해야 승인 경로와 예외 흐름을 일관되게 유지할 수 있습니다.",
+                        linked_evidence=evidence_index.get(lead_rule, []),
+                    )
+                )
+            elif template.template_id == "state_transition":
                 items.append(
                     DecisionItem(
                         statement=f"{concept} 기능의 상태 전이 규칙을 별도 정책 계층으로 분리하는 것이 필요합니다.",
@@ -2566,6 +3527,22 @@ class RebuildAssistantService:
                     DecisionItem(
                         statement=f"{concept} 기능의 핵심 검증 규칙을 저장 흐름과 분리하는 것이 필요합니다.",
                         rationale=f"{lead_rule or '직접 확인된 차단 조건'}을 선행 검증으로 고정해야 처리 가능 범위를 안정적으로 통제할 수 있습니다.",
+                        linked_evidence=evidence_index.get(lead_rule, []),
+                    )
+                )
+            elif template.template_id == "query_filter":
+                items.append(
+                    DecisionItem(
+                        statement=f"{concept} 기능의 조회 조건과 필터 조합 규칙을 별도 조회 모델로 분리하는 것이 필요합니다.",
+                        rationale=f"{lead_rule or '직접 확인된 조회 조건 규칙'}을 화면과 SQL 조건 매핑에서 분리해야 조회 결과 일관성을 유지할 수 있습니다.",
+                        linked_evidence=evidence_index.get(lead_rule, []),
+                    )
+                )
+            elif template.template_id == "amount_threshold":
+                items.append(
+                    DecisionItem(
+                        statement=f"{concept} 기능의 금액 구간과 한도 정책을 별도 정책 계층으로 분리하는 것이 필요합니다.",
+                        rationale=f"{lead_rule or '직접 확인된 금액 한도 규칙'}을 처리 흐름과 분리해야 구간별 기준을 일관되게 유지할 수 있습니다.",
                         linked_evidence=evidence_index.get(lead_rule, []),
                     )
                 )
@@ -2595,6 +3572,33 @@ class RebuildAssistantService:
                         statement=statement,
                         rationale=rationale,
                         linked_evidence=[evidence for rule in grounded_rules[:2] for evidence in rule.evidence][:2],
+                    )
+                )
+        if primary and primary.template_id == "workflow":
+            workflow_defaults = [
+                (
+                    f"{concept} 기능의 승인 단계 구조와 의사결정 게이트를 워크플로우 계층으로 고정하는 것이 필요합니다.",
+                    "단계별 승인, 반려, 보류 게이트를 분리해야 승인 순서와 처리 결과가 흔들리지 않습니다.",
+                ),
+                (
+                    f"{concept} 기능의 승인 주체와 승인 권한 경계를 같은 워크플로우 정책으로 정리하는 것이 필요합니다.",
+                    "승인 주체와 승인 권한 경계를 함께 고정해야 승인 누락과 권한 오남용을 줄일 수 있습니다.",
+                ),
+                (
+                    f"{concept} 기능의 예외 승인 경로와 일반 승인 경로를 분리하는 것이 필요합니다.",
+                    "대리 승인, 긴급 승인, 자동 승인 경로를 분리해야 운영 예외를 통제할 수 있습니다.",
+                ),
+            ]
+            for statement, rationale in workflow_defaults:
+                if len(items) >= 3:
+                    break
+                if any(item.statement == statement for item in items):
+                    continue
+                items.append(
+                    DecisionItem(
+                        statement=statement,
+                        rationale=rationale,
+                        linked_evidence=[evidence for rule in grounded_rules[:3] for evidence in rule.evidence][:2],
                     )
                 )
         if primary and primary.template_id == "state_transition":
@@ -2649,6 +3653,60 @@ class RebuildAssistantService:
                         statement=statement,
                         rationale=rationale,
                         linked_evidence=[evidence for rule in grounded_rules[:3] for evidence in rule.evidence][:2],
+                    )
+                )
+        if primary and primary.template_id == "query_filter":
+            query_defaults = [
+                (
+                    f"{concept} 기능의 조회 조건과 필터 상태를 별도 조회 모델로 고정하는 것이 필요합니다.",
+                    "직접 확인된 조회 조건과 필터 조합을 분리해야 화면과 SQL 조건 매핑이 흔들리지 않습니다.",
+                ),
+                (
+                    f"{concept} 기능의 정렬과 페이징 기본 규칙을 조회 정책으로 분리하는 것이 필요합니다.",
+                    "정렬과 페이징을 조회 정책으로 고정해야 동일 조건의 결과 일관성을 유지할 수 있습니다.",
+                ),
+                (
+                    f"{concept} 기능의 결과 목록 구성 규칙을 조회 API와 함께 고정하는 것이 필요합니다.",
+                    "조회 조건과 결과 목록 구성을 함께 고정해야 필터 조합 누락을 줄일 수 있습니다.",
+                ),
+            ]
+            for statement, rationale in query_defaults:
+                if len(items) >= 3:
+                    break
+                if any(item.statement == statement for item in items):
+                    continue
+                items.append(
+                    DecisionItem(
+                        statement=statement,
+                        rationale=rationale,
+                        linked_evidence=[evidence for rule in grounded_rules[:2] for evidence in rule.evidence][:2],
+                    )
+                )
+        if primary and primary.template_id == "amount_threshold":
+            amount_defaults = [
+                (
+                    f"{concept} 기능의 금액 구간과 한도 규칙을 별도 정책 계층으로 고정하는 것이 필요합니다.",
+                    "직접 확인된 금액 구간과 한도 조건을 분리해야 고액 처리 기준이 흔들리지 않습니다.",
+                ),
+                (
+                    f"{concept} 기능의 한도 초과 처리 경계를 별도 정책 결과로 정리하는 것이 필요합니다.",
+                    "구간별 후속 처리 경계를 고정해야 고액 조건의 예외 누락을 줄일 수 있습니다.",
+                ),
+                (
+                    f"{concept} 기능의 금액 기준 메시지와 처리 결과를 같은 한도 정책으로 맞추는 것이 필요합니다.",
+                    "금액 기준 결과를 같은 정책에서 계산해야 화면과 처리 흐름이 어긋나지 않습니다.",
+                ),
+            ]
+            for statement, rationale in amount_defaults:
+                if len(items) >= 3:
+                    break
+                if any(item.statement == statement for item in items):
+                    continue
+                items.append(
+                    DecisionItem(
+                        statement=statement,
+                        rationale=rationale,
+                        linked_evidence=[evidence for rule in grounded_rules[:2] for evidence in rule.evidence][:2],
                     )
                 )
         while len(items) < 3:
@@ -2790,28 +3848,104 @@ class RebuildAssistantService:
                         linked_contracts=linked_contracts,
                     )
                 )
+        if primary and primary.template_id == "query_filter":
+            existing_priorities = {item.priority for item in items}
+            linked_rules = primary.matched_rule_titles[:3] or [rule.title for rule in grounded_rules[:3]]
+            linked_contracts = primary.matched_contract_items[:2] or [item.item for item in retained_contracts[:2]]
+            defaults = [
+                (
+                    2,
+                    f"{concept} 기능에서 정렬과 페이징 기본 규칙을 다음 단계로 정리하는 것이 필요합니다.",
+                    f"{concept} 정렬 및 페이징 규칙 정리",
+                    "정렬과 페이징 기준을 별도로 고정해야 같은 조회 요청의 결과 일관성을 유지할 수 있습니다.",
+                    "정렬 규칙, 페이징 기본값, 결과 목록 정합성",
+                    "조회 조건 모델 확정",
+                ),
+            ]
+            for priority, item_text, title, reason, impact_scope, prerequisite in defaults:
+                if priority in existing_priorities:
+                    continue
+                items.append(
+                    PrioritySplitItem(
+                        priority=priority,
+                        item=item_text,
+                        title=title,
+                        reason=reason,
+                        impact_scope=impact_scope,
+                        prerequisite=prerequisite,
+                        linked_rules=linked_rules,
+                        linked_contracts=linked_contracts,
+                    )
+                )
+        if primary and primary.template_id == "amount_threshold":
+            existing_priorities = {item.priority for item in items}
+            linked_rules = primary.matched_rule_titles[:3] or [rule.title for rule in grounded_rules[:3]]
+            linked_contracts = primary.matched_contract_items[:2] or [item.item for item in retained_contracts[:2]]
+            defaults = [
+                (
+                    2,
+                    f"{concept} 기능에서 금액 구간별 처리 경계와 후속 흐름을 다음 단계로 정리하는 것이 필요합니다.",
+                    f"{concept} 한도 적용 흐름 정리",
+                    "금액 구간별 후속 처리 경계를 고정해야 한도 정책 누락을 줄일 수 있습니다.",
+                    "고액 처리, 한도 초과, 예외 메시지 기준",
+                    "금액 한도 정책 확정",
+                ),
+            ]
+            for priority, item_text, title, reason, impact_scope, prerequisite in defaults:
+                if priority in existing_priorities:
+                    continue
+                items.append(
+                    PrioritySplitItem(
+                        priority=priority,
+                        item=item_text,
+                        title=title,
+                        reason=reason,
+                        impact_scope=impact_scope,
+                        prerequisite=prerequisite,
+                        linked_rules=linked_rules,
+                        linked_contracts=linked_contracts,
+                    )
+                )
         ui_focus = "화면 액션 노출과 상태 표시" if any(item.template_id == "state_transition" for item in templates) else "화면 액션 노출과 입력 검증"
-        if primary and primary.template_id == "access_control":
+        if primary and primary.template_id == "workflow":
+            ui_focus = "승인 단계 안내와 예외 처리 안내"
+        elif primary and primary.template_id == "access_control":
             ui_focus = "화면 액션 노출과 승인 경로 안내"
+        elif primary and primary.template_id == "query_filter":
+            ui_focus = "조회 조건 입력과 결과 목록 정합성"
+        elif primary and primary.template_id == "amount_threshold":
+            ui_focus = "한도 안내와 처리 결과 메시지"
         items.append(
             PrioritySplitItem(
                 priority=3,
-                item=f"{concept} 기능의 {ui_focus}를 마지막에 재구성하는 것이 필요합니다.",
+                item=f"{concept} 기능의 {self._with_object_particle(ui_focus)} 마지막에 재구성하는 것이 필요합니다.",
                 title=f"{concept} 화면 재구성",
                 reason=(
-                    "핵심 정책과 승인 경로가 정리된 뒤 화면을 맞춰야 재작업을 줄일 수 있습니다."
+                    "핵심 승인 정책과 단계 구조가 정리된 뒤 화면을 맞춰야 재작업을 줄일 수 있습니다."
+                    if primary and primary.template_id == "workflow"
+                    else "핵심 정책과 승인 경로가 정리된 뒤 화면을 맞춰야 재작업을 줄일 수 있습니다."
                     if primary and primary.template_id == "access_control"
                     else "핵심 상태 정책과 전이 규칙이 정리된 뒤 화면을 맞춰야 재작업을 줄일 수 있습니다."
                     if primary and primary.template_id == "state_transition"
-                    else "핵심 정책과 검증 규칙이 정리된 뒤 화면을 맞춰야 재작업을 줄일 수 있습니다."
+                    else "핵심 조회 정책이 정리된 뒤 화면을 맞춰야 재작업을 줄일 수 있습니다."
+                    if primary and primary.template_id == "query_filter"
+                    else "핵심 금액 정책과 한도 경계가 정리된 뒤 화면을 맞춰야 재작업을 줄일 수 있습니다."
+                    if primary and primary.template_id == "amount_threshold"
+                    else "핵심 조회/한도 정책이 정리된 뒤 화면을 맞춰야 재작업을 줄일 수 있습니다."
                 ),
                 impact_scope="화면 액션 노출, 상태 표시, 사용자 안내 메시지",
                 prerequisite=(
-                    "정책 API 계약 고정"
+                    "워크플로우 API 계약 고정"
+                    if primary and primary.template_id == "workflow"
+                    else "정책 API 계약 고정"
                     if primary and primary.template_id == "access_control"
                     else "상태 정책 API 계약 고정"
                     if primary and primary.template_id == "state_transition"
-                    else "정책/검증 API 계약 고정"
+                    else "조회 API 계약 고정"
+                    if primary and primary.template_id == "query_filter"
+                    else "금액 정책 API 계약 고정"
+                    if primary and primary.template_id == "amount_threshold"
+                    else "조회/정책 API 계약 고정"
                 ),
                 linked_rules=[rule.title for rule in grounded_rules[:2]],
                 linked_contracts=[item.item for item in retained_contracts[:1]],
@@ -2835,6 +3969,24 @@ class RebuildAssistantService:
                 DesignOption(name="옵션 A. 검증 규칙 중심 모듈형 구조", structure_summary="차단 조건, 저장 전 검증, 예외 처리 순서를 검증 계층으로 분리하고 처리 흐름은 검증 결과만 반영하도록 구성합니다.", advantages=["차단 조건과 저장 전 검증 순서를 우선 고정해야 합니다.", "기존 검증 기준 컬럼과 차단 계약을 유지한 상태에서 분리 순서를 통제해야 합니다."], risks=["권한 규칙이나 상태 표시가 보조 축으로 남으면 후속 단계 조정이 필요할 수 있습니다."], difficulty="MEDIUM", duration_weeks=4, recommended=True, selection_reason=""),
                 DesignOption(name="옵션 B. 검증 우선 분리 구조", structure_summary="저장 전 차단 규칙을 먼저 분리하고 API와 서비스는 검증 결과를 소비하는 구조로 정리합니다.", advantages=["단기적으로 저장 오류와 예외 누락을 줄일 수 있습니다."], risks=["정책 규칙이 후속 단계로 밀리면 일부 액션 노출 조정이 남을 수 있습니다."], difficulty="MEDIUM", duration_weeks=5, recommended=False, selection_reason=""),
                 DesignOption(name="옵션 C. 화면 우선 재구성 구조", structure_summary="화면을 먼저 재구성하고 검증 규칙 분리는 후속 단계로 넘깁니다.", advantages=["화면 개선 효과를 빠르게 보여줄 수 있습니다."], risks=["핵심 차단 조건과 저장 전 검증이 레거시에 남아 재작업 가능성이 큽니다."], difficulty="MEDIUM", duration_weeks=5, recommended=False, selection_reason=""),
+            ]
+        if primary == "query_filter":
+            return [
+                DesignOption(name="옵션 A. 조회 모델 중심 모듈형 구조", structure_summary="조회 조건, 필터 상태, 정렬, 페이징을 별도 조회 모델로 분리하고 API는 조회 모델만 받아 결과 목록을 반환하도록 구성합니다.", advantages=["조회 조건과 SQL 조건 매핑을 한곳에서 통제해야 합니다.", "정렬과 페이징 기본값을 같은 조회 정책으로 유지해야 합니다."], risks=["조회 규칙 정의가 약하면 필터 조합이 다시 화면과 SQL에 분산될 수 있습니다."], difficulty="MEDIUM", duration_weeks=4, recommended=True, selection_reason=""),
+                DesignOption(name="옵션 B. 필터 상태 분리형 구조", structure_summary="화면 필터 상태를 먼저 분리하고 정렬과 결과 목록 구성은 후속 조회 정책으로 정리합니다.", advantages=["화면 필터 상태를 빠르게 정리할 수 있습니다."], risks=["SQL 조건 매핑 규칙이 뒤로 밀리면 조회 결과 일관성이 흔들릴 수 있습니다."], difficulty="MEDIUM", duration_weeks=5, recommended=False, selection_reason=""),
+                DesignOption(name="옵션 C. 결과 목록 우선 구조", structure_summary="결과 목록 구성과 정렬 기준을 먼저 정리하고 필터 입력 모델 분리는 후속 단계로 넘깁니다.", advantages=["결과 목록 UX 개선을 빠르게 보여줄 수 있습니다."], risks=["필터 조합 규칙이 레거시에 남아 재작업 가능성이 큽니다."], difficulty="MEDIUM", duration_weeks=5, recommended=False, selection_reason=""),
+            ]
+        if primary == "workflow":
+            return [
+                DesignOption(name="옵션 A. 승인 흐름 중심 모듈형 구조", structure_summary="승인 트리거, 승인 주체, 단계별 의사결정 게이트를 별도 워크플로우 계층으로 분리하고 API는 승인 결과만 반영하도록 구성합니다.", advantages=["승인 트리거와 승인 주체를 같은 워크플로우 기준으로 유지해야 합니다.", "단계별 승인 순서와 예외 승인 흐름을 함께 고정해야 합니다."], risks=["승인 단계와 예외 승인 경계가 흐리면 승인 누락이 다시 발생할 수 있습니다."], difficulty="MEDIUM", duration_weeks=5, recommended=True, selection_reason=""),
+                DesignOption(name="옵션 B. 단계 분리형 승인 구조", structure_summary="단일 승인과 다단계 승인을 별도 단계 모듈로 나누고 승인 주체 정책은 각 단계에서 공통으로 적용합니다.", advantages=["다단계 승인 구조를 독립적으로 추적하기 쉽습니다."], risks=["단계 간 상태 전달 규칙이 늘어나면 관리 비용이 커질 수 있습니다."], difficulty="MEDIUM", duration_weeks=6, recommended=False, selection_reason=""),
+                DesignOption(name="옵션 C. 예외 승인 분리형 구조", structure_summary="일반 승인 흐름과 대리 승인, 긴급 승인, 자동 승인 경로를 분리하고 승인 주체는 공통 정책으로 적용합니다.", advantages=["예외 흐름을 별도로 통제하기 쉽습니다."], risks=["예외 승인 경로가 늘어나면 일반 승인 흐름과의 정합성 비용이 커질 수 있습니다."], difficulty="HIGH", duration_weeks=6, recommended=False, selection_reason=""),
+            ]
+        if primary == "amount_threshold":
+            return [
+                DesignOption(name="옵션 A. 금액 한도 정책 중심 모듈형 구조", structure_summary="금액 구간, 한도 임계값, 한도 초과 후속 처리 규칙을 별도 정책 계층으로 분리하고 API는 정책 결과만 반영하도록 구성합니다.", advantages=["금액 한도와 임계값을 한 정책 기준으로 유지해야 합니다.", "고액 처리 경계를 같은 규칙 표로 관리해야 합니다."], risks=["승인 또는 보조 처리 규칙과 경계가 흐리면 한도 정책이 다시 분산될 수 있습니다."], difficulty="MEDIUM", duration_weeks=4, recommended=True, selection_reason=""),
+                DesignOption(name="옵션 B. 한도 기준 우선 구조", structure_summary="한도 초과 차단과 임계값 비교를 먼저 분리하고 후속 처리 흐름은 다음 단계에서 정리합니다.", advantages=["한도 초과 기준을 빠르게 고정할 수 있습니다."], risks=["고액 처리 후속 흐름이 뒤로 밀리면 사용자 메시지와 처리 결과가 어긋날 수 있습니다."], difficulty="MEDIUM", duration_weeks=5, recommended=False, selection_reason=""),
+                DesignOption(name="옵션 C. 처리 결과 우선 구조", structure_summary="한도 초과 결과와 메시지를 먼저 정리하고 한도 정책 분리는 후속 단계로 넘깁니다.", advantages=["사용자 안내를 빠르게 정리할 수 있습니다."], risks=["핵심 한도 규칙이 레거시에 남아 재작업 가능성이 큽니다."], difficulty="MEDIUM", duration_weeks=5, recommended=False, selection_reason=""),
             ]
         if primary == "access_control":
             return [
@@ -2860,6 +4012,12 @@ class RebuildAssistantService:
                 DesignOption(name="옵션 B. 예외 승인 워크플로우 분리형 구조", structure_summary="예외 승인 규칙을 별도 워크플로우로 분리하고 일반 처리 흐름은 기본 검증에 집중시킵니다.", advantages=["예외 승인 경로를 독립적으로 관리하기 쉽습니다."], risks=["기본 검증과 예외 승인 흐름이 이중화될 수 있습니다."], difficulty="HIGH", duration_weeks=6, recommended=False, selection_reason=""),
                 DesignOption(name="옵션 C. 검증 우선 분리 구조", structure_summary="차단 조건과 저장 전 검증을 먼저 분리하고 권한 정책은 후속 단계에서 정교화합니다.", advantages=["단기적으로 저장 오류를 줄일 수 있습니다."], risks=["핵심 승인 정책 분리가 뒤로 밀릴 수 있습니다."], difficulty="MEDIUM", duration_weeks=5, recommended=False, selection_reason=""),
             ]
+        if primary in {"amount_threshold", "access_control"} and secondary in {"amount_threshold", "access_control"}:
+            return [
+                DesignOption(name="옵션 A. 한도·권한 정책 중심 모듈형 구조", structure_summary="금액 한도, 부서별 승인 권한, 예외 승인 경계를 같은 정책 계층으로 분리하고 처리 흐름은 정책 결과만 반영하도록 구성합니다.", advantages=["금액 한도와 권한 조건을 같은 정책 기준으로 유지해야 합니다.", "고액 처리와 승인 주체 경계를 함께 고정할 수 있습니다."], risks=["한도 정책과 승인 정책 경계가 흐리면 책임이 다시 섞일 수 있습니다."], difficulty="MEDIUM", duration_weeks=4, recommended=True, selection_reason=""),
+                DesignOption(name="옵션 B. 승인 경로 분리형 구조", structure_summary="고액 승인 경로를 별도 승인 흐름으로 분리하고 금액 한도는 각 경로에서 공통 정책으로 적용합니다.", advantages=["고액 승인 경로를 독립적으로 추적하기 쉽습니다."], risks=["승인 경로가 늘어나면 한도 정책 적용 지점이 중복될 수 있습니다."], difficulty="HIGH", duration_weeks=6, recommended=False, selection_reason=""),
+                DesignOption(name="옵션 C. 한도 검증 우선 구조", structure_summary="금액 한도 비교를 먼저 분리하고 승인 정책은 후속 단계에서 정교화합니다.", advantages=["한도 기준을 빠르게 고정할 수 있습니다."], risks=["승인 주체 분리가 뒤로 밀릴 수 있습니다."], difficulty="MEDIUM", duration_weeks=5, recommended=False, selection_reason=""),
+            ]
         return [
             DesignOption(name="옵션 A. 정책 중심 모듈형 구조", structure_summary=f"{self._primary_concept(prepared)} 기능 안에서 API, 정책 서비스, 데이터 계약을 모듈형으로 분리합니다.", advantages=["핵심 규칙을 우선 분리해야 합니다.", "기존 계약을 유지한 상태에서 분리 범위를 통제해야 합니다."], risks=["정책 수가 많으면 서비스 경계가 커질 수 있습니다."], difficulty="MEDIUM", duration_weeks=4, recommended=True, selection_reason=""),
             DesignOption(name="옵션 B. 조회/저장 이원화 구조", structure_summary=f"{self._primary_concept(prepared)} 기능을 조회 흐름과 저장 흐름으로 분리하고 정책은 저장 측에 집중합니다.", advantages=["조회 성능과 저장 검증을 분리하기 쉽습니다."], risks=["핵심 정책이 조회에도 필요하면 판단 로직이 중복될 수 있습니다."], difficulty="MEDIUM", duration_weeks=5, recommended=False, selection_reason=""),
@@ -2875,13 +4033,196 @@ class RebuildAssistantService:
     ) -> list[ExecutionPlanWeek]:
         concept = self._primary_concept(prepared)
         option_name = self._option_label(recommended_option.name) if recommended_option else "정책 중심 모듈형 구조"
-        templates = applied_templates[:2]
+        templates = self._ordered_templates_for_generation(prepared, applied_templates, grounded_rules)[:2]
         top = templates[0] if templates else None
         second = templates[1] if len(templates) > 1 else None
+        if top and top.template_id in {"query_filter", "amount_threshold"}:
+            templates = [top]
+            second = None
         top_rules = top.matched_rule_titles[:3] if top else [rule.title for rule in grounded_rules[:3]]
         top_contracts = top.matched_contract_items[:2] if top else [item.item for item in retained_contracts[:2]]
         second_rules = second.matched_rule_titles[:3] if second else [rule.title for rule in grounded_rules[1:3]]
         second_contracts = second.matched_contract_items[:2] if second else [item.item for item in retained_contracts[:1]]
+        if top and top.template_id == "query_filter":
+            return [
+                ExecutionPlanWeek(
+                    week_label="1주차",
+                    goal="조회 조건, 필터 조합, 정렬 기준을 구조화합니다.",
+                    tasks=[
+                        "조회 조건과 필터 조합을 조회 모델 기준으로 정리합니다.",
+                        "정렬 기준과 기본 페이징 값을 조회 정책 목록으로 고정합니다.",
+                        "직접 확인된 조회 계약을 유지 목록으로 확정합니다.",
+                    ],
+                    related_rules=top_rules,
+                    related_contracts=top_contracts,
+                    roles=["컨설턴트", "업무 분석가", "백엔드 아키텍트"],
+                    duration_weeks=1,
+                    deliverables=["조회 조건 목록", "필터 조합 표", "정렬/페이징 기본값 표"],
+                ),
+                ExecutionPlanWeek(
+                    week_label="2주차",
+                    goal=f"{option_name} 기준으로 조회 모델과 SQL 조건 매핑 구조를 설계합니다.",
+                    tasks=[
+                        "조회 파라미터와 SQL 조건 매핑 규칙을 조회 계층 책임으로 정의합니다.",
+                        "필터 상태와 결과 목록 구성을 같은 조회 모델 기준으로 고정합니다.",
+                    ],
+                    related_rules=top_rules,
+                    related_contracts=top_contracts,
+                    roles=["백엔드 아키텍트", "시니어 개발자"],
+                    duration_weeks=1,
+                    deliverables=["조회 모델 설계안", "SQL 조건 매핑 규칙", "결과 목록 구성 명세"],
+                ),
+                ExecutionPlanWeek(
+                    week_label="3주차",
+                    goal=f"{concept} API와 조회 모델에 핵심 조회 규칙을 반영합니다.",
+                    tasks=[
+                        "조회 조건, 정렬, 페이징 규칙을 조회 API와 SQL 매핑에 반영합니다.",
+                        f"{self._append_suffix_without_dup(grounded_rules[0].title if grounded_rules else '조회 조건 분리', '규칙')}을 회귀 테스트 케이스로 고정합니다.",
+                    ],
+                    related_rules=top_rules,
+                    related_contracts=top_contracts,
+                    roles=["백엔드 개발자", "QA"],
+                    duration_weeks=1,
+                    deliverables=["API 반영 목록", "조회 모델 테스트 케이스", "조회 규칙 구현 체크리스트"],
+                ),
+                ExecutionPlanWeek(
+                    week_label="4주차",
+                    goal=f"{concept} 화면과 결과 목록 정합성을 규칙 기준으로 검증합니다.",
+                    tasks=[
+                        "필터 입력, 정렬, 페이징 UI를 조회 모델과 맞춰 정렬합니다.",
+                        "유지 계약이 화면과 API 결과에서 깨지지 않는지 회귀 검증합니다.",
+                    ],
+                    related_rules=top_rules,
+                    related_contracts=top_contracts,
+                    roles=["프론트엔드 개발자", "백엔드 개발자", "QA"],
+                    duration_weeks=1,
+                    deliverables=["화면 정합성 체크리스트", "회귀 검증 결과", "파일럿 적용안"],
+                ),
+            ]
+        if top and top.template_id == "workflow":
+            return [
+                ExecutionPlanWeek(
+                    week_label="1주차",
+                    goal="승인 트리거와 승인 주체 규칙을 구조화합니다.",
+                    tasks=[
+                        "승인 시작 조건과 승인 요청 트리거를 워크플로우 규칙 표로 정리합니다.",
+                        "승인 주체와 승인 권한 관계를 승인 주체 매트릭스로 고정합니다.",
+                    ],
+                    related_rules=top_rules,
+                    related_contracts=top_contracts,
+                    roles=["컨설턴트", "업무 분석가", "백엔드 아키텍트"],
+                    duration_weeks=1,
+                    deliverables=["승인 트리거 목록", "승인 주체 매트릭스", "승인 권한 계약 목록"],
+                ),
+                ExecutionPlanWeek(
+                    week_label="2주차",
+                    goal=f"{option_name} 기준으로 승인 단계 구조와 의사결정 게이트를 설계합니다.",
+                    tasks=[
+                        "단계별 승인 순서와 조건부 승인 분기를 워크플로우 단계 구조로 정의합니다.",
+                        "승인, 반려, 보류 게이트를 단계별 워크플로우 결과로 분리합니다.",
+                    ],
+                    related_rules=top_rules,
+                    related_contracts=top_contracts,
+                    roles=["백엔드 아키텍트", "시니어 개발자"],
+                    duration_weeks=1,
+                    deliverables=["승인 단계 흐름도", "의사결정 게이트 명세", "단계별 승인 구조안"],
+                ),
+                ExecutionPlanWeek(
+                    week_label="3주차",
+                    goal=f"{concept} 승인 API와 워크플로우 서비스에 승인 규칙을 반영합니다.",
+                    tasks=[
+                        "승인 주체 규칙과 단계별 승인 순서를 워크플로우 서비스 호출로 반영합니다.",
+                        "대리 승인, 긴급 승인, 자동 승인 경로를 예외 워크플로우 결과로 분리합니다.",
+                    ],
+                    related_rules=top_rules,
+                    related_contracts=top_contracts,
+                    roles=["백엔드 개발자", "QA"],
+                    duration_weeks=1,
+                    deliverables=["승인 API 반영 목록", "워크플로우 테스트 케이스", "예외 승인 구현 체크리스트"],
+                ),
+                ExecutionPlanWeek(
+                    week_label="4주차",
+                    goal=f"{concept} 승인 화면과 승인 단계 안내를 워크플로우 기준으로 정렬합니다.",
+                    tasks=[
+                        "승인 단계 안내와 승인 주체 메시지를 워크플로우 결과와 맞춰 정렬합니다.",
+                        "승인 버튼 노출과 예외 승인 안내가 유지 계약과 일치하는지 확인합니다.",
+                    ],
+                    related_rules=top_rules,
+                    related_contracts=top_contracts,
+                    roles=["프론트엔드 개발자", "백엔드 개발자", "QA"],
+                    duration_weeks=1,
+                    deliverables=["승인 화면 체크리스트", "승인 단계 안내 시안", "정합성 확인 결과"],
+                ),
+                ExecutionPlanWeek(
+                    week_label="5주차",
+                    goal=f"{concept} 상태 전이와 승인 흐름 통합 기준을 확정합니다.",
+                    tasks=[
+                        "승인 완료, 반려, 보류 결과가 상태 전이와 어떻게 연결되는지 통합 규칙으로 고정합니다.",
+                        "워크플로우 결과와 상태 전이 결과가 충돌하지 않는지 통합 시나리오로 확인합니다.",
+                    ],
+                    related_rules=top_rules,
+                    related_contracts=top_contracts,
+                    roles=["백엔드 아키텍트", "QA"],
+                    duration_weeks=1,
+                    deliverables=["승인-상태 통합 규칙서", "통합 시나리오 목록", "파일럿 적용안"],
+                ),
+            ]
+        if top and top.template_id == "amount_threshold":
+            return [
+                ExecutionPlanWeek(
+                    week_label="1주차",
+                    goal="금액 구간과 한도 계산 기준을 구조화합니다.",
+                    tasks=[
+                        "금액 구간 기준과 구간별 경계를 정책 규칙 표로 정리합니다.",
+                        "한도 계산 기준과 한도 적용 필드를 계약 목록으로 고정합니다.",
+                        "직접 확인된 금액 정책 계약을 유지 목록으로 확정합니다.",
+                    ],
+                    related_rules=top_rules,
+                    related_contracts=top_contracts,
+                    roles=["컨설턴트", "업무 분석가", "백엔드 아키텍트"],
+                    duration_weeks=1,
+                    deliverables=["금액 구간 표", "한도 계산 기준표", "금액 정책 계약 목록"],
+                ),
+                ExecutionPlanWeek(
+                    week_label="2주차",
+                    goal=f"{option_name} 기준으로 금액 정책과 한도 적용 구조를 설계합니다.",
+                    tasks=[
+                        "금액 구간 정책과 한도 계산 기준을 별도 정책 계층 책임으로 정의합니다.",
+                        "승인 필요 구간과 한도 초과 시 처리 경계를 정책 결과로 분리합니다.",
+                    ],
+                    related_rules=top_rules,
+                    related_contracts=top_contracts,
+                    roles=["백엔드 아키텍트", "시니어 개발자"],
+                    duration_weeks=1,
+                    deliverables=["금액 정책 설계안", "한도 계산 명세", "구간별 처리 흐름도"],
+                ),
+                ExecutionPlanWeek(
+                    week_label="3주차",
+                    goal=f"{concept} API와 정책 서비스에 금액 규칙을 반영합니다.",
+                    tasks=[
+                        "금액 구간 기준과 한도 계산 규칙을 정책 서비스 호출로 반영합니다.",
+                        "승인 필요 경계와 고액 처리 결과를 API 응답 규칙으로 고정합니다.",
+                    ],
+                    related_rules=top_rules,
+                    related_contracts=top_contracts,
+                    roles=["백엔드 개발자", "QA"],
+                    duration_weeks=1,
+                    deliverables=["API 반영 목록", "금액 정책 테스트 케이스", "한도 규칙 구현 체크리스트"],
+                ),
+                ExecutionPlanWeek(
+                    week_label="4주차",
+                    goal=f"{concept} 화면과 처리 결과 정합성을 금액 정책 기준으로 확인합니다.",
+                    tasks=[
+                        "금액 구간 안내와 한도 초과 메시지를 정책 결과와 맞춰 정렬합니다.",
+                        "유지 계약이 화면과 API 결과에서 유지되는지 확인합니다.",
+                    ],
+                    related_rules=top_rules,
+                    related_contracts=top_contracts,
+                    roles=["프론트엔드 개발자", "백엔드 개발자", "QA"],
+                    duration_weeks=1,
+                    deliverables=["화면 정합성 체크리스트", "정합성 확인 결과", "파일럿 적용안"],
+                ),
+            ]
         week1_goal = self._execution_goal_for_template(concept, top, 0)
         week2_goal = f"{option_name} 기준으로 {self._execution_goal_for_template(concept, second or top, 1)}"
         week3_tasks = self._execution_build_tasks(templates, grounded_rules)
@@ -2914,6 +4255,10 @@ class RebuildAssistantService:
                     if top and top.template_id == "access_control"
                     else f"{concept} API, 서비스, 상태 정책에 핵심 규칙을 반영합니다."
                     if top and top.template_id == "state_transition"
+                    else f"{concept} API, 서비스, 조회 모델에 핵심 규칙을 반영합니다."
+                    if top and top.template_id == "query_filter"
+                    else f"{concept} API, 서비스, 한도 정책에 핵심 규칙을 반영합니다."
+                    if top and top.template_id == "amount_threshold"
                     else f"{concept} API, 서비스, 검증 흐름에 핵심 규칙을 반영합니다."
                 ),
                 tasks=week3_tasks,
@@ -2924,6 +4269,10 @@ class RebuildAssistantService:
                 deliverables=(
                     ["API 반영 목록", "상태 정책 테스트 케이스", "전이 구현 체크리스트"]
                     if top and top.template_id == "state_transition"
+                    else ["API 반영 목록", "조회 모델 테스트 케이스", "조회 규칙 구현 체크리스트"]
+                    if top and top.template_id == "query_filter"
+                    else ["API 반영 목록", "한도 정책 테스트 케이스", "금액 규칙 구현 체크리스트"]
+                    if top and top.template_id == "amount_threshold"
                     else ["API 반영 목록", "정책 테스트 케이스", "검증 구현 체크리스트"]
                 ),
             ),
@@ -2947,14 +4296,15 @@ class RebuildAssistantService:
         applied_templates: list[AppliedJudgmentTemplate],
     ) -> list[str]:
         risks: list[str] = []
-        for template in applied_templates[:2]:
+        ordered_templates = self._ordered_templates_for_generation(prepared, applied_templates, grounded_rules)
+        for template in ordered_templates[:2]:
             spec = get_judgment_template_spec(template.template_id)
             lead_rule = template.matched_rule_titles[0] if template.matched_rule_titles else ""
             lead_contract = template.matched_contract_items[0] if template.matched_contract_items else ""
             if spec.risk_patterns:
                 risks.append(spec.risk_patterns[0])
             if lead_rule:
-                risks.append(f"{lead_rule} 규칙이 누락되면 {self._primary_concept(prepared)} 핵심 흐름을 잘못 재현할 수 있습니다.")
+                risks.append(f"{self._append_suffix_without_dup(lead_rule, '규칙')}이 누락되면 {self._primary_concept(prepared)} 핵심 흐름을 잘못 재현할 수 있습니다.")
             if lead_contract:
                 risks.append(f"{lead_contract} 계약이 흔들리면 기존 처리 조건과 화면 표시가 어긋날 수 있습니다.")
         if prepared.missing_context:
@@ -2980,7 +4330,40 @@ class RebuildAssistantService:
             return f"{concept} 상태 전이 정책과 처리 가능 상태 판단 구조를 설계합니다."
         spec = get_judgment_template_spec(template.template_id)
         defaults = spec.execution_plan_defaults[min(stage, len(spec.execution_plan_defaults) - 1)]
-        return f"{concept} {defaults['goal']}"
+        return self._compose_concept_goal(concept, str(defaults["goal"]))
+
+    def _compose_concept_goal(self, concept: str, goal: str) -> str:
+        normalized_concept = (concept or "").strip()
+        normalized_goal = (goal or "").strip()
+        if not normalized_concept:
+            return normalized_goal
+        if not normalized_goal:
+            return normalized_concept
+        concept_tokens = [token for token in re.split(r"[/\s]+", normalized_concept) if token]
+        if normalized_goal.startswith(normalized_concept):
+            return normalized_goal
+        if any(normalized_goal.startswith(token) for token in concept_tokens):
+            return normalized_goal
+        return f"{normalized_concept} {normalized_goal}"
+
+    def _append_suffix_without_dup(self, text: str, suffix: str) -> str:
+        normalized = (text or "").strip()
+        normalized_suffix = (suffix or "").strip()
+        if not normalized:
+            return normalized_suffix
+        if not normalized_suffix or normalized.endswith(normalized_suffix):
+            return normalized
+        return f"{normalized} {normalized_suffix}"
+
+    def _with_object_particle(self, text: str) -> str:
+        normalized = (text or "").strip()
+        if not normalized:
+            return normalized
+        last = normalized[-1]
+        if "가" <= last <= "힣":
+            has_batchim = (ord(last) - ord("가")) % 28 != 0
+            return f"{normalized}{'을' if has_batchim else '를'}"
+        return f"{normalized}를"
 
     def _execution_deliverables_for_template(self, template: AppliedJudgmentTemplate | None, stage: int) -> tuple[str, ...]:
         if not template:
@@ -3003,6 +4386,10 @@ class RebuildAssistantService:
                 tasks.append("권한 주체, 부서 책임, 승인 경로를 규칙 표로 정리합니다.")
             elif template.template_id == "validation":
                 tasks.append("금액 한도, 선행 차단, 상태 제한 조건을 검증 규칙으로 분리합니다.")
+            elif template.template_id == "query_filter":
+                tasks.append("조회 조건, 필터 조합, 정렬 규칙을 조회 모델 기준으로 정리합니다.")
+            elif template.template_id == "amount_threshold":
+                tasks.append("금액 구간과 한도 임계값을 정책 규칙 표로 정리합니다.")
         if retained_contracts:
             tasks.append("직접 확인된 상태값, 컬럼, 플래그 계약을 유지 목록으로 고정합니다.")
         return self._dedupe_list(tasks)[:4]
@@ -3016,6 +4403,10 @@ class RebuildAssistantService:
                 tasks.append("권한 정책과 예외 승인 경계를 별도 서비스 책임으로 정의합니다.")
             elif template.template_id == "validation":
                 tasks.append("저장 전 검증과 정책 검증의 경계를 분리하고 순서를 정의합니다.")
+            elif template.template_id == "query_filter":
+                tasks.append("조회 모델과 SQL 조건 매핑 규칙을 별도 조회 계층 책임으로 정의합니다.")
+            elif template.template_id == "amount_threshold":
+                tasks.append("금액 한도 정책과 한도 초과 후속 처리 경계를 별도 정책 책임으로 정의합니다.")
         if grounded_rules:
             tasks.append("직접 확인된 규칙이 API와 서비스 경계에 어떻게 반영되는지 명세로 고정합니다.")
         return self._dedupe_list(tasks)[:4]
@@ -3024,13 +4415,17 @@ class RebuildAssistantService:
         tasks: list[str] = []
         if any(item.template_id == "validation" for item in templates):
             tasks.append("직접 확인된 차단 조건과 한도 규칙을 검증 계층에 반영합니다.")
+        if any(item.template_id == "amount_threshold" for item in templates):
+            tasks.append("금액 구간과 한도 정책을 서비스 계층의 정책 호출로 반영합니다.")
         if any(item.template_id == "access_control" for item in templates):
             tasks.append("승인 주체와 부서별 처리 권한을 서비스 계층의 정책 호출로 연결합니다.")
             tasks.append("예외 승인 경로와 일반 처리 경로를 권한 정책 기준으로 분리합니다.")
         if any(item.template_id == "state_transition" for item in templates):
             tasks.append("상태 전이 규칙과 처리 가능 상태 조건을 API와 서비스 흐름에 반영합니다.")
+        if any(item.template_id == "query_filter" for item in templates):
+            tasks.append("조회 조건 모델과 정렬/페이징 규칙을 조회 API와 SQL 매핑에 반영합니다.")
         if grounded_rules:
-            tasks.append(f"{grounded_rules[0].title} 규칙을 회귀 테스트 케이스로 고정합니다.")
+            tasks.append(f"{self._append_suffix_without_dup(grounded_rules[0].title, '규칙')}을 회귀 테스트 케이스로 고정합니다.")
         for rule in grounded_rules[:3]:
             text = f"{rule.title} {rule.description}"
             if "REVIEW_REQUIRED" in text and all("REVIEW_REQUIRED" not in task for task in tasks):
@@ -3050,6 +4445,10 @@ class RebuildAssistantService:
             tasks.append("상태 표시와 처리 가능 상태 안내를 정책 결과와 맞춰 검증합니다.")
         if any(item.template_id == "validation" for item in templates):
             tasks.append("입력 검증과 저장 전 차단 메시지를 검증 결과와 맞춰 정렬합니다.")
+        if any(item.template_id == "query_filter" for item in templates):
+            tasks.append("필터 입력, 정렬, 페이징 UI를 조회 모델과 맞춰 정렬합니다.")
+        if any(item.template_id == "amount_threshold" for item in templates):
+            tasks.append("한도 안내와 고액 처리 메시지를 정책 결과와 맞춰 정렬합니다.")
         if retained_contracts:
             tasks.append("유지 계약이 화면과 API 결과에서 깨지지 않는지 회귀 검증합니다.")
         return self._dedupe_list(tasks)[:4]
@@ -3070,10 +4469,16 @@ class RebuildAssistantService:
         for item in applied_templates[:2]:
             if item.template_id == "state_transition":
                 keywords.extend(["REVIEW_REQUIRED", "상태", "READY", "CLOSED", "배송보류"])
+            elif item.template_id == "workflow":
+                keywords.extend(["승인", "approver", "approval", "reject", "delegate", "단계"])
             elif item.template_id == "access_control":
                 keywords.extend(["대리점", "CLAIM_AUDIT", "FRAUD", "권한", "지점장"])
             elif item.template_id == "validation":
                 keywords.extend(["300만원", "한도", "B99", "delivery_hold", "차단"])
+            elif item.template_id == "query_filter":
+                keywords.extend(["검색", "조회", "필터", "정렬", "페이징"])
+            elif item.template_id == "amount_threshold":
+                keywords.extend(["금액", "한도", "고액", "threshold", "limit"])
         return keywords
 
     def _template_retained_contract_specs(
@@ -3088,44 +4493,136 @@ class RebuildAssistantService:
         seen: set[str] = set()
         candidate_ids = self._candidate_template_ids(prepared, grounded_rules)
         validation_primary = self._is_validation_primary(prepared)
-        access_control_primary = self._should_enrich_access_control(prepared, grounded_rules)
+        access_control_primary = self._should_enrich_access_control(prepared, grounded_rules) or self._has_claim_access_control_focus(prepared, grounded_rules)
+        query_filter_primary = prepared.signals.primary_feature_mode == "search_filters"
+        amount_threshold_primary = "amount_threshold" in candidate_ids and self._should_force_amount_threshold_narrative(prepared, grounded_rules) and not self._has_claim_access_control_focus(prepared, grounded_rules)
         status_tokens = self._extract_status_tokens(combined)
         status_field = f"{table_name}.status" if table_name else "status"
-        if "state_transition" in candidate_ids and status_tokens and not validation_primary:
+        if "state_transition" in candidate_ids and status_tokens and not validation_primary and not query_filter_primary and not self._has_workflow_pattern(prepared):
             specs.append(self._contract_spec(
                 item=f"{status_field} 컬럼의 상태값({', '.join(status_tokens[:4])}) 계약은 유지하는 것이 필요합니다.",
                 keywords=tuple(status_tokens[:4] + ["status", "state"]),
                 basis="직접 확인된 상태값 계약이 깨지면 처리 가능 범위와 후속 흐름이 달라집니다.",
                 seen=seen,
             ))
-        if "validation" in candidate_ids and not access_control_primary and any(token in lowered for token in ("delivery_hold_flag", "deliveryhold", "배송보류")):
+        if "query_filter" in candidate_ids:
+            if any(token in lowered for token in ("request.getparameter", "@requestparam", "querystring", "keyword", "statusfilter", "filter")):
+                specs.append(self._contract_spec(
+                    item="조회 조건 파라미터 계약은 유지하는 것이 필요합니다.",
+                    keywords=("request.getparameter", "@requestparam", "querystring", "keyword", "statusfilter", "filter"),
+                    basis="조회 파라미터 계약이 바뀌면 같은 조회 요청에서도 조건 해석이 달라질 수 있습니다.",
+                    seen=seen,
+                ))
+            if any(token in lowered for token in ("order by", "sort", "paging", "page", "limit", "offset", "정렬", "페이징")):
+                specs.append(self._contract_spec(
+                    item="정렬과 페이징 기본값 계약은 유지하는 것이 필요합니다.",
+                    keywords=("order by", "sort", "paging", "page", "limit", "offset", "정렬", "페이징"),
+                    basis="정렬과 페이징 기본값이 달라지면 같은 조회 조건에서도 결과 순서가 달라질 수 있습니다.",
+                    seen=seen,
+                ))
+            if any(token in lowered for token in ("where", "criteria", "검색", "조회", "filter", "and", "or")):
+                specs.append(self._contract_spec(
+                    item="필터 조합과 결과 일관성 계약은 유지하는 것이 필요합니다.",
+                    keywords=("where", "criteria", "검색", "조회", "filter", "and", "or"),
+                    basis="필터 조합 규칙이 바뀌면 결과 목록 구성과 조건 해석이 달라질 수 있습니다.",
+                    seen=seen,
+                ))
+        if "workflow" in candidate_ids and self._has_workflow_pattern(prepared):
+            if any(token in lowered for token in ("submitted", "approve", "approved", "reject", "rejected", "hold", "pending", "approval")):
+                specs.append(self._contract_spec(
+                    item="승인 경로와 처리 순서 계약은 유지하는 것이 필요합니다.",
+                    keywords=("submitted", "approve", "approved", "reject", "rejected", "hold", "pending", "approval"),
+                    basis="승인 경로와 처리 순서가 바뀌면 승인 결과와 후속 처리 흐름이 달라질 수 있습니다.",
+                    seen=seen,
+                ))
+            if any(token in lowered for token in ("approver", "approverrole", "approver_role", "reviewer", "manager", "finance", "admin", "승인자", "결재자")):
+                specs.append(self._contract_spec(
+                    item="승인 권한 체계 계약은 유지하는 것이 필요합니다.",
+                    keywords=("approver", "approverrole", "approver_role", "reviewer", "manager", "finance", "admin", "승인자", "결재자"),
+                    basis="승인 권한 체계가 바뀌면 승인 주체와 승인 경로가 달라질 수 있습니다.",
+                    seen=seen,
+                ))
+            if any(token in lowered for token in ("approvalstep", "approval_step", "approvallevel", "approval_level", "step", "stage", "1차", "2차", "단계")):
+                specs.append(self._contract_spec(
+                    item="단계별 승인 순서 계약은 유지하는 것이 필요합니다.",
+                    keywords=("approvalstep", "approval_step", "approvallevel", "approval_level", "step", "stage", "1차", "2차", "단계"),
+                    basis="단계별 승인 순서가 달라지면 승인 흐름과 후속 상태 반영이 달라질 수 있습니다.",
+                    seen=seen,
+                ))
+            if any(token in lowered for token in ("approve", "reject", "hold", "pending", "delegate", "자동 승인", "반려", "보류", "대리 승인", "escalation")):
+                specs.append(self._contract_spec(
+                    item="승인 경로와 예외 승인 규칙 계약은 유지하는 것이 필요합니다.",
+                    keywords=("approve", "reject", "hold", "pending", "delegate", "자동 승인", "반려", "보류", "대리 승인", "escalation"),
+                    basis="승인 경로와 예외 승인 규칙이 바뀌면 승인 결과와 운영 예외 흐름이 달라질 수 있습니다.",
+                    seen=seen,
+                ))
+        if access_control_primary and self._primary_concept(prepared) == "청구 조정":
+            if any(token in lowered for token in ("branch_manager", "3000000", "300만원", "지점장")):
+                specs.append(self._contract_spec(
+                    item="claim_amount >= 3000000 지점장 승인 경계 규칙은 유지하는 것이 필요합니다.",
+                    keywords=("claim_amount", "3000000", "300만원", "branch_manager", "지점장"),
+                    basis="지점장 승인 경계가 바뀌면 승인 주체와 처리 권한 범위가 달라질 수 있습니다.",
+                    seen=seen,
+                ))
+            if any(token in lowered for token in ("claim_audit", "dept_code", "10000000", "1천만원")):
+                specs.append(self._contract_spec(
+                    item="claim_amount >= 10000000 and dept_code = CLAIM_AUDIT 규칙은 유지하는 것이 필요합니다.",
+                    keywords=("claim_amount", "10000000", "1천만원", "dept_code", "claim_audit"),
+                    basis="고액 처리 전담 부서 규칙은 직접 확인된 권한 계약입니다.",
+                    seen=seen,
+                ))
+            if any(token in lowered for token in ("fraud", "hq_reviewer")):
+                specs.append(self._contract_spec(
+                    item="accident_type = FRAUD HQ_REVIEWER 심사 규칙은 유지하는 것이 필요합니다.",
+                    keywords=("fraud", "hq_reviewer", "accident_type"),
+                    basis="사고 유형별 본사 심사 규칙이 바뀌면 승인 주체와 심사 경로가 달라질 수 있습니다.",
+                    seen=seen,
+                ))
+            if any(token in lowered for token in ("b99", "urgent", "긴급", "선승인")):
+                specs.append(self._contract_spec(
+                    item="branch_code = B99 긴급건 본사 선승인 규칙은 유지하는 것이 필요합니다.",
+                    keywords=("b99", "urgent", "긴급", "선승인", "branch_code"),
+                    basis="특수 지점 긴급건의 예외 승인 경로가 바뀌면 승인 흐름과 후속 처리 기준이 달라질 수 있습니다.",
+                    seen=seen,
+                ))
+        if "validation" in candidate_ids and not access_control_primary and not amount_threshold_primary and any(token in lowered for token in ("delivery_hold_flag", "deliveryhold", "배송보류")):
             specs.append(self._contract_spec(
                 item="delivery_hold_flag 선행 차단 규칙은 유지하는 것이 필요합니다.",
                 keywords=("delivery_hold_flag", "deliveryhold", "배송보류"),
                 basis="선행 차단 규칙은 직접 확인된 검증 계약입니다.",
                 seen=seen,
             ))
-        if "validation" in candidate_ids and not access_control_primary and any(token in lowered for token in ("duplicate", "중복", "exists", "count(", "count(1)")):
+        if "validation" in candidate_ids and not access_control_primary and not amount_threshold_primary and any(token in lowered for token in ("duplicate", "중복", "exists", "count(", "count(1)")):
             specs.append(self._contract_spec(
                 item="동일 대상 중복 처리 차단 규칙은 유지하는 것이 필요합니다.",
                 keywords=("duplicate", "중복", "exists", "count", "existsby", "count(1)"),
                 basis="중복 처리 차단은 직접 확인된 검증 계약이므로 유지해야 합니다.",
                 seen=seen,
             ))
-        if "validation" in candidate_ids and not access_control_primary and any(token in lowered for token in ("blocked", "forbidden", "invalid", "조정 불가", "save(", "repository.save", "throw new")):
+        if "validation" in candidate_ids and not access_control_primary and not amount_threshold_primary and any(token in lowered for token in ("blocked", "forbidden", "invalid", "조정 불가", "save(", "repository.save", "throw new")):
             specs.append(self._contract_spec(
                 item="저장 전 차단 조건은 유지하는 것이 필요합니다.",
                 keywords=("blocked", "forbidden", "invalid", "조정 불가", "save", "repository.save", "throw"),
                 basis="저장 전 차단 조건은 직접 확인된 검증 계약이므로 유지해야 합니다.",
                 seen=seen,
             ))
-        if "validation" in candidate_ids and not access_control_primary and any(token in lowered for token in ("required", "선행", "before", "prior", "flag", "delivery_hold", "pending")):
+        if "validation" in candidate_ids and not access_control_primary and not amount_threshold_primary and any(token in lowered for token in ("required", "선행", "before", "prior", "flag", "delivery_hold", "pending")):
             specs.append(self._contract_spec(
                 item="선행 조건 확인과 검증 순서는 유지하는 것이 필요합니다.",
                 keywords=("required", "선행", "before", "prior", "flag", "delivery_hold", "pending"),
                 basis="검증 순서와 선행 조건은 직접 확인된 검증 흐름 계약입니다.",
                 seen=seen,
             ))
+        if "amount_threshold" in candidate_ids and not access_control_primary:
+            for amount_spec in self._extract_amount_threshold_contract_specs(combined):
+                built = self._contract_spec(
+                    item=str(amount_spec["item"]),
+                    keywords=tuple(amount_spec["keywords"]),
+                    basis=str(amount_spec["basis"]),
+                    seen=seen,
+                )
+                if built:
+                    specs.append(built)
         if "access_control" in candidate_ids and all(token in lowered for token in ("channel_code", "agency", "hq")):
             specs.append(self._contract_spec(
                 item="channel_code = 'AGENCY' 본사 승인 조건은 유지하는 것이 필요합니다.",
@@ -3141,7 +4638,7 @@ class RebuildAssistantService:
                 basis="직접 확인된 금액 한도 정책이므로 유지해야 합니다.",
                 seen=seen,
             ))
-        if "access_control" in candidate_ids and any(token in lowered for token in ("claim_audit", "dept_code")):
+        if "access_control" in candidate_ids and any(token in lowered for token in ("claim_audit", "dept_code")) and self._primary_concept(prepared) != "청구 조정":
             specs.append(self._contract_spec(
                 item="claim_amount >= 10000000 and dept_code = CLAIM_AUDIT 규칙은 유지하는 것이 필요합니다.",
                 keywords=("claim_amount", "10000000", "1천만원", "dept_code", "claim_audit"),
@@ -3150,6 +4647,88 @@ class RebuildAssistantService:
             ))
         return [item for item in specs if item]
 
+    def _extract_amount_threshold_contract_specs(self, text: str) -> list[dict[str, object]]:
+        lowered = (text or "").lower()
+        specs: list[dict[str, object]] = []
+        amount_field = "order_amount" if "order_amount" in lowered else "claim_amount" if "claim_amount" in lowered else "amount"
+        amount_pattern = rf"{re.escape(amount_field)}\s*(?:<=|<|>=|>)\s*(\d{{5,}})"
+        amount_boundaries = self._extract_numeric_matches(lowered, amount_pattern)
+        if len(amount_boundaries) >= 2:
+            specs.append(
+                {
+                    "item": f"{amount_field} 금액 구간 경계({', '.join(amount_boundaries[:2])}) 계약은 유지하는 것이 필요합니다.",
+                    "keywords": [amount_field, "금액", "구간", *amount_boundaries[:2]],
+                    "basis": "금액 구간 경계가 바뀌면 구간별 처리 정책과 결과 등급이 달라질 수 있습니다.",
+                }
+            )
+        elif amount_boundaries:
+            specs.append(
+                {
+                    "item": f"{amount_field} 금액 기준({amount_boundaries[0]}) 계약은 유지하는 것이 필요합니다.",
+                    "keywords": [amount_field, "금액", amount_boundaries[0]],
+                    "basis": "직접 확인된 금액 기준이 바뀌면 기본 처리 구간이 달라질 수 있습니다.",
+                }
+            )
+        elif amount_field == "amount":
+            generic_boundaries = self._extract_numeric_matches(lowered, r"amount\s*(?:<=|<|>=|>)\s*(\d{5,})")
+            if len(generic_boundaries) >= 2:
+                specs.append(
+                    {
+                        "item": f"amount 금액 구간 경계({', '.join(generic_boundaries[:2])}) 계약은 유지하는 것이 필요합니다.",
+                        "keywords": ["amount", "금액", "구간", *generic_boundaries[:2]],
+                        "basis": "금액 구간 경계가 바뀌면 구간별 처리 정책과 결과 등급이 달라질 수 있습니다.",
+                    }
+                )
+            elif generic_boundaries:
+                specs.append(
+                    {
+                        "item": f"amount 금액 기준({generic_boundaries[0]}) 계약은 유지하는 것이 필요합니다.",
+                        "keywords": ["amount", "금액", generic_boundaries[0]],
+                        "basis": "직접 확인된 금액 기준이 바뀌면 기본 처리 구간이 달라질 수 있습니다.",
+                    }
+                )
+
+        limit_field = None
+        if "dailylimit" in lowered:
+            limit_field = "dailyLimit"
+        elif "daily_limit" in lowered:
+            limit_field = "daily_limit"
+        elif "limit_amount" in lowered:
+            limit_field = "limit_amount"
+        if limit_field and re.search(rf"(?:{amount_field}|amount)\s*(?:<=|<|>=|>)\s*{re.escape(limit_field.lower())}", lowered):
+            specs.append(
+                {
+                    "item": f"{limit_field} 한도 기준 계약은 유지하는 것이 필요합니다.",
+                    "keywords": [limit_field, "한도", "limit"],
+                    "basis": "한도 기준 필드가 바뀌면 구간별 처리 판단과 초과 기준이 달라질 수 있습니다.",
+                }
+            )
+
+        approval_values = self._extract_numeric_matches(
+            lowered,
+            rf"(?:{amount_field}|amount)[^\n]{{0,24}}(?:<=|<|>=|>)\s*(\d{{5,}})[^\n]{{0,80}}(?:requires_|manager|finance|승인 필요|본사 승인|검토)",
+        )
+        if approval_values:
+            approval_field = "amount" if re.search(r"\bamount\b", lowered) else amount_field
+            specs.append(
+                {
+                    "item": f"{approval_field} 승인 필요 경계({approval_values[0]}) 계약은 유지하는 것이 필요합니다.",
+                    "keywords": [approval_field, approval_values[0], "승인", "approval"],
+                    "basis": "승인 필요 경계가 바뀌면 고액 처리 기준과 승인 흐름이 달라질 수 있습니다.",
+                }
+            )
+        return specs[:3]
+
+    def _extract_numeric_matches(self, text: str, pattern: str) -> list[str]:
+        matches = re.findall(pattern, text, flags=re.IGNORECASE)
+        ordered: list[str] = []
+        for match in matches:
+            parts = [item for item in match if item] if isinstance(match, tuple) else [match]
+            for part in parts:
+                if part and part not in ordered:
+                    ordered.append(part)
+        return ordered
+
     def _candidate_template_ids(
         self,
         prepared: PreparedRebuildInput,
@@ -3157,7 +4736,8 @@ class RebuildAssistantService:
     ) -> list[JudgmentTemplateId]:
         ordered: list[JudgmentTemplateId] = []
         mode_map: dict[str, tuple[JudgmentTemplateId, ...]] = {
-            "status_permissions": ("state_transition", "access_control"),
+            "status_permissions": ("workflow", "state_transition", "access_control"),
+            "search_filters": ("query_filter",),
             "save_validation": ("validation",),
         }
         for mode in (prepared.signals.primary_feature_mode, prepared.signals.secondary_feature_mode):
@@ -3466,6 +5046,15 @@ class RebuildAssistantService:
         sanitized = sanitized.replace("처리을", "처리를")
         sanitized = sanitized.replace("검증를", "검증을")
         sanitized = sanitized.replace("구조을", "구조를")
+        sanitized = sanitized.replace("분리을", "분리를")
+        sanitized = sanitized.replace("한도을", "한도를")
+        sanitized = sanitized.replace("조회 조회", "조회")
+        sanitized = sanitized.replace("규칙 규칙", "규칙")
+        sanitized = sanitized.replace("정합성를", "정합성을")
+        sanitized = sanitized.replace("조회 조건과 SQL 파라미터 조합 규칙을 명시적으로 정리해", "조회 조건과 SQL 파라미터 조합 규칙")
+        sanitized = sanitized.replace("조회 조건과 SQL 파라미터 조합 규칙 규칙", "조회 조건과 SQL 파라미터 조합 규칙")
+        sanitized = sanitized.replace("여부을", "여부를")
+        sanitized = sanitized.replace("승인 또는 차단 기준", "승인 경계")
         sanitized = sanitized.replace("상태 전이와 처리 가능 상태, 금액 한도와 핵심 검증", "차단 조건과 검증 순서")
         sanitized = sanitized.replace("상태 전이와 처리 가능 상태, 권한과 승인 주체", "상태 전이와 처리 가능 상태")
         sanitized = re.sub(r"\s{2,}", " ", sanitized)
