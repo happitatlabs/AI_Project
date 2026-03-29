@@ -120,6 +120,11 @@ raw `assets` / `temp_session_id` 입력은 공개 API에서 사용하지 않습�
 - `secondary_feature_mode`
 - `scope_limited`
 - `needs_more_input`
+- `polish_bundle`
+  - `structured_result` 원문을 보존한 표현 전용 후처리 번들
+  - `polished_sections`
+  - `preserved_facts`
+  - `warnings`
 
 ## 진행 단계
 
