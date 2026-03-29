@@ -91,6 +91,24 @@ def _spawn_rebuild_run(
 
             emit_event(run_id, EVENT_TYPE_TODO_STARTED, todos[4])
             result = service.build_result(prepared)
+            polish_bundle = service.build_polish_bundle(
+                result,
+                audience="manager",
+                delivery_mode="client_report",
+                use_ai_rewrite=False,
+            )
+            primary_template_id = result.primary_judgment or ""
+            emit_event(
+                run_id,
+                EVENT_TYPE_LOG,
+                {
+                    "level": "info",
+                    "message": "primary judgment selected",
+                    "primary_judgment": primary_template_id,
+                    "primary_judgment_reason": result.primary_judgment_reason,
+                    "pattern_candidates": [item.model_dump() for item in result.pattern_candidates],
+                },
+            )
             needs_more_input = bool(result.missing_context or result.confidence < 0.45)
             summary = service.format_user_summary(result, scope_limited=prepared.scope_limited, needs_more_input=needs_more_input)
             emit_event(run_id, EVENT_TYPE_TODO_DONE, {**todos[4], "detail": "구조화 결과와 사용자 요약을 정리했습니다."})
@@ -101,6 +119,7 @@ def _spawn_rebuild_run(
                     "success": True,
                     "summary": summary[:4000],
                     "structured_result": result.model_dump(),
+                    "polish_bundle": polish_bundle.model_dump(),
                     "primary_feature_mode": prepared.signals.primary_feature_mode,
                     "secondary_feature_mode": prepared.signals.secondary_feature_mode,
                     "confidence": result.confidence,
@@ -108,6 +127,8 @@ def _spawn_rebuild_run(
                     "scope_limited": prepared.scope_limited,
                     "module_id": "rebuild_assistant",
                     "run_kind": "rebuild_plan",
+                    "primary_judgment": primary_template_id,
+                    "judgment_template_key": primary_template_id,
                 },
             )
         except Exception as e:

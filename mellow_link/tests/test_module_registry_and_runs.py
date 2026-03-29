@@ -1223,7 +1223,7 @@ if claim["claim_amount"] >= 10000000 and dept_code != "CLAIM_AUDIT": return "심
     assert "access_control" in template_ids
 
 
-def test_rebuild_assistant_search_filter_sample_does_not_promote_search_only_template():
+def test_rebuild_assistant_search_filter_sample_applies_query_filter_template():
     from mellow_link.modules.rebuild_assistant.schemas import RebuildAssetsPayload
     from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
 
@@ -1238,9 +1238,440 @@ def test_rebuild_assistant_search_filter_sample_does_not_promote_search_only_tem
     grounded = svc.build_grounded_business_rules(prepared, svc.extract_core_business_rules(prepared))
     retained = svc.build_retained_contracts(prepared, grounded)
     applied = svc.build_applied_templates(prepared, grounded, retained)
+    primary = svc._primary_template(prepared, applied)
+    result = svc.build_result(prepared)
 
-    assert all(item.template_id in {"state_transition", "access_control", "validation"} for item in applied)
-    assert not any(item.matched_signal_types == ["search_filters"] for item in applied)
+    assert any(item.template_id == "query_filter" for item in applied)
+    assert primary is not None
+    assert primary.template_id == "query_filter"
+    assert "조회 조건" in result.one_line_conclusion or "조회 조건" in " ".join(result.executive_summary_v2)
+    assert result.recommended_option is not None
+    assert "조회 모델" in result.recommended_option.name or "필터" in result.recommended_option.name
+    top_rule_text = " ".join(f"{item.title} {item.description}" for item in grounded[:4])
+    assert "상태 전이와 액션 노출 조건" not in top_rule_text
+    assert not any("상태 전이" in item for item in result.risks[:3])
+    assert "조회/필터 기능" in result.one_line_conclusion or "조회/필터 기능" in " ".join(result.executive_summary_v2)
+    rendered = "\n".join(
+        result.executive_summary_v2
+        + [result.one_line_conclusion]
+        + [item.statement for item in result.decision_items]
+        + [item.item for item in result.priority_split_items]
+        + [item.reason for item in result.priority_split_items]
+        + result.risks
+    )
+    assert "조회 조회" not in rendered
+    assert "분리을" not in rendered
+    assert "규칙 규칙" not in rendered
+    assert "정합성를" not in rendered
+    assert len(retained) >= 2
+    retained_text = " ".join(item.item for item in retained)
+    assert "조회 조건 파라미터 계약" in retained_text or "정렬과 페이징 기본값 계약" in retained_text
+    assert not retained or "status 컬럼의 상태값" not in retained[0].item
+    execution_text = " ".join(week.goal + " " + " ".join(week.tasks) for week in result.execution_plan)
+    assert "조회 조회" not in execution_text
+    assert "분리을" not in execution_text
+    assert "규칙 규칙" not in execution_text
+    assert "정합성를" not in execution_text
+    draft_text = " ".join(result.recomposition_draft.database + result.recomposition_draft.backend + result.recomposition_draft.frontend)
+    assert "조회 조회" not in draft_text
+    assert "정합성를" not in draft_text
+
+
+def test_rebuild_assistant_amount_threshold_sample_applies_amount_threshold_template():
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+
+    svc = RebuildAssistantService()
+    bundle = _build_safe_bundle_for_rebuild_tests(
+        [
+            {
+                "name": "cs_expense_policy.cs",
+                "content": 'if (isExecutive && amount <= 300000) { return "AUTO_APPROVED"; } if (amount <= dailyLimit) { return "WITHIN_LIMIT"; } if (amount > dailyLimit && amount <= 1000000) { return "REQUIRES_MANAGER_APPROVAL"; } return "REQUIRES_FINANCE_APPROVAL";',
+            },
+            {
+                "name": "sql_order_limit.sql",
+                "content": "SELECT order_amount, CASE WHEN order_amount <= 50000 THEN 'SMALL' WHEN order_amount > 50000 AND order_amount <= 300000 THEN 'MEDIUM' WHEN order_amount > 300000 THEN 'LARGE' END AS amount_grade FROM purchase_order WHERE order_amount > 0 AND order_amount <= limit_amount;",
+            },
+            {
+                "name": "schema.sql",
+                "content": "CREATE TABLE purchase_order (order_id bigint, order_amount integer, limit_amount integer, amount_grade varchar(20));",
+            },
+        ]
+    )
+    prepared = svc.prepare_safe_bundle_input(goal="금액 한도 규칙이 많은 주문 처리 기능", safe_bundle=bundle, constraints=["고액 주문 한도는 유지"])
+    grounded = svc.build_grounded_business_rules(prepared, svc.extract_core_business_rules(prepared))
+    retained = svc.build_retained_contracts(prepared, grounded)
+    applied = svc.build_applied_templates(prepared, grounded, retained)
+    primary = svc._primary_template(prepared, applied)
+    result = svc.build_result(prepared)
+
+    assert any(item.template_id == "amount_threshold" for item in applied)
+    assert primary is not None
+    assert primary.template_id == "amount_threshold"
+    assert "금액" in result.one_line_conclusion or "한도" in result.one_line_conclusion
+    assert result.recommended_option is not None
+    assert "금액 한도" in result.recommended_option.name or "한도" in result.recommended_option.selection_reason
+    top_rule_text = " ".join(f"{item.title} {item.description}" for item in grounded[:3])
+    assert "조회 조건과 SQL 파라미터 조합 규칙" not in top_rule_text
+    assert "정렬" not in top_rule_text
+    assert "검증" not in top_rule_text
+    assert len(retained) >= 2
+    assert any(("금액" in item.item or "한도" in item.item) for item in retained)
+    retained_text = " ".join(item.item for item in retained)
+    assert "금액 구간 경계(50000, 300000)" in retained_text
+    assert "dailyLimit 한도 기준 계약" in retained_text or "limit_amount 한도 기준 계약" in retained_text
+    assert "고액 처리 경계(50000)" not in retained_text
+    assert "금액 기준(300000, 1000000)" not in retained_text
+    assert "승인 필요 경계(1000000)" in retained_text
+    verification_text = " ".join(item.item for item in result.verification_checkpoints)
+    assert "검증" not in verification_text
+    assert "한도 초과 이후 후속 처리 기준" in verification_text or not verification_text
+    draft_text = " ".join(result.recomposition_draft.database + result.recomposition_draft.backend + result.recomposition_draft.frontend)
+    assert "금액 구간" in draft_text or "한도" in draft_text or "고액 처리" in draft_text
+    executive = " ".join(result.executive_summary_v2[:3]) + " " + result.one_line_conclusion
+    assert "차단 조건" not in executive
+    assert "검증 순서" not in executive
+    assert "저장 전 검증" not in executive
+    execution_text = " ".join(week.goal + " " + " ".join(week.tasks) for week in result.execution_plan)
+    assert "검증 흐름" not in execution_text
+    assert "저장 전 검증" not in execution_text
+    assert "차단 조건" not in execution_text
+    assert "검증" not in " ".join(week.goal for week in result.execution_plan)
+    rendered = "\n".join(
+        result.executive_summary_v2
+        + [result.one_line_conclusion]
+        + [item.statement for item in result.decision_items]
+        + [item.item for item in result.priority_split_items]
+        + [item.reason for item in result.priority_split_items]
+        + [option.name for option in result.design_options]
+        + [risk for option in result.design_options for risk in option.risks]
+        + [item.item for item in result.verification_checkpoints]
+        + result.risks
+    )
+    assert "규칙 규칙" not in rendered
+    assert "검증" not in rendered
+    assert "금액 구간" in execution_text
+    assert "한도" in execution_text
+    assert "승인" in execution_text
+
+
+def test_rebuild_assistant_workflow_single_approval_detected():
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+
+    svc = RebuildAssistantService()
+    bundle = _build_safe_bundle_for_rebuild_tests(
+        [
+            {
+                "name": "approval_service.java",
+                "content": """
+if ("SUBMITTED".equals(request.getStatus()) && "MANAGER".equals(approverRole)) {
+    return approve ? "APPROVED" : "REJECTED";
+}
+                """,
+            },
+            {
+                "name": "schema.sql",
+                "content": "CREATE TABLE approval_request (request_id bigint, status varchar(20), approver_role varchar(20));",
+            },
+        ]
+    )
+
+    prepared = svc.prepare_safe_bundle_input(goal="단일 승인 흐름이 있는 요청 처리 기능", safe_bundle=bundle, constraints=["승인 권한 체계는 유지"])
+    result = svc.build_result(prepared)
+    grounded = result.grounded_business_rules
+    retained = result.retained_contracts
+    applied = svc.build_applied_templates(prepared, grounded, retained)
+    primary = svc._primary_template(prepared, applied)
+
+    top_titles = [item.title for item in grounded[:4]]
+    retained_text = " ".join(item.item for item in retained)
+    rendered = " ".join(result.executive_summary_v2 + [result.one_line_conclusion] + [item.statement for item in result.decision_items])
+
+    assert primary is not None
+    assert primary.template_id == "workflow"
+    assert any(item.template_id == "workflow" for item in applied)
+    assert any(title in top_titles for title in ("승인 트리거 조건", "승인 단계 구조", "의사결정 분기 조건", "예외 처리 흐름"))
+    assert sum(1 for title in top_titles if title in ("승인 트리거 조건", "승인 단계 구조", "의사결정 분기 조건", "예외 처리 흐름")) >= 2
+    assert len(retained) >= 2
+    assert "승인 경로" in retained_text or "단계" in retained_text
+    assert "여부을" not in rendered
+
+
+def test_rebuild_assistant_workflow_multistep_detected():
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+
+    svc = RebuildAssistantService()
+    bundle = _build_safe_bundle_for_rebuild_tests(
+        [
+            {
+                "name": "approval_service.java",
+                "content": """
+if (approvalStep == 1 && "TEAM_MANAGER".equals(approverRole) && approve) {
+    return "MANAGER_APPROVED";
+}
+if (approvalStep == 2 && "FINANCE_MANAGER".equals(approverRole) && approve) {
+    return "FINANCE_APPROVED";
+}
+                """,
+            },
+            {
+                "name": "schema.sql",
+                "content": "CREATE TABLE approval_request (request_id bigint, approval_step integer, approver_role varchar(30), status varchar(20));",
+            },
+        ]
+    )
+
+    result = svc.build_result(svc.prepare_safe_bundle_input(goal="다단계 승인 흐름이 있는 요청 기능", safe_bundle=bundle, constraints=["승인 단계는 유지"]))
+
+    top_titles = [item.title for item in result.grounded_business_rules[:4]]
+    assert any(item.title == "승인 단계 구조" for item in result.grounded_business_rules)
+    assert any(item.title == "승인 주체 정의" for item in result.grounded_business_rules)
+    assert sum(1 for title in top_titles if title in ("승인 트리거 조건", "승인 단계 구조", "의사결정 분기 조건", "예외 처리 흐름")) >= 2
+    assert any("단계별 승인 순서" in item.item or "승인 경로와 처리 순서" in item.item for item in result.retained_contracts)
+
+
+def test_rebuild_assistant_workflow_exception_flow_detected():
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+
+    svc = RebuildAssistantService()
+    bundle = _build_safe_bundle_for_rebuild_tests(
+        [
+            {
+                "name": "approval_service.java",
+                "content": """
+if (urgent && amount < 100000) { return "AUTO_APPROVED"; }
+if (delegateApprover != null && approvalStep == 1) { return "DELEGATED"; }
+if (reject) { return "REJECTED"; }
+if (hold) { return "ON_HOLD"; }
+                """,
+            },
+            {
+                "name": "schema.sql",
+                "content": "CREATE TABLE approval_request (request_id bigint, approval_step integer, delegate_approver varchar(30), status varchar(20));",
+            },
+        ]
+    )
+
+    result = svc.build_result(svc.prepare_safe_bundle_input(goal="예외 승인과 대리 승인이 있는 요청 기능", safe_bundle=bundle, constraints=["예외 승인 흐름은 유지"]))
+
+    rendered = "\n".join(
+        result.executive_summary_v2
+        + [result.one_line_conclusion]
+        + [item.title for item in result.grounded_business_rules]
+        + [item.item for item in result.retained_contracts]
+        + [week.goal for week in result.execution_plan]
+    )
+    assert "승인 트리거" in rendered
+    assert "승인 주체" in rendered
+    assert "승인 단계" in rendered
+    assert "예외" in rendered
+    assert "여부을" not in rendered
+    assert any("승인 경로" in item.item or "예외 승인" in item.item for item in result.retained_contracts)
+
+
+def test_rebuild_assistant_workflow_safe_bundle_pipeline_keeps_workflow_result():
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+    from mellow_link.services.anonymization import (
+        AnonymizationAsset,
+        AnonymizationRunRequest,
+        AnonymizationService,
+        MaskingLevel,
+    )
+
+    root = Path(__file__).resolve().parents[1]
+    sample_dir = root / "modules" / "rebuild_assistant" / "samples" / "06. workflow"
+    files = [
+        sample_dir / "cs_leave_workflow.cs",
+        sample_dir / "ts_approval_flow.ts",
+    ]
+
+    svc = RebuildAssistantService()
+    assets = [
+        AnonymizationAsset(
+            asset_id=f"asset_{index:03d}",
+            name=path.name,
+            temp_file_id=f"temp_{index:03d}",
+            size=path.stat().st_size,
+            content_text=path.read_text(encoding="utf-8", errors="ignore"),
+            original_bytes=path.read_bytes(),
+        )
+        for index, path in enumerate(files, start=1)
+    ]
+    bundle = AnonymizationService().run_anonymization_pipeline(
+        AnonymizationRunRequest(
+            project_id="proj_workflow_pipeline",
+            upload_session_id="workflow_pipeline_session",
+            masking_level=MaskingLevel.FULL,
+            assets=assets,
+        )
+    ).safe_bundle
+
+    prepared = svc.prepare_safe_bundle_input(
+        goal="승인형 문서",
+        safe_bundle=bundle,
+        constraints=["승인 단계 구조 유지", "예외 승인 규칙 유지"],
+    )
+    result = svc.build_result(prepared)
+    applied = svc.build_applied_templates(prepared, result.grounded_business_rules, result.retained_contracts)
+    primary = svc._primary_template(prepared, applied)
+    grounded_titles = [item.title for item in result.grounded_business_rules[:4]]
+    retained_text = " ".join(item.item for item in result.retained_contracts)
+
+    assert primary is not None
+    assert primary.template_id == "workflow"
+    assert sum(1 for title in grounded_titles if title in ("승인 트리거 조건", "승인 단계 구조", "의사결정 분기 조건", "예외 처리 흐름")) >= 2
+    assert len(result.retained_contracts) >= 2
+    assert "승인 경로" in retained_text or "단계별 승인 순서" in retained_text
+    assert result.recommended_option is not None
+    assert "승인 흐름 중심" in result.recommended_option.name
+    assert result.primary_judgment == "workflow"
+    assert result.primary_judgment_reason
+    assert any(item.name == "workflow" and item.matched and item.reasons for item in result.pattern_candidates)
+
+
+def test_rebuild_assistant_workflow_beats_amount_threshold_when_approval_flow_exists():
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+
+    svc = RebuildAssistantService()
+    bundle = _build_safe_bundle_for_rebuild_tests(
+        [
+            {
+                "name": "approval_amount.java",
+                "content": """
+if ("SUBMITTED".equals(status) && amount > 1000000 && "MANAGER".equals(approverRole)) {
+    return "MANAGER_APPROVED";
+}
+if ("MANAGER_APPROVED".equals(status) && "FINANCE".equals(approverRole)) {
+    return "FINANCE_APPROVED";
+}
+                """,
+            },
+        ]
+    )
+    result = svc.build_result(
+        svc.prepare_safe_bundle_input(
+            goal="금액 기준으로 승인 단계가 시작되는 결재 기능",
+            safe_bundle=bundle,
+            constraints=["승인 단계 구조 유지"],
+        )
+    )
+
+    assert result.primary_judgment == "workflow"
+    assert any(item.name == "amount_threshold" for item in result.pattern_candidates)
+
+
+def test_rebuild_assistant_workflow_beats_access_control_when_stage_exists():
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+
+    svc = RebuildAssistantService()
+    bundle = _build_safe_bundle_for_rebuild_tests(
+        [
+            {
+                "name": "approval_roles.java",
+                "content": """
+if (approvalStep == 1 && "MANAGER".equals(approverRole)) { return "MANAGER_APPROVED"; }
+if (approvalStep == 2 && "FINANCE".equals(approverRole)) { return approve ? "FINANCE_APPROVED" : "REJECTED"; }
+                """,
+            },
+        ]
+    )
+    result = svc.build_result(
+        svc.prepare_safe_bundle_input(
+            goal="승인 역할과 단계가 함께 있는 결재 기능",
+            safe_bundle=bundle,
+            constraints=["승인 단계 유지"],
+        )
+    )
+
+    assert result.primary_judgment == "workflow"
+
+
+def test_rebuild_assistant_query_filter_beats_amount_threshold_when_amount_is_only_filter():
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+    from mellow_link.modules.rebuild_assistant.schemas import RebuildAssetsPayload
+
+    svc = RebuildAssistantService()
+    assets = RebuildAssetsPayload(
+        source_code='function search(amount, status, sort, page) { return fetch(`/api/orders?amount=${amount}&status=${status}&sort=${sort}&page=${page}`); }',
+        sql_queries="SELECT * FROM orders WHERE order_amount <= 300000 AND status = :status ORDER BY created_at DESC LIMIT :limit OFFSET :offset",
+    )
+    result = svc.build_result(
+        svc.prepare_input(
+            goal="금액 필터가 포함된 주문 목록 조회 기능",
+            assets=assets,
+            constraints=["조회 조건은 유지"],
+        )
+    )
+
+    assert result.primary_judgment == "query_filter"
+
+
+def test_rebuild_assistant_state_transition_beats_access_control_when_status_move_is_explicit():
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+    from mellow_link.modules.rebuild_assistant.schemas import RebuildAssetsPayload
+
+    svc = RebuildAssistantService()
+    assets = RebuildAssetsPayload(
+        source_code='if ("READY".equals(order.getStatus()) && "MANAGER".equals(role)) { order.setStatus("APPROVED"); }',
+        sql_queries="UPDATE purchase_order SET status = 'APPROVED' WHERE status IN ('READY')",
+    )
+    result = svc.build_result(
+        svc.prepare_input(
+            goal="권한 조건이 있지만 핵심은 상태 이동인 주문 처리 기능",
+            assets=assets,
+            constraints=["상태 코드는 유지"],
+        )
+    )
+
+    assert result.primary_judgment == "state_transition"
+
+
+def test_rebuild_assistant_uses_validation_fallback_when_no_pattern_is_strong():
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+    from mellow_link.modules.rebuild_assistant.schemas import RebuildAssetsPayload
+
+    svc = RebuildAssistantService()
+    assets = RebuildAssetsPayload(source_code="<div>legacy form</div>")
+    result = svc.build_result(
+        svc.prepare_input(
+            goal="단순 레거시 폼 현대화",
+            assets=assets,
+            constraints=[],
+        )
+    )
+
+    assert result.primary_judgment == "validation"
+
+
+def test_rebuild_assistant_workflow_falls_back_to_state_transition_without_actor_or_gate():
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+
+    svc = RebuildAssistantService()
+    bundle = _build_safe_bundle_for_rebuild_tests(
+        [
+            {
+                "name": "state_service.java",
+                "content": """
+if ("SUBMITTED".equals(order.getStatus())) {
+    order.setStatus("APPROVED");
+}
+                """,
+            },
+            {
+                "name": "state.sql",
+                "content": "UPDATE purchase_order SET status = 'APPROVED' WHERE status IN ('SUBMITTED')",
+            },
+        ]
+    )
+
+    prepared = svc.prepare_safe_bundle_input(goal="상태 변경이 있는 주문 처리 기능", safe_bundle=bundle, constraints=["상태 코드는 유지"])
+    grounded = svc.build_grounded_business_rules(prepared, svc.extract_core_business_rules(prepared))
+    retained = svc.build_retained_contracts(prepared, grounded)
+    applied = svc.build_applied_templates(prepared, grounded, retained)
+    primary = svc._primary_template(prepared, applied)
+
+    assert primary is not None
+    assert primary.template_id == "state_transition"
+    assert all(item.template_id != "workflow" for item in applied[:1])
 
 
 def test_rebuild_assistant_generation_methods_do_not_branch_on_domain_names():
@@ -1572,6 +2003,8 @@ if claim["branch_code"] == "B99" and claim["is_urgent"] == "Y" and user_role == 
     recommendation = result.recommended_option.selection_reason if result.recommended_option else ""
     priority = " ".join(item.reason for item in result.priority_split_items[:2])
     combined = " ".join([summary, result.one_line_conclusion, recommendation, priority])
+    grounded_titles = [item.title for item in result.grounded_business_rules[:4]]
+    retained_items = [item.item for item in result.retained_contracts[:4]]
     assert any(token in combined for token in ("권한", "부서", "승인 주체", "예외 승인"))
     assert "차단 조건" not in result.executive_summary_v2[0]
     assert "저장 전 검증" not in result.executive_summary_v2[0]
@@ -1583,6 +2016,13 @@ if claim["branch_code"] == "B99" and claim["is_urgent"] == "Y" and user_role == 
     assert "저장 전 검증" not in recommendation
     assert result.recommended_option is not None
     assert "권한 정책 중심" in result.recommended_option.name
+    assert "금액 한도 검증" != grounded_titles[0]
+    assert any(title in grounded_titles[:3] for title in ("지점장 300만원 한도", "B99 긴급건 본사 선승인", "FRAUD 본사 심사 전용"))
+    assert len(result.retained_contracts) >= 2
+    assert any("승인" in item or "심사" in item or "CLAIM_AUDIT" in item for item in retained_items[:2])
+    assert not any("저장 전 차단 조건" in item or "선행 조건 확인과 검증 순서" in item for item in retained_items[:2])
+    rendered = "\n".join(result.executive_summary_v2 + [result.one_line_conclusion] + grounded_titles + retained_items)
+    assert "한도을" not in rendered
 
 
 def test_rebuild_assistant_claim_real_sample_prefers_access_control_primary_template():
@@ -1984,6 +2424,11 @@ def test_rebuild_assistant_runner_emits_structured_result(monkeypatch):
     finished = [event for event in events if event["type"] == "run_finished"]
     assert len(finished) == 1
     payload = finished[0]["payload"]
+    judgment_logs = [
+        event["payload"]
+        for event in events
+        if event["type"] == "log" and event["payload"].get("message") == "primary judgment selected"
+    ]
     assert payload["success"] is True
     assert payload["module_id"] == "rebuild_assistant"
     assert payload["run_kind"] == "rebuild_plan"
@@ -1993,9 +2438,142 @@ def test_rebuild_assistant_runner_emits_structured_result(monkeypatch):
     assert isinstance(payload["structured_result"]["missing_context_details"], list)
     assert set(payload["structured_result"]["layer_reconstruction"].keys()) == {"database", "backend", "frontend"}
     assert set(payload["structured_result"]["extracted_rules"].keys()) == {"status_permissions", "search_filters", "save_validation"}
+    assert payload["primary_judgment"] == payload["structured_result"]["primary_judgment"]
+    assert payload["judgment_template_key"] == payload["structured_result"]["primary_judgment"]
+    assert isinstance(payload["structured_result"]["pattern_candidates"], list)
+    assert payload["polish_bundle"]["primary_judgment"] == payload["structured_result"]["primary_judgment"]
+    assert payload["polish_bundle"]["original_result"]["primary_judgment"] == payload["structured_result"]["primary_judgment"]
+    assert isinstance(payload["polish_bundle"]["polished_sections"], list)
+    assert payload["polish_bundle"]["delivery_mode"] == "client_report"
+    assert payload["polish_bundle"]["audience"] == "manager"
     assert isinstance(payload["confidence"], float)
+    assert len(judgment_logs) == 1
+    assert judgment_logs[0]["primary_judgment"] == payload["structured_result"]["primary_judgment"]
+    assert judgment_logs[0]["primary_judgment_reason"]
+    assert isinstance(judgment_logs[0]["pattern_candidates"], list)
     todo_ids = [event["payload"].get("todo_id") for event in events if event["type"] == "todo_started"]
     assert todo_ids == ["B1", "B2", "B3", "B4", "B5"]
+
+
+def test_rebuild_assistant_polish_bundle_preserves_original_result_and_facts():
+    from mellow_link.modules.rebuild_assistant.schemas import RebuildAssetsPayload
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+
+    svc = RebuildAssistantService()
+    prepared = svc.prepare_input(
+        goal="금액 구간과 한도 기준이 많은 승인 기능을 재구성해줘",
+        assets=RebuildAssetsPayload(
+            source_code="""
+if (orderAmount <= 50000) return "AUTO";
+if (orderAmount <= 300000) return "MANAGER";
+if (amount > dailyLimit && amount <= 1000000) return "DIRECTOR";
+            """,
+            sql_queries="""
+SELECT CASE
+  WHEN order_amount <= 50000 THEN 'SMALL'
+  WHEN order_amount <= 300000 THEN 'MEDIUM'
+  ELSE 'LARGE'
+END
+FROM orders
+WHERE order_amount > dailyLimit
+            """,
+        ),
+    )
+    result = svc.build_result(prepared)
+    original = result.model_dump()
+    bundle = svc.build_polish_bundle(result, audience="manager", delivery_mode="client_report")
+    combined = "\n".join(section.polished_text for section in bundle.polished_sections)
+
+    assert bundle.primary_judgment == result.primary_judgment
+    assert bundle.original_result == original
+    assert "50000" in combined
+    assert "300000" in combined
+    assert any("50000" in fact or "300000" in fact for fact in bundle.preserved_facts)
+    assert bundle.use_ai_rewrite is False
+
+
+def test_rebuild_assistant_polish_bundle_removes_duplicate_and_particle_errors():
+    from mellow_link.modules.rebuild_assistant.postprocess.service import StructuredResultPolishService
+    from mellow_link.modules.rebuild_assistant.schemas import (
+        ExecutionPlanWeek,
+        GroundedBusinessRule,
+        RecommendedOption,
+        StructuredRebuildResult,
+    )
+
+    result = StructuredRebuildResult(
+        primary_judgment="query_filter",
+        one_line_conclusion="조회 조회 조건 분리을 통해 결과 목록 정합성를 유지해야 합니다.",
+        grounded_business_rules=[
+            GroundedBusinessRule(
+                title="결과 목록 구성 규칙 규칙",
+                description="조회 조회 API가 정합성를 깨지 않도록 해야 합니다.",
+            )
+        ],
+        recommended_option=RecommendedOption(
+            name="옵션 A. 조회 조회 API 구조",
+            structure_summary="조회 조건 분리을 유지합니다.",
+            selection_reason="조회 조회 조건을 우선 정리합니다.",
+        ),
+        execution_plan=[ExecutionPlanWeek(week_label="1주차", goal="조회 조회 정책 분리을 정리", tasks=["정합성를 확인"])],
+    )
+
+    bundle = StructuredResultPolishService().polish_result(result)
+    combined = "\n".join(section.polished_text for section in bundle.polished_sections)
+
+    assert "규칙 규칙" not in combined
+    assert "조회 조회" not in combined
+    assert "정합성를" not in combined
+    assert "분리을" not in combined
+
+
+def test_rebuild_assistant_polish_bundle_creates_audience_and_delivery_variants():
+    from mellow_link.modules.rebuild_assistant.postprocess.service import StructuredResultPolishService
+    from mellow_link.modules.rebuild_assistant.schemas import StructuredRebuildResult
+
+    bundle = StructuredResultPolishService().polish_result(
+        StructuredRebuildResult(
+            primary_judgment="workflow",
+            one_line_conclusion="승인 트리거와 승인 단계 구조를 기준으로 승인 흐름을 분리해야 합니다.",
+        ),
+        audience="client",
+        delivery_mode="proposal_appendix",
+    )
+    section = next(item for item in bundle.polished_sections if item.section_key == "one_line_conclusion")
+
+    assert set(section.audience_variants.keys()) == {"developer", "manager", "client"}
+    assert set(section.delivery_variants.keys()) == {"internal_review", "client_report", "proposal_appendix"}
+    assert section.audience_variants["developer"].startswith("참고 판단:") or section.audience_variants["developer"].startswith("구현 기준:")
+    assert section.delivery_variants["proposal_appendix"].startswith("부록 기준:")
+    assert "승인 단계 구조" in section.delivery_variants["client_report"]
+
+
+def test_rebuild_assistant_polish_bundle_keeps_pattern_purity():
+    from mellow_link.modules.rebuild_assistant.postprocess.service import StructuredResultPolishService
+    from mellow_link.modules.rebuild_assistant.schemas import StructuredRebuildResult
+
+    query_bundle = StructuredResultPolishService().polish_result(
+        StructuredRebuildResult(
+            primary_judgment="query_filter",
+            one_line_conclusion="조회 조건과 정렬 기준을 분리해야 합니다.",
+        )
+    )
+    amount_bundle = StructuredResultPolishService().polish_result(
+        StructuredRebuildResult(
+            primary_judgment="amount_threshold",
+            one_line_conclusion="금액 구간과 한도 경계를 기준으로 처리 정책을 나눠야 합니다.",
+        )
+    )
+    workflow_bundle = StructuredResultPolishService().polish_result(
+        StructuredRebuildResult(
+            primary_judgment="workflow",
+            one_line_conclusion="승인 단계 구조와 예외 처리 흐름을 분리해야 합니다.",
+        )
+    )
+
+    assert not query_bundle.warnings
+    assert not amount_bundle.warnings
+    assert not workflow_bundle.warnings
 
 
 def test_rebuild_assistant_extracted_rules_shape_is_kept_for_sparse_input():
