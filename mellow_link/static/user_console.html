@@ -15,7 +15,7 @@
             <div>
                 <p class="text-xs uppercase tracking-[0.28em] text-teal-300/80">Analysis Workspace</p>
                 <h1 class="mt-2 text-3xl font-semibold">분석 워크스페이스</h1>
-                <p class="mt-2 text-sm text-slate-400">업로드 자산을 정리하고 기능 분류, 업무 규칙, 설계 초안 생성 상태를 한 화면에서 확인합니다.</p>
+                <p class="mt-2 text-sm text-slate-400">업로드 자산을 정리하고 무엇을 분석 중인지, 어떤 조치 제안을 만들고 있는지, 결과 패키지에서 무엇을 결정하게 될지를 한 화면에서 확인합니다.</p>
             </div>
             <nav class="flex flex-wrap gap-2 text-sm">
                 <a href="/projects/create" class="rounded-full border border-white/10 px-4 py-2 hover:bg-white/5">새 프로젝트</a>
@@ -31,6 +31,29 @@
         <div id="warningState" class="mt-8 hidden rounded-[2rem] border border-amber-300/20 bg-amber-500/10 px-6 py-5 text-sm text-amber-100"></div>
 
         <main id="workspaceView" class="mt-8 hidden space-y-6">
+            <section class="grid gap-6 xl:grid-cols-4">
+                <div class="rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">분석 목표</p>
+                    <h2 class="mt-3 text-xl font-semibold">무엇을 판단하나</h2>
+                    <div class="mt-4 text-sm leading-7 text-slate-300">레거시 기능 또는 화면 1개를 기준으로 유지할 것, 바꿀 것, 분리할 것을 판단할 수 있는 자료를 만듭니다.</div>
+                </div>
+                <div class="rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">분석 과정</p>
+                    <h2 class="mt-3 text-xl font-semibold">어떻게 진행되나</h2>
+                    <div class="mt-4 text-sm leading-7 text-slate-300">입력 정리 -> 자산 분석 -> 업무 규칙 및 설계 초안 추출 -> 조치 제안 생성 -> 결과 패키지 요약 순서로 진행합니다.</div>
+                </div>
+                <div class="rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">현재 생성물</p>
+                    <h2 class="mt-3 text-xl font-semibold">워크스페이스 역할</h2>
+                    <div class="mt-4 text-sm leading-7 text-slate-300">조치 제안은 분석 결과로부터 도출되며, 워크스페이스에서 생성되고 결과 패키지에서 요약 및 비교 형태로 정리됩니다.</div>
+                </div>
+                <div class="rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">추적과 재분석</p>
+                    <h2 class="mt-3 text-xl font-semibold">무엇이 남나</h2>
+                    <div class="mt-4 text-sm leading-7 text-slate-300">각 실행은 이력으로 남고, 추가 자료 업로드 후 같은 프로젝트에서 다시 분석해 결과를 비교할 수 있습니다.</div>
+                </div>
+            </section>
+
             <section class="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
                 <div class="rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
                     <p class="text-xs uppercase tracking-[0.24em] text-slate-500">프로젝트 개요</p>
@@ -96,6 +119,7 @@
                 <div class="rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
                     <p class="text-xs uppercase tracking-[0.24em] text-slate-500">실행 이력</p>
                     <h2 class="mt-3 text-xl font-semibold">최신 실행 기준</h2>
+                    <p class="mt-2 text-sm leading-7 text-slate-400">실행 단위별 상태를 추적하고, 결과 패키지 부록의 provenance와 함께 어떤 입력과 어떤 run에서 판단이 나왔는지 확인합니다.</p>
                     <div id="historyBox" class="mt-4 space-y-3"></div>
                 </div>
             </section>
@@ -131,8 +155,8 @@
             const stages = [
                 { title: '입력 정리', ids: ['B1'] },
                 { title: '자산 분석', ids: ['B2'] },
-                { title: '설계 초안 생성', ids: ['B3', 'B4'] },
-                { title: '결과 패키지 정리', ids: ['B5'] },
+                { title: '설계 초안 / 조치 제안 생성', ids: ['B3', 'B4'] },
+                { title: '결과 패키지 요약', ids: ['B5'] },
             ];
             const status = (snapshot && snapshot.status) || 'running';
             const currentTodoId = snapshot && snapshot.current_todo_id;

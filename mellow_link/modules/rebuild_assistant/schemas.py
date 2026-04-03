@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from mellow_link.services.anonymization.schemas import SafeAnalysisBundle
@@ -195,6 +197,9 @@ class StructuredRebuildResult(BaseModel):
     primary_judgment: str = ""
     primary_judgment_reason: str = ""
     pattern_candidates: list[PatternCandidate] = Field(default_factory=list)
+    report_purpose: str = ""
+    report_scope: list[str] = Field(default_factory=list)
+    report_questions: list[str] = Field(default_factory=list)
     one_line_conclusion: str = ""
     core_business_rules: list[str] = Field(default_factory=list)
     executive_summary_v2: list[str] = Field(default_factory=list)
@@ -216,6 +221,12 @@ class StructuredRebuildResult(BaseModel):
     confidence: float = 0.0
     missing_context: list[str] = Field(default_factory=list)
     missing_context_details: list[MissingContextItem] = Field(default_factory=list)
+    extensions: dict[str, Any] = Field(default_factory=dict)
+    structure_snapshot: dict[str, Any] = Field(default_factory=dict)
+    diagnosis_report: dict[str, Any] = Field(default_factory=dict)
+    decision_summary: dict[str, Any] = Field(default_factory=dict)
+    improvement_plan_bundle: dict[str, Any] = Field(default_factory=dict)
+    appendix: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("confidence", mode="before")
     @classmethod

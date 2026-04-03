@@ -419,6 +419,9 @@ String sql = "SELECT * FROM orders WHERE user_id = ?";
 
     dumped = result.model_dump()
     expected_keys = {
+        "report_purpose",
+        "report_scope",
+        "report_questions",
         "one_line_conclusion",
         "core_business_rules",
         "executive_summary_v2",
@@ -442,6 +445,9 @@ String sql = "SELECT * FROM orders WHERE user_id = ?";
         "missing_context_details",
     }
     assert expected_keys <= set(dumped.keys())
+    assert isinstance(dumped["report_purpose"], str)
+    assert isinstance(dumped["report_scope"], list)
+    assert isinstance(dumped["report_questions"], list)
     assert isinstance(dumped["one_line_conclusion"], str)
     assert isinstance(dumped["core_business_rules"], list)
     assert isinstance(dumped["analysis_summary"], list)
@@ -724,6 +730,51 @@ def _build_safe_bundle_for_rebuild_tests(asset_specs):
     )
 
 
+def _accounting_payload_json(*, method="MOVING_AVERAGE", strict=True, include_exchange_rates=True, include_vouchers=True, include_account_mappings=True):
+    exchange_rates = [
+        {"currency": "USD", "rate_date": "2026-03-01", "rate": 1200},
+        {"currency": "USD", "rate_date": "2026-03-02", "rate": 1300},
+        {"currency": "USD", "rate_date": "2026-03-03", "rate": 1400},
+    ] if include_exchange_rates else []
+    vouchers = [
+        {
+            "voucher_id": "V001",
+            "occurred_at": "2026-03-03",
+            "lines": [
+                {"account_code": "1110", "side": "debit", "amount_krw": 210000, "amount_fc": 150, "currency": "USD", "rate_used": 1400, "source_tx_ids": ["TX003"]},
+                {"account_code": "5120", "side": "credit", "amount_krw": 187500, "source_tx_ids": ["TX003"]},
+                {"account_code": "7190", "side": "credit", "amount_krw": 22500, "source_tx_ids": ["TX003"]},
+            ],
+        }
+    ] if include_vouchers else []
+    account_mappings = [
+        {"purpose": "FX_GAIN", "account_code": "7190"},
+        {"purpose": "FX_LOSS", "account_code": "7290"},
+    ] if include_account_mappings else []
+    return """
+{
+  "strict": %s,
+  "transactions": [
+    {"tx_id": "TX001", "tx_type": "BUY_FX", "occurred_at": "2026-03-01", "currency": "USD", "amount_fc": 100, "rate": 1200, "fx_account_id": "USD_MAIN"},
+    {"tx_id": "TX002", "tx_type": "BUY_FX", "occurred_at": "2026-03-02", "currency": "USD", "amount_fc": 100, "rate": 1300, "fx_account_id": "USD_MAIN"},
+    {"tx_id": "TX003", "tx_type": "PAY", "occurred_at": "2026-03-03", "currency": "USD", "amount_fc": 150, "rate": 1400, "fx_account_id": "USD_MAIN"}
+  ],
+  "exchange_rates": %s,
+  "vouchers": %s,
+  "account_mappings": %s,
+  "policies": [
+    {"policy_id": "P001", "fx_cost_method": "%s", "effective_from": "2026-01-01", "version": 1, "tolerance_krw": 1}
+  ]
+}
+""" % (
+        "true" if strict else "false",
+        str(exchange_rates).replace("'", '"'),
+        str(vouchers).replace("'", '"'),
+        str(account_mappings).replace("'", '"'),
+        method,
+    )
+
+
 def test_rebuild_assistant_safe_bundle_with_schema_and_query_sql_removes_db_request():
     from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
 
@@ -958,7 +1009,13 @@ if ("EXPORT".equals(order.getOrderType()) && order.getOrderAmount() >= 7000000) 
     assert retained
     assert verification
     assert retained.isdisjoint(verification)
-    assert any("status 값" in item or "delivery_hold_flag" in item or "channel_code" in item for item in retained)
+    assert any(
+        "status 값" in item
+        or "상태값" in item
+        or "delivery_hold_flag" in item
+        or "channel_code" in item
+        for item in retained
+    )
     assert all("상태 코드는 유지" not in item for item in retained)
     status_items = [item for item in retained if "status" in item.lower()]
     assert status_items
@@ -2446,6 +2503,9 @@ def test_rebuild_assistant_runner_emits_structured_result(monkeypatch):
     assert isinstance(payload["polish_bundle"]["polished_sections"], list)
     assert payload["polish_bundle"]["delivery_mode"] == "client_report"
     assert payload["polish_bundle"]["audience"] == "manager"
+    assert payload["structured_result"]["report_purpose"]
+    assert isinstance(payload["structured_result"]["report_scope"], list)
+    assert isinstance(payload["structured_result"]["report_questions"], list)
     assert isinstance(payload["confidence"], float)
     assert len(judgment_logs) == 1
     assert judgment_logs[0]["primary_judgment"] == payload["structured_result"]["primary_judgment"]
@@ -2574,6 +2634,740 @@ def test_rebuild_assistant_polish_bundle_keeps_pattern_purity():
     assert not query_bundle.warnings
     assert not amount_bundle.warnings
     assert not workflow_bundle.warnings
+
+
+def test_rebuild_assistant_accounting_extension_moving_average_pipeline():
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+
+    svc = RebuildAssistantService()
+    bundle = _build_safe_bundle_for_rebuild_tests(
+        [
+            {"name": "legacy_service.java", "content": "if (policy.equals(\"moving average\")) { return calculateFx(); }"},
+            {"name": "accounting_payload.json", "content": _accounting_payload_json(method="MOVING_AVERAGE")},
+        ]
+    )
+
+    prepared = svc.prepare_safe_bundle_input(goal="외화 회계 계산이 있는 레거시 기능을 재구성", safe_bundle=bundle, constraints=["회계 정책은 유지"])
+    result = svc.build_result(prepared)
+    accounting = result.extensions["accounting"]
+
+    assert accounting["calculation_status"]["can_calculate"] is True
+    assert accounting["calculation_status"]["reason"] == "all required inputs present"
+    assert accounting["fx_calculation"]["realized_gain_loss_krw"] == 22500
+    assert "이동평균법" in accounting["summary_sentence"]
+    assert any("transaction" in (step.get("source_tags") or []) for step in accounting["fx_calculation"]["detail_steps"])
+    assert result.report_purpose == "외환 거래의 환차손익을 계산하고, 적용된 회계 방식과 전표 정합성을 함께 검토하기 위한 보고서입니다."
+    assert result.report_scope == ["외화 거래 데이터", "환율 데이터", "회계 정책", "전표 검토 결과"]
+    assert result.report_questions == [
+        "이 거래에서 환차익 또는 환차손은 얼마인가?",
+        "어떤 계산 방식이 적용되었는가?",
+        "전표와 계산 결과는 일치하는가?",
+    ]
+
+
+def test_rebuild_assistant_accounting_extension_fifo_policy_changes_result():
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+
+    svc = RebuildAssistantService()
+    bundle = _build_safe_bundle_for_rebuild_tests(
+        [
+            {"name": "legacy_service.java", "content": "if (mode.equals(\"FIFO\")) { return calculateFx(); }"},
+            {"name": "accounting_payload.json", "content": _accounting_payload_json(method="FIFO")},
+        ]
+    )
+
+    result = svc.build_result(svc.prepare_safe_bundle_input(goal="외화 회계 계산이 있는 레거시 기능을 재구성", safe_bundle=bundle, constraints=[]))
+    accounting = result.extensions["accounting"]
+
+    assert accounting["fx_calculation"]["method"] == "FIFO"
+    assert accounting["fx_calculation"]["realized_gain_loss_krw"] == 25000
+
+
+def test_rebuild_assistant_accounting_extension_missing_exchange_rates_fails_explicitly():
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+
+    svc = RebuildAssistantService()
+    bundle = _build_safe_bundle_for_rebuild_tests(
+        [
+            {"name": "legacy_service.java", "content": "calculateFx();"},
+            {"name": "accounting_payload.json", "content": _accounting_payload_json(include_exchange_rates=False)},
+        ]
+    )
+
+    result = svc.build_result(svc.prepare_safe_bundle_input(goal="외화 회계 계산이 있는 레거시 기능을 재구성", safe_bundle=bundle, constraints=[]))
+    accounting = result.extensions["accounting"]
+
+    assert accounting["calculation_status"]["can_calculate"] is False
+    assert accounting["calculation_status"]["blocking_issue"] == "missing required inputs: exchange_rates"
+    assert "회계 계산을 수행할 수 없습니다." in accounting["summary_sentence"]
+    assert "환율 데이터가 누락" in accounting["summary_sentence"]
+    assert result.report_purpose == "외환 거래의 환차손익을 계산하고, 적용된 회계 방식과 전표 정합성을 함께 검토하기 위한 보고서입니다."
+    assert result.report_purpose != accounting["summary_sentence"]
+    assert result.report_questions
+
+
+def test_rebuild_assistant_accounting_success_rewrites_top_narrative():
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+
+    svc = RebuildAssistantService()
+    bundle = _build_safe_bundle_for_rebuild_tests(
+        [
+            {"name": "legacy_service.java", "content": "if (policy.equals(\"moving average\")) { return calculateFx(); }"},
+            {"name": "accounting_payload.json", "content": _accounting_payload_json(method="MOVING_AVERAGE")},
+        ]
+    )
+
+    result = svc.build_result(svc.prepare_safe_bundle_input(goal="외화 회계 계산이 있는 레거시 기능을 재구성", safe_bundle=bundle, constraints=[]))
+    summary_text = " ".join(result.executive_summary_v2)
+    option_text = f"{result.recommended_option.name if result.recommended_option else ''} {result.recommended_option.structure_summary if result.recommended_option else ''}"
+    execution_text = " ".join(f"{week.goal} {' '.join(week.tasks)}" for week in result.execution_plan)
+    combined = " ".join([result.one_line_conclusion, summary_text, option_text, execution_text])
+
+    assert "이동평균법" in combined
+    assert "22,500원" in combined
+    assert "전표 검토 결과" in summary_text or "전표 검토는 입력 부족" in summary_text or "전표 검토 결과 차변·대변" in summary_text
+    assert "단계적으로 분리" not in combined
+    assert "검증 규칙 중심 모듈형 구조" not in combined
+    assert "핵심 규칙과 유지 계약을 같은 실행 계획 안에서 고정" not in combined
+    assert result.recommended_option is not None
+    assert result.recommended_option.name == "옵션 A. 현재 회계 방식 유지 및 입력 통제 강화"
+    assert all("API" not in week.goal and "화면" not in week.goal and "모듈" not in week.goal for week in result.execution_plan)
+
+
+def test_rebuild_assistant_accounting_failure_rewrites_top_narrative():
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+
+    svc = RebuildAssistantService()
+    bundle = _build_safe_bundle_for_rebuild_tests(
+        [
+            {"name": "legacy_service.java", "content": "calculateFx();"},
+            {"name": "accounting_payload.json", "content": _accounting_payload_json(include_exchange_rates=False)},
+        ]
+    )
+
+    result = svc.build_result(svc.prepare_safe_bundle_input(goal="외화 회계 계산이 있는 레거시 기능을 재구성", safe_bundle=bundle, constraints=[]))
+    summary_text = " ".join(result.executive_summary_v2)
+    option_text = f"{result.recommended_option.name if result.recommended_option else ''} {result.recommended_option.structure_summary if result.recommended_option else ''}"
+    execution_text = " ".join(f"{week.goal} {' '.join(week.tasks)}" for week in result.execution_plan)
+    combined = " ".join([result.one_line_conclusion, summary_text, option_text, execution_text])
+
+    assert "회계 계산을 수행할 수 없습니다" in combined
+    assert "환율 데이터 누락" in combined
+    assert "22,500원" not in combined
+    assert "단계적으로 분리" not in combined
+    assert "검증 규칙 중심 모듈형 구조" not in combined
+    assert result.recommended_option is not None
+    assert result.recommended_option.name == "옵션 A. 누락 입력 보완 후 동일 방식으로 재계산"
+    assert any("누락 입력" in week.goal or any("누락 입력" in task for task in week.tasks) for week in result.execution_plan)
+
+
+def test_rebuild_assistant_accounting_warning_rewrites_top_narrative():
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+
+    payload = """
+{
+  "strict": false,
+  "transactions": [
+    {"tx_id": "TX001", "tx_type": "BUY_FX", "occurred_at": "2026-03-01", "currency": "USD", "amount_fc": 100, "fx_account_id": "USD_MAIN"},
+    {"tx_id": "TX002", "tx_type": "SELL_FX", "occurred_at": "2026-03-01", "currency": "USD", "amount_fc": 50, "fx_account_id": "USD_MAIN"}
+  ],
+  "exchange_rates": [
+    {"currency": "USD", "rate_date": "2026-03-01", "rate": 1200},
+    {"currency": "USD", "rate_date": "2026-03-01", "rate": 1210}
+  ],
+  "vouchers": [],
+  "account_mappings": [],
+  "policies": [
+    {"policy_id": "P001", "fx_cost_method": "MOVING_AVERAGE", "effective_from": "2026-01-01", "version": 1}
+  ]
+}
+"""
+    svc = RebuildAssistantService()
+    bundle = _build_safe_bundle_for_rebuild_tests(
+        [
+            {"name": "legacy_service.java", "content": "calculateFx();"},
+            {"name": "accounting_payload.json", "content": payload},
+        ]
+    )
+
+    result = svc.build_result(svc.prepare_safe_bundle_input(goal="외화 회계 계산", safe_bundle=bundle, constraints=[]))
+    summary_text = " ".join(result.executive_summary_v2)
+    option_text = f"{result.recommended_option.name if result.recommended_option else ''} {result.recommended_option.structure_summary if result.recommended_option else ''}"
+    execution_text = " ".join(f"{week.goal} {' '.join(week.tasks)}" for week in result.execution_plan)
+    combined = " ".join([result.one_line_conclusion, summary_text, option_text, execution_text])
+
+    assert result.extensions["accounting"]["calculation_status"]["can_calculate"] is True
+    assert "검토용 초안" in combined
+    assert "복수 환율" in combined
+    assert "이동평균법" in combined
+    assert "단계적으로 분리" not in combined
+    assert "검증 규칙 중심 모듈형 구조" not in combined
+    assert result.recommended_option is not None
+    assert result.recommended_option.name == "옵션 A. 현재 계산 결과를 초안으로 유지하고 입력 보완"
+
+
+@pytest.mark.parametrize(
+    ("goal", "assets", "expected_judgment", "expected_purpose"),
+    [
+        (
+            "조회 조건과 필터 규칙이 많은 화면을 재구성해줘",
+            {
+                "source_code": "const page = req.query.page; const sort = req.query.sort; const status = req.query.status;",
+                "sql_queries": "SELECT * FROM requests WHERE status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            },
+            "query_filter",
+            "조회 조건, 필터 조합, 정렬 및 결과 구성 규칙을 분석하기 위한 보고서입니다.",
+        ),
+        (
+            "다단계 승인 흐름이 있는 요청 기능을 재구성해줘",
+            {
+                "source_code": 'if (approvalStep == 1 && approverRole == "TEAM_MANAGER") { approve(); } if (approvalStep == 2 && approverRole == "FINANCE_MANAGER") { reject(); }',
+            },
+            "workflow",
+            "승인 트리거, 승인 단계, 예외 처리 흐름을 분석하기 위한 보고서입니다.",
+        ),
+        (
+            "저장 전 차단 조건이 많은 등록 화면을 재구성해줘",
+            {
+                "source_code": "if (!name) throw invalid; if (existsDuplicate(code)) throw duplicate; save();",
+            },
+            "validation",
+            "입력 검증, 저장 전 차단 조건, 예외 처리 기준을 분석하기 위한 보고서입니다.",
+        ),
+    ],
+)
+def test_rebuild_assistant_general_report_purpose_follows_primary_judgment(goal, assets, expected_judgment, expected_purpose):
+    from mellow_link.modules.rebuild_assistant.schemas import RebuildAssetsPayload
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+
+    svc = RebuildAssistantService()
+    prepared = svc.prepare_input(goal=goal, assets=RebuildAssetsPayload(**assets))
+    result = svc.build_result(prepared)
+
+    assert result.primary_judgment == expected_judgment
+    assert result.report_purpose == expected_purpose
+    assert result.report_scope
+    assert result.report_questions
+
+
+def test_rebuild_assistant_report_purpose_does_not_echo_raw_user_question():
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+
+    goal = "이 거래에서 환차익이 얼마인지 알고 싶다"
+    svc = RebuildAssistantService()
+    bundle = _build_safe_bundle_for_rebuild_tests(
+        [
+            {"name": "legacy_service.java", "content": "if (policy.equals(\"moving average\")) { return calculateFx(); }"},
+            {"name": "accounting_payload.json", "content": _accounting_payload_json(method="MOVING_AVERAGE")},
+        ]
+    )
+
+    result = svc.build_result(svc.prepare_safe_bundle_input(goal=goal, safe_bundle=bundle, constraints=[]))
+
+    assert goal not in result.report_purpose
+    assert all(goal not in item for item in result.report_questions)
+
+
+def test_rebuild_assistant_report_purpose_follows_narrative_axis_for_claim_and_amount_samples():
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+
+    svc = RebuildAssistantService()
+
+    claim_sample = Path(
+        r"C:\Users\Hyein\ClaudeAI\AI_Project\mellow_link\modules\rebuild_assistant\samples\02. python_claim_adjustment_case_01"
+    )
+    claim_bundle = _build_safe_bundle_for_rebuild_tests(
+        [
+            {"name": path.name, "content": path.read_text(encoding="utf-8")}
+            for path in claim_sample.iterdir()
+            if path.name.lower() not in {"readme.md", "goal.txt", "constraints.txt"}
+        ]
+    )
+    claim_constraints = [line.strip() for line in claim_sample.joinpath("constraints.txt").read_text(encoding="utf-8").splitlines() if line.strip()]
+    claim_goal = claim_sample.joinpath("goal.txt").read_text(encoding="utf-8").strip()
+    claim_result = svc.build_result(
+        svc.prepare_safe_bundle_input(goal=claim_goal, safe_bundle=claim_bundle, constraints=claim_constraints)
+    )
+
+    amount_sample = Path(
+        r"C:\Users\Hyein\ClaudeAI\AI_Project\mellow_link\modules\rebuild_assistant\samples\04. amount_limit"
+    )
+    amount_bundle = _build_safe_bundle_for_rebuild_tests(
+        [
+            {"name": path.name, "content": path.read_text(encoding="utf-8")}
+            for path in amount_sample.iterdir()
+        ]
+    )
+    amount_result = svc.build_result(
+        svc.prepare_safe_bundle_input(goal="금액 한도형 샘플", safe_bundle=amount_bundle, constraints=[])
+    )
+
+    assert claim_result.report_purpose == "권한 체계, 승인 주체, 조직별 처리 범위를 분석하기 위한 보고서입니다."
+    assert amount_result.report_purpose == "금액 기준, 한도 정책, 경계 조건을 분석하기 위한 보고서입니다."
+
+
+def test_rebuild_assistant_rca_exception_sample_keeps_single_workflow_narrative():
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+
+    svc = RebuildAssistantService()
+    sample_dir = Path(
+        r"C:\Users\Hyein\ClaudeAI\AI_Project\mellow_link\modules\rebuild_assistant\samples\00. rca_exception_case_01"
+    )
+    bundle = _build_safe_bundle_for_rebuild_tests(
+        [
+            {"name": path.name, "content": path.read_text(encoding="utf-8")}
+            for path in sample_dir.iterdir()
+            if path.name.lower() not in {"readme.md", "goal.txt", "constraints.txt"}
+        ]
+    )
+    goal = sample_dir.joinpath("goal.txt").read_text(encoding="utf-8").strip()
+    constraints = [line.strip() for line in sample_dir.joinpath("constraints.txt").read_text(encoding="utf-8").splitlines() if line.strip()]
+    result = svc.build_result(
+        svc.prepare_safe_bundle_input(goal=goal, safe_bundle=bundle, constraints=constraints)
+    )
+
+    retained_items = [item.item for item in result.retained_contracts[:3]]
+    assert result.primary_judgment == "workflow"
+    assert result.report_purpose == "승인 트리거, 승인 단계, 예외 처리 흐름을 분석하기 위한 보고서입니다."
+    assert "조회 조건과 결과 구성을 별도 조회 모델로 분리" not in result.one_line_conclusion
+    assert any(title in [rule.title for rule in result.grounded_business_rules[:4]] for title in ("의사결정 분기 조건", "예외 처리 흐름", "승인 단계 구조"))
+    assert retained_items
+    assert not any("조회 조건 파라미터 계약" in item or "정렬과 페이징 기본값 계약" in item for item in retained_items)
+    assert any("승인" in item or "단계" in item for item in retained_items)
+
+
+def test_rebuild_assistant_accounting_extension_voucher_review_input_missing_is_not_treated_as_no():
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+
+    payload = _accounting_payload_json().replace('"vouchers": [', '"vouchers_disabled": [').replace('"account_mappings": [', '"account_mappings_disabled": [')
+    svc = RebuildAssistantService()
+    bundle = _build_safe_bundle_for_rebuild_tests(
+        [
+            {"name": "legacy_service.java", "content": "calculateFx();"},
+            {"name": "accounting_payload.json", "content": payload},
+        ]
+    )
+
+    result = svc.build_result(svc.prepare_safe_bundle_input(goal="전표 입력이 빠진 외화 회계 기능", safe_bundle=bundle, constraints=[]))
+    accounting = result.extensions["accounting"]
+    polish_bundle = svc.build_polish_bundle(result, audience="manager", delivery_mode="client_report")
+    voucher_section = next(section for section in polish_bundle.polished_sections if section.section_key == "voucher_review")
+
+    assert accounting["voucher_review"]["status"] == "input_missing"
+    assert accounting["voucher_review"]["balance_ok"] is None
+    assert accounting["voucher_review"]["policy_consistent"] is None
+    assert "전표 데이터와 계정 매핑이 없어 전표 검토를 수행할 수 없습니다." in accounting["voucher_review"]["failure_reason"]
+    assert "차변/대변 균형: 검토 불가" in voucher_section.polished_text
+    assert "정책 일치: 검토 불가" in voucher_section.polished_text
+
+
+def test_rebuild_assistant_accounting_extension_strict_mode_blocks_ambiguous_rate_but_non_strict_warns():
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+
+    payload = """
+{
+  "strict": true,
+  "transactions": [
+    {"tx_id": "TX001", "tx_type": "BUY_FX", "occurred_at": "2026-03-01", "currency": "USD", "amount_fc": 100, "fx_account_id": "USD_MAIN"},
+    {"tx_id": "TX002", "tx_type": "SELL_FX", "occurred_at": "2026-03-01", "currency": "USD", "amount_fc": 50, "fx_account_id": "USD_MAIN"}
+  ],
+  "exchange_rates": [
+    {"currency": "USD", "rate_date": "2026-03-01", "rate": 1200},
+    {"currency": "USD", "rate_date": "2026-03-01", "rate": 1210}
+  ],
+  "vouchers": [],
+  "account_mappings": [],
+  "policies": [
+    {"policy_id": "P001", "fx_cost_method": "MOVING_AVERAGE", "effective_from": "2026-01-01", "version": 1}
+  ]
+}
+"""
+    svc = RebuildAssistantService()
+    strict_bundle = _build_safe_bundle_for_rebuild_tests(
+        [
+            {"name": "legacy_service.java", "content": "calculateFx();"},
+            {"name": "accounting_payload.json", "content": payload},
+        ]
+    )
+    strict_result = svc.build_result(svc.prepare_safe_bundle_input(goal="외화 회계 계산", safe_bundle=strict_bundle, constraints=[]))
+    strict_accounting = strict_result.extensions["accounting"]
+
+    non_strict_bundle = _build_safe_bundle_for_rebuild_tests(
+        [
+            {"name": "legacy_service.java", "content": "calculateFx();"},
+            {"name": "accounting_payload.json", "content": payload.replace('"strict": true', '"strict": false')},
+        ]
+    )
+    non_strict_result = svc.build_result(svc.prepare_safe_bundle_input(goal="외화 회계 계산", safe_bundle=non_strict_bundle, constraints=[]))
+    non_strict_accounting = non_strict_result.extensions["accounting"]
+
+    assert strict_accounting["calculation_status"]["can_calculate"] is False
+    assert "ambiguous exchange rate" in strict_accounting["calculation_status"]["blocking_issue"]
+    assert non_strict_accounting["calculation_status"]["can_calculate"] is True
+    assert any("복수 환율" in warning for warning in non_strict_accounting["fx_calculation"]["warnings"])
+
+
+def test_rebuild_assistant_accounting_extension_voucher_review_detects_mismatch():
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+
+    payload = _accounting_payload_json().replace('"amount_krw": 210000', '"amount_krw": 209000')
+    svc = RebuildAssistantService()
+    bundle = _build_safe_bundle_for_rebuild_tests(
+        [
+            {"name": "legacy_service.java", "content": "calculateFx();"},
+            {"name": "accounting_payload.json", "content": payload},
+        ]
+    )
+
+    result = svc.build_result(svc.prepare_safe_bundle_input(goal="전표 검토가 필요한 외화 기능", safe_bundle=bundle, constraints=[]))
+    accounting = result.extensions["accounting"]
+
+    assert accounting["voucher_review"]["status"] == "completed"
+    assert accounting["voucher_review"]["mismatches"]
+
+
+def test_rebuild_assistant_accounting_result_package_and_polish_bundle_include_accounting_sections():
+    from datetime import datetime, timezone
+
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+    from mellow_link.routers.projects import _result_package_markdown, build_result_package
+
+    svc = RebuildAssistantService()
+    bundle = _build_safe_bundle_for_rebuild_tests(
+        [
+            {"name": "legacy_service.java", "content": "if (mode.equals(\"moving average\")) { calculateFx(); }"},
+            {"name": "accounting_payload.json", "content": _accounting_payload_json(method="MOVING_AVERAGE")},
+        ]
+    )
+    result = svc.build_result(svc.prepare_safe_bundle_input(goal="외화 회계 계산이 있는 레거시 기능을 재구성", safe_bundle=bundle, constraints=[]))
+    polish_bundle = svc.build_polish_bundle(result, audience="manager", delivery_mode="client_report")
+
+    project = SimpleNamespace(
+        id="proj_accounting",
+        project_name="회계 MVP",
+        client_name="ACME",
+        template_key="rebuild_assistant",
+        status="completed",
+        created_at=datetime.now(timezone.utc),
+    )
+    pkg = build_result_package(
+        project,
+        {"status": "completed", "run_id": "run_accounting"},
+        result,
+        assets=[],
+        polish_bundle=polish_bundle.model_dump(),
+        app_version="0.1.0",
+    )
+    markdown = _result_package_markdown(pkg)
+
+    assert pkg["accounting"]["calculation_status"]["can_calculate"] is True
+    assert pkg["report_purpose"] == "외환 거래의 환차손익을 계산하고, 적용된 회계 방식과 전표 정합성을 함께 검토하기 위한 보고서입니다."
+    assert pkg["report_scope"] == ["외화 거래 데이터", "환율 데이터", "회계 정책", "전표 검토 결과"]
+    assert len(pkg["report_questions"]) == 3
+    assert pkg["polish_bundle"]["audience"] == "manager"
+    assert pkg["polish_bundle"]["delivery_mode"] == "client_report"
+    assert "## 보고서 목적" in markdown
+    assert "## 분석 범위" in markdown
+    assert "## 검증 질문" in markdown
+    assert "회계 계산 요약" in markdown
+    assert "외화 계산 결과" in markdown
+    assert any(section.section_key == "accounting_summary" for section in polish_bundle.polished_sections)
+    assert any(section.section_key == "report_purpose" for section in polish_bundle.polished_sections)
+    assert any(fact in ("22500", "22,500") for fact in polish_bundle.preserved_facts)
+    assert "검증 규칙 중심 모듈형 구조" not in markdown
+    assert "단계적으로 분리" not in markdown
+
+
+def test_rebuild_assistant_accounting_invalid_schema_failure_is_humanized_in_result_package():
+    from datetime import datetime, timezone
+
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+    from mellow_link.routers.projects import _result_package_markdown, build_result_package
+
+    invalid_payload = """
+{
+  "strict": true,
+  "transactions": [
+    {"tx_id": "T1", "tx_type": "BUY_FX", "currency": "USD", "amount_fc": 100, "rate": 1200}
+  ],
+  "exchange_rates": [
+    {"currency": "USD", "rate_date": "2026-03-01", "rate": 1200}
+  ],
+  "vouchers": [],
+  "account_mappings": [],
+  "policies": [
+    {"policy_id": "P001", "fx_cost_method": "MOVING_AVERAGE", "effective_from": "2026-01-01", "version": 1}
+  ]
+}
+"""
+    svc = RebuildAssistantService()
+    bundle = _build_safe_bundle_for_rebuild_tests(
+        [
+            {"name": "legacy_context.txt", "content": "accounting failure sample"},
+            {"name": "accounting_payload.json", "content": invalid_payload},
+        ]
+    )
+    result = svc.build_result(
+        svc.prepare_safe_bundle_input(goal="전산회계 입력 검토", safe_bundle=bundle, constraints=[])
+    )
+    pkg = build_result_package(
+        SimpleNamespace(
+            id="proj_invalid_accounting",
+            project_name="invalid accounting payload",
+            client_name="ACME",
+            template_key="rebuild_assistant",
+            status="completed",
+            created_at=datetime.now(timezone.utc),
+        ),
+        {"status": "completed", "run_id": "run_invalid_accounting"},
+        result,
+        assets=[],
+        polish_bundle=svc.build_polish_bundle(result, audience="manager", delivery_mode="client_report").model_dump(),
+        app_version="0.1.0",
+    )
+    markdown = _result_package_markdown(pkg)
+
+    assert "거래일(occurred_at) 입력이 누락되었습니다." in markdown
+    assert "invalid accounting payload schema" not in markdown
+
+
+def test_rebuild_assistant_success_full_result_package_hides_placeholders_and_humanizes_accounting():
+    from datetime import datetime, timezone
+
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+    from mellow_link.routers.projects import _result_package_markdown, build_result_package
+
+    sample_dir = Path(
+        r"C:\Users\Hyein\ClaudeAI\AI_Project\mellow_link\modules\rebuild_assistant\samples\01_success_full"
+    )
+    bundle = _build_safe_bundle_for_rebuild_tests(
+        [
+            {"name": "legacy_context.txt", "content": sample_dir.joinpath("legacy_context.txt").read_text(encoding="utf-8")},
+            {"name": "accounting_payload.json", "content": sample_dir.joinpath("accounting_payload.json").read_text(encoding="utf-8")},
+        ]
+    )
+
+    svc = RebuildAssistantService()
+    result = svc.build_result(
+        svc.prepare_safe_bundle_input(goal="전산회계 MVP 기능을 재구성", safe_bundle=bundle, constraints=[])
+    )
+    pkg = build_result_package(
+        SimpleNamespace(
+            id="proj_success_fx",
+            project_name="success full",
+            client_name="ACME",
+            template_key="rebuild_assistant",
+            status="completed",
+            created_at=datetime.now(timezone.utc),
+        ),
+        {"status": "completed", "run_id": "run_success_fx"},
+        result,
+        assets=[],
+        polish_bundle=svc.build_polish_bundle(result, audience="manager", delivery_mode="client_report").model_dump(),
+        app_version="0.1.0",
+    )
+    markdown = _result_package_markdown(pkg)
+
+    assert "## 핵심 업무 규칙\n- ready" not in markdown
+    assert "## 유지해야 할 계약\n- ready" not in markdown
+    assert "all required inputs present" not in markdown
+    assert "MOVING_AVERAGE" not in markdown
+    assert "voucher_review requires vouchers and account_mappings" not in markdown
+    assert "account 기능" not in markdown
+    assert "회계 기능" in markdown
+    assert "## 보고서 목적" in markdown
+    assert "외환 거래의 환차손익을 계산하고, 적용된 회계 방식과 전표 정합성을 함께 검토하기 위한 보고서입니다." in markdown
+    assert "필수 입력이 모두 제공되었습니다." in markdown
+    assert "이동평균법" in markdown
+    assert "환차익은 22,500원입니다." in markdown
+    assert "검토 상태: 완료" in markdown
+    assert "차변/대변 균형: 아니오" in markdown
+    assert "정책 일치: 아니오" in markdown
+    assert "입니다. 입니다." not in markdown
+    assert "습니다.와" not in markdown
+
+    statements = [item["statement"] for item in pkg["decision_items"]]
+    assert statements
+    assert len(statements) == len(set(statements))
+
+
+def test_rebuild_assistant_success_full_accounting_overrides_lower_sections():
+    from datetime import datetime, timezone
+
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+    from mellow_link.routers.projects import _result_package_markdown, build_result_package
+
+    sample_dir = Path(
+        r"C:\Users\Hyein\ClaudeAI\AI_Project\mellow_link\modules\rebuild_assistant\samples\01_success_full"
+    )
+    bundle = _build_safe_bundle_for_rebuild_tests(
+        [
+            {"name": "legacy_context.txt", "content": sample_dir.joinpath("legacy_context.txt").read_text(encoding="utf-8")},
+            {"name": "accounting_payload.json", "content": sample_dir.joinpath("accounting_payload.json").read_text(encoding="utf-8")},
+        ]
+    )
+
+    svc = RebuildAssistantService()
+    result = svc.build_result(
+        svc.prepare_safe_bundle_input(goal="전산회계 MVP 기능을 재구성", safe_bundle=bundle, constraints=[])
+    )
+    pkg = build_result_package(
+        SimpleNamespace(
+            id="proj_success_fx_lower",
+            project_name="success full",
+            client_name="ACME",
+            template_key="rebuild_assistant",
+            status="completed",
+            created_at=datetime.now(timezone.utc),
+        ),
+        {"status": "completed", "run_id": "run_success_fx_lower"},
+        result,
+        assets=[],
+        polish_bundle=svc.build_polish_bundle(result, audience="manager", delivery_mode="client_report").model_dump(),
+        app_version="0.1.0",
+    )
+    markdown = _result_package_markdown(pkg)
+
+    assert any(rule.title == "적용 회계 방식" for rule in result.grounded_business_rules)
+    assert any("환차손익은 이동평균법 기준으로 계산됩니다." in rule.description for rule in result.grounded_business_rules)
+    assert any("환율 기준 계약" in item.item for item in result.retained_contracts)
+    assert any("회계 정책 적용 기준 계약" in item.item for item in result.retained_contracts)
+    assert result.recomposition_draft.database
+    assert result.recomposition_draft.backend
+    assert result.recomposition_draft.frontend
+    assert not any("API 분리" in item or "모듈형 구조" in item for item in result.recomposition_draft.database + result.recomposition_draft.backend + result.recomposition_draft.frontend)
+    assert "직접 확인된 핵심 업무 규칙이 없습니다." not in markdown
+    assert "직접 확인된 유지 계약이 없습니다." not in markdown
+    assert "V1 전표의 차변/대변이 일치하지 않습니다." in markdown
+
+
+def test_rebuild_assistant_failure_missing_exchange_rates_sample_uses_humanized_failure_narrative():
+    from datetime import datetime, timezone
+
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+    from mellow_link.routers.projects import _result_package_markdown, build_result_package
+
+    sample_dir = Path(
+        r"C:\Users\Hyein\ClaudeAI\AI_Project\mellow_link\modules\rebuild_assistant\samples\02_failure_missing_exchange_rates"
+    )
+    bundle = _build_safe_bundle_for_rebuild_tests(
+        [
+            {"name": "legacy_context.txt", "content": sample_dir.joinpath("legacy_context.txt").read_text(encoding="utf-8")},
+            {"name": "accounting_payload.json", "content": sample_dir.joinpath("accounting_payload.json").read_text(encoding="utf-8")},
+        ]
+    )
+
+    svc = RebuildAssistantService()
+    result = svc.build_result(
+        svc.prepare_safe_bundle_input(goal="전산회계 MVP 기능을 재구성", safe_bundle=bundle, constraints=[])
+    )
+    pkg = build_result_package(
+        SimpleNamespace(
+            id="proj_failure_fx",
+            project_name="failure missing exchange rates",
+            client_name="ACME",
+            template_key="rebuild_assistant",
+            status="completed",
+            created_at=datetime.now(timezone.utc),
+        ),
+        {"status": "completed", "run_id": "run_failure_fx"},
+        result,
+        assets=[],
+        polish_bundle=svc.build_polish_bundle(result, audience="manager", delivery_mode="client_report").model_dump(),
+        app_version="0.1.0",
+    )
+    markdown = _result_package_markdown(pkg)
+
+    assert "환율 데이터 누락입니다." in markdown
+    assert "환율 데이터가 누락되었습니다." in markdown
+    assert "입니다. 입니다." not in markdown
+    assert "습니다.와" not in markdown
+    assert "단계적으로 분리" not in markdown
+    assert "검증 규칙 중심 모듈형 구조" not in markdown
+
+
+def test_rebuild_assistant_sentence_polish_fixes_known_fragments():
+    from mellow_link.modules.rebuild_assistant.postprocess.rules import apply_sentence_polish
+
+    raw = "환율 데이터 누락로 명확하므로 규칙야 합니다. 이동평균법로 계산합니다. 금지을 확인합니다. 입니다. 입니다."
+    polished = apply_sentence_polish(raw)
+
+    assert "누락로" not in polished
+    assert "규칙야 합니다" not in polished
+    assert "이동평균법로" not in polished
+    assert "금지을" not in polished
+    assert "입니다. 입니다." not in polished
+    assert "누락으로" in polished
+    assert "규칙이어야 합니다" in polished
+    assert "이동평균법으로" in polished
+
+
+def test_rebuild_assistant_warning_lenient_policy_sample_uses_warning_narrative():
+    from datetime import datetime, timezone
+
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+    from mellow_link.routers.projects import _result_package_markdown, build_result_package
+
+    sample_dir = Path(
+        r"C:\Users\Hyein\ClaudeAI\AI_Project\mellow_link\modules\rebuild_assistant\samples\03_warning_lenient_policy"
+    )
+    bundle = _build_safe_bundle_for_rebuild_tests(
+        [
+            {"name": "legacy_context.txt", "content": sample_dir.joinpath("legacy_context.txt").read_text(encoding="utf-8")},
+            {"name": "accounting_payload.json", "content": sample_dir.joinpath("accounting_payload.json").read_text(encoding="utf-8")},
+        ]
+    )
+
+    svc = RebuildAssistantService()
+    result = svc.build_result(
+        svc.prepare_safe_bundle_input(goal="전산회계 MVP 기능을 재구성", safe_bundle=bundle, constraints=[])
+    )
+    pkg = build_result_package(
+        SimpleNamespace(
+            id="proj_warning_fx",
+            project_name="warning lenient policy",
+            client_name="ACME",
+            template_key="rebuild_assistant",
+            status="completed",
+            created_at=datetime.now(timezone.utc),
+        ),
+        {"status": "completed", "run_id": "run_warning_fx"},
+        result,
+        assets=[],
+        polish_bundle=svc.build_polish_bundle(result, audience="manager", delivery_mode="client_report").model_dump(),
+        app_version="0.1.0",
+    )
+    markdown = _result_package_markdown(pkg)
+
+    assert "검토용 초안" in markdown
+    assert "복수 정책 충돌" in markdown
+    assert "회계 기능은 이동평균법 기준으로 계산을 수행했지만" in markdown
+    assert "회계 계산을 수행할 수 없습니다." not in markdown
+    assert "입니다. 입니다." not in markdown
+    assert "습니다.와" not in markdown
+
+
+def test_project_result_static_ui_renders_accounting_polish_controls():
+    html_path = Path(r"C:\Users\Hyein\ClaudeAI\AI_Project\mellow_link\static\project_result.html")
+    html = html_path.read_text(encoding="utf-8")
+
+    assert 'id="accountingSection"' in html
+    assert 'id="polishAudienceSelect"' in html
+    assert 'id="polishDeliverySelect"' in html
+    assert "accounting_summary" in html
+    assert "accounting_status" in html
+    assert "회계 확장" in html
+    assert "보고서 목적" in html
+    assert "분석 범위" in html
+    assert "검증 질문" in html
+    assert "열람 대상" in html
+    assert "납품 톤" in html
+    assert "표현 보정 경고" in html
+    assert "회계 계산 요약" in html
+    assert "계산 가능 여부" in html
+    assert "fx_calculation" in html
+    assert "검토 불가" in html
+    assert "renderAccountingSection(pkg)" in html
 
 
 def test_rebuild_assistant_extracted_rules_shape_is_kept_for_sparse_input():

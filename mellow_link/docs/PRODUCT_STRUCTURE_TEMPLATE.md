@@ -38,7 +38,21 @@ mellow_link
 
 ## 2. 대표 상품 기준 배치
 
-현재 상용 1차 대표 상품은 `modules/rebuild_assistant` 기준으로 본다.
+현재 상용 1차 대표 상품은 상품명 `레거시 현대화 분석`이며, 제품 정의는 `레거시 시스템을 분석하고, 현대화 방향과 실행 가능한 조치를 제안하는 AI 도구`다.
+
+현재 제품 단계는 아래와 같이 고정한다.
+
+- 1단계: 분석 + 결과 패키지 (완료)
+- 2단계: 조치 제안 + 비교 (부분 구현)
+- 3단계: 실행 준비 (planned)
+- 4단계: 실행/검증/승인/배포 (planned)
+- 5단계: 운영/로그/감사 (planned)
+
+현재 상태 구분은 아래와 같이 고정한다.
+
+- current: 추천안, 분리 우선순위, 설계 선택지 비교, 실행 계획
+- gap: 조치 제안, 변경 요약, Before 구조, After 구조
+- planned: 실행/검증/승인/배포, 운영/로그/감사
 
 ```text
 modules/rebuild_assistant
@@ -47,7 +61,7 @@ modules/rebuild_assistant
 ├─ runner.py
 │  └─ safe bundle 기반 분석 실행 흐름
 ├─ service.py
-│  └─ 기능 분류, 업무 규칙 추출, 설계안/전환 초안 생성
+│  └─ 기능 분류, 업무 규칙 추출, 분석 결과와 결정 지원 초안 생성
 ├─ schemas.py
 │  └─ 입력/출력 계약
 ├─ manifest.py
@@ -70,6 +84,38 @@ static
 ├─ user_console.html      # 분석 워크스페이스
 └─ project_result.html    # 결과 패키지
 ```
+
+현재 화면 구조는 아래처럼 해석한다.
+
+- `projects_create.html`
+  - 프로젝트 생성
+- `user_console.html`
+  - 분석 워크스페이스
+  - 입력 정리
+  - 자산 분석
+  - 설계 초안
+  - 조치 제안
+  - 현재 상태: `조치 제안`은 gap 항목이다.
+- `project_result.html`
+  - 결과 패키지
+
+[분석 결과]
+- 진단
+- 설계안
+- 전환 초안
+
+[결정 지원]
+- 추천안
+- 분리 우선순위
+- 설계 선택지 비교
+- 실행 계획
+
+`execution_plan`은 자동 실행이 아니라 `실행 준비 계획`으로 해석한다.
+
+- 실행/검증 화면
+  - planned
+- 로그/감사 화면
+  - planned
 
 규칙:
 

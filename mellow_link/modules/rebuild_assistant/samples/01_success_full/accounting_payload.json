@@ -1,0 +1,67 @@
+{
+  "transactions": [
+    {
+      "tx_id": "T1",
+      "tx_type": "BUY_FX",
+      "currency": "USD",
+      "amount_fc": 100,
+      "rate": 1200,
+      "occurred_at": "2026-03-01"
+    },
+    {
+      "tx_id": "T2",
+      "tx_type": "BUY_FX",
+      "currency": "USD",
+      "amount_fc": 100,
+      "rate": 1300,
+      "occurred_at": "2026-03-05"
+    },
+    {
+      "tx_id": "T3",
+      "tx_type": "SELL_FX",
+      "currency": "USD",
+      "amount_fc": 150,
+      "rate": 1400,
+      "occurred_at": "2026-03-10"
+    }
+  ],
+  "exchange_rates": [
+    {
+      "rate_date": "2026-03-01",
+      "currency": "USD",
+      "rate": 1200
+    },
+    {
+      "rate_date": "2026-03-05",
+      "currency": "USD",
+      "rate": 1300
+    },
+    {
+      "rate_date": "2026-03-10",
+      "currency": "USD",
+      "rate": 1400
+    }
+  ],
+  "policies": [
+    {
+      "policy_id": "P1",
+      "fx_cost_method": "MOVING_AVERAGE"
+    }
+  ],
+  "vouchers": [
+    {
+      "voucher_id": "V1",
+      "source_tx_ids": [
+        "T3"
+      ],
+      "debit": 210000,
+      "credit": 187500
+    }
+  ],
+  "account_mappings": [
+    {
+      "account": "FX_GAIN",
+      "type": "gain"
+    }
+  ]
+}

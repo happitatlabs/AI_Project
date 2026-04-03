@@ -4,6 +4,13 @@
 상태: Contract  
 범위: `rebuild_assistant` 판단 템플릿에 `조회/필터형`, `금액/한도형` 2종을 1차로 추가
 
+추가 메모 (2026-04-03)
+
+- 현재 canonical judgment template registry는
+  [`mellow_link/services/refactoring_support_engine/decision_catalog.py`](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/services/refactoring_support_engine/decision_catalog.py)다.
+- [`mellow_link/modules/rebuild_assistant/judgment_templates.py`](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/modules/rebuild_assistant/judgment_templates.py)는 compatibility re-export만 유지한다.
+- 아래 반영 대상 파일 목록은 당시 계약 기준이며, 현재 구조 해석은 위 canonical source를 우선한다.
+
 ## 1. 작업 목표
 
 현재 1차 판단 템플릿 `state_transition`, `access_control`, `validation`에 더해 아래 2개를 추가한다.
@@ -30,7 +37,9 @@
 
 이번 Contract에서 수정하는 대상은 아래로 제한한다.
 
+- [`mellow_link/services/refactoring_support_engine/decision_catalog.py`](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/services/refactoring_support_engine/decision_catalog.py)
 - [`mellow_link/modules/rebuild_assistant/judgment_templates.py`](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/modules/rebuild_assistant/judgment_templates.py)
+  - compatibility re-export
 - [`mellow_link/modules/rebuild_assistant/schemas.py`](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/modules/rebuild_assistant/schemas.py)
 - [`mellow_link/modules/rebuild_assistant/service.py`](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/modules/rebuild_assistant/service.py)
 - [`mellow_link/tests/test_module_registry_and_runs.py`](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/tests/test_module_registry_and_runs.py)

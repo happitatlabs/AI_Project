@@ -1,7 +1,17 @@
 # Rebuild Assistant Result Status
 
-기준일: 2026-03-29  
-상태: 판단 템플릿 6종 반영 완료, 기존 실샘플은 구조상 통과 단계, `workflow`는 `/projects` 실제 실행 경로까지 재검증 완료
+기준일: 2026-03-30  
+상태: 판단 템플릿 6종 + 표현 polish layer + 회계 MVP 확장 + 보고서 목적 자동 생성 + 회계 상단 narrative 분리 + legacy 회계 payload 호환 반영 완료, 기존 실샘플은 구조상 통과 단계, `/projects` 실제 실행 경로 회귀 통과
+
+상태 해석 메모 (2026-04-03)
+
+- 이 문서는 상태/샘플/회귀 기록 문서다.
+- 현재 엔진 구조와 authoritative payload source of truth는
+  [`refactoring_support_engine.md`](/C:/Users/Hyein/ClaudeAI/AI_Project/refactoring_support_engine.md)다.
+- 현재 canonical judgment template registry는
+  [`mellow_link/services/refactoring_support_engine/decision_catalog.py`](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/services/refactoring_support_engine/decision_catalog.py)다.
+- [`mellow_link/modules/rebuild_assistant/judgment_templates.py`](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/modules/rebuild_assistant/judgment_templates.py)는 compatibility re-export만 유지한다.
+- 현재 `decision_summary.decisions[*]`에는 `score_breakdown`이 함께 포함되며, `priority_score`의 구성요소를 설명 가능하게 유지한다.
 
 ## 1. 현재 결론
 
@@ -48,6 +58,126 @@
 
 관련 contract: [REBUILD_ASSISTANT_POLISH_LAYER_CONTRACT_2026-03-29.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/REBUILD_ASSISTANT_POLISH_LAYER_CONTRACT_2026-03-29.md)
 
+2026-03-30 기준으로 `structured_result` 위에 `extensions.accounting` 확장을 추가했다. 이 확장은 기존 판단을 바꾸지 않고 아래를 병렬로 제공한다.
+
+- `input_validation`
+- `calculation_status`
+- `accounting_analysis`
+- `fx_calculation`
+- `voucher_review`
+- `summary_sentence`
+
+관련 contract: [REBUILD_ASSISTANT_ACCOUNTING_MVP_CONTRACT_2026-03-30.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/REBUILD_ASSISTANT_ACCOUNTING_MVP_CONTRACT_2026-03-30.md)
+
+같은 날 `structured_result` 상단에는 보고서 목적 필드를 추가했다.
+
+- `report_purpose`
+- `report_scope`
+- `report_questions`
+
+목적 생성은 회계 확장을 우선으로 하며, 회계 확장이 없으면 `primary_judgment` 기준 목적을 생성한다. 사용자 질문은 목적 생성의 참고 입력으로만 사용하고, 질문 원문을 문서 맨 위에 그대로 노출하지 않는다. 또한 `report_purpose`는 문서의 의도를 설명하고 `summary_sentence`는 실행 결과를 설명하도록 분리했다.
+
+결과 패키지와 렌더 상단도 아래 순서로 고정했다.
+
+1. `보고서 목적`
+2. `핵심 결론`
+3. `분석 범위`
+4. `검증 질문`
+
+관련 contract: [REBUILD_ASSISTANT_REPORT_PURPOSE_CONTRACT_2026-03-30.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/REBUILD_ASSISTANT_REPORT_PURPOSE_CONTRACT_2026-03-30.md)
+
+같은 날 회계 확장이 있는 문서는 상단 narrative도 일반 현대화 템플릿에서 분리했다.
+
+- 성공형
+  - 계산 방식 / 계산 금액 / 전표 검토 상태 중심
+- 실패형
+  - 계산 불가 / 누락 입력 / 재실행 조건 중심
+- 경고형
+  - 계산 가능 / warning 존재 / 검토용 초안 중심
+
+따라서 회계 문서의 `Executive Summary`, `핵심 판단`, `추천안`, `실행 계획`은 더 이상 `검증 규칙 중심 모듈형 구조`, `단계적 분리`, `화면 재구성` 같은 일반 현대화 서사를 사용하지 않는다. 회계 문서는 `입력 확인 -> 계산 검토 -> 전표 검토 -> 기준 확정` 흐름으로 읽히도록 고정했다.
+
+관련 contract:
+
+- [REBUILD_ASSISTANT_ACCOUNTING_MVP_CONTRACT_2026-03-30.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/REBUILD_ASSISTANT_ACCOUNTING_MVP_CONTRACT_2026-03-30.md)
+- [REBUILD_ASSISTANT_REFINEMENT_OUTPUT_CONTRACT_2026-03-30.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/REBUILD_ASSISTANT_REFINEMENT_OUTPUT_CONTRACT_2026-03-30.md)
+
+추가로 회계 샘플 `01_success_full`, `02_failure_missing_exchange_rates`, `03_warning_lenient_policy`에서 쓰던 구형 payload shape도 호환 처리했다.
+
+- `vouchers`
+  - legacy top-level `debit` / `credit` / `source_tx_ids` 입력 허용
+- `account_mappings`
+  - legacy `account` / `type` 입력 허용
+
+이 보강으로 파일명은 success/warning인데 실제 결과는 schema failure로 떨어지던 문제가 해소됐다. 동시에 회계 실패/경고 사유를 상단 narrative에 끼워 넣을 때 `입니다. 입니다.`, `습니다.와` 같은 문장 깨짐이 생기지 않도록 failure/warning label을 분리했다.
+
+같은 날 결과 패키지 UI도 보강했다. `/projects/{id}/result` HTML은 `polish_bundle`를 JSON으로 함께 받고, 회계 확장 섹션에 대해 아래 선택 렌더링을 지원한다.
+
+- `audience`
+  - `developer`
+  - `manager`
+  - `client`
+- `delivery mode`
+  - `internal_review`
+  - `client_report`
+  - `proposal_appendix`
+
+원문 회계 결과와 선택된 표현 변형본은 병렬로 노출되며, `structured_result` 원문과 `extensions.accounting` 사실관계는 변경하지 않는다.
+
+또한 `voucher_review`에서 `vouchers` 또는 `account_mappings`가 누락된 경우, 이를 단순 실패가 아니라 `input_missing` 상태로 구분하고 UI에서는 `차변/대변 균형`, `정책 일치`를 `검토 불가`로 표시하도록 보정했다. 이 경우 계산 엔진 오류가 아니라 입력 부족임을 바로 구분할 수 있다.
+
+추가로 결과 페이지 HTML 템플릿의 회계 카드/라벨도 humanize 했다.
+
+- `Accounting Extension` -> `회계 확장`
+- `Audience` -> `열람 대상`
+- `Delivery` -> `납품 톤`
+- `Polish Warnings` -> `표현 보정 경고`
+- 회계 표현 변형본 섹션 제목은 내부 `section_key` 대신 사용자 제목으로 매핑
+  - `accounting_summary` -> `회계 계산 요약`
+  - `accounting_status` -> `계산 가능 여부`
+  - `accounting_analysis` -> `회계 방식 분석`
+  - `fx_calculation` -> `외화 계산 결과`
+  - `voucher_review` -> `전표 검토 결과`
+- 회계 raw 카드의 내부 키 직접 노출 제거
+  - `can_calculate` -> `계산 가능 여부`
+  - `reason` -> `판단 근거`
+  - `blocking_issue` -> `차단 사유`
+  - `missing_required_inputs` -> `누락 입력`
+
+같은 날 결과 패키지 Markdown/JSON 조립 경로도 보정했다. success moving average 샘플 기준으로 아래 문제가 재발하지 않도록 회귀를 추가했다.
+
+- `핵심 업무 규칙` / `유지해야 할 계약`에 `ready` placeholder 직접 노출 금지
+- `decision_items` 중복 문장 제거
+- 회계 결과의 영문 내부 값 직접 노출 금지
+  - `MOVING_AVERAGE` -> `이동평균법`
+  - `all required inputs present` -> `필수 입력이 모두 제공되었습니다.`
+  - `voucher_review requires vouchers and account_mappings` -> `전표 데이터와 계정 매핑이 없어 전표 검토를 수행할 수 없습니다.`
+- accounting success 샘플의 도메인 앵커를 일반 `account 기능`이 아니라 `회계 기능`으로 고정
+
+관련 contract: [REBUILD_ASSISTANT_POLISH_UI_RENDERING_CONTRACT_2026-03-30.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/REBUILD_ASSISTANT_POLISH_UI_RENDERING_CONTRACT_2026-03-30.md)
+
+같은 날 refinement 단계 보정도 추가했다. 이 보정의 목적은 판단 구조를 바꾸지 않고 결과 패키지의 문서 축과 완성도를 맞추는 것이다.
+
+- `report_purpose`는 더 이상 기계적으로 `primary_judgment`만 따르지 않고, 사용자가 실제로 읽는 narrative 축을 따르는 `selected_narrative_judgment`를 기준으로 생성한다.
+  - `python_claim_adjustment_case_01` -> `access_control` 목적
+  - `amount_limit` -> `amount_threshold` 목적
+- 한 문서 안에서 상단/본문 패턴이 섞이지 않도록 narrative 축을 단일화했다.
+  - `rca_exception_case_01`은 `workflow` 상단/본문/계약을 같은 축으로 유지한다.
+- 회계 문서는 상단 narrative뿐 아니라 하단 섹션도 회계 전용 템플릿으로 분리했다.
+  - `grounded_business_rules`
+  - `core_business_rules`
+  - `retained_contracts`
+  - `recomposition_draft`
+  - `recommended_directions`
+- 공통 문장 조합기도 보강했다.
+  - `누락로` -> `누락으로`
+  - `금지을` -> `금지를`
+  - `규칙야 합니다` -> `규칙이어야 합니다`
+  - `이동평균법로` -> `이동평균법으로`
+  - `입니다. 입니다.` -> `입니다.`
+
+관련 contract: [REBUILD_ASSISTANT_REFINEMENT_OUTPUT_CONTRACT_2026-03-30.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/REBUILD_ASSISTANT_REFINEMENT_OUTPUT_CONTRACT_2026-03-30.md)
+
 ## 2. 이번 라운드에서 정리된 항목
 
 ### 2.1 결과 패키지 구조
@@ -68,6 +198,16 @@
 12. 전환 초안
 13. 부록
 
+내부 authoritative payload는 아래 5개 block을 기준으로 유지한다.
+
+- `structure_snapshot`
+- `diagnosis_report`
+- `decision_summary`
+- `improvement_plan_bundle`
+- `appendix`
+
+Flat 결과와 UI 문장은 위 authoritative block에서 파생한다.
+
 ### 2.2 출력 품질
 
 아래 항목은 구조적으로 정리됐다.
@@ -80,10 +220,10 @@
   - `REDACTED_PATH`
   - `SAFE STRUCTURE`
   - `TBL_001`, `COL_001` 등 익명 식별자 직접 노출
-- 결과 문장 결정형 통일
-  - `~하는 것이 필요합니다`
-  - `~를 우선 적용해야 합니다`
-  - `~를 유지해야 합니다`
+- 결과 문장 강도 분리
+  - 핵심 결론은 도메인 축을 유지한다.
+  - 판단 근거, selection reason, 보조 요약 문장은 필요 이상 확정형으로 밀지 않는다.
+  - `왜 이 판단인지` 설명 가능한 방향으로 `score_breakdown`과 함께 읽히도록 유지한다.
 
 ### 2.3 판단 템플릿 구조
 
@@ -178,7 +318,7 @@
 
 전체 회귀 결과:
 
-- `136 passed`
+- `159 passed`
 
 ### 2.9 패턴 후보 선택 경로 고정
 
@@ -252,6 +392,42 @@
   - `proposal_appendix`
 
 현재 구현은 deterministic v1이며, optional AI rewrite hook은 설계만 열어두고 기본값 `OFF`로 둔다.
+
+### 2.12 회계 MVP 확장 추가
+
+2026-03-30 기준으로 기존 `rebuild_assistant` 판단 엔진 위에 전산회계 MVP 확장을 추가했다.
+
+- 입력
+  - `accounting_payload.json`
+  - `transactions`
+  - `exchange_rates`
+  - `policies`
+  - `vouchers`
+  - `account_mappings`
+  - `strict`
+- 계산 가능 여부
+  - `calculation_status.can_calculate`
+  - `reason`
+  - `blocking_issue`
+- 계산 기능
+  - `accounting_analysis`
+  - `fx_calculation`
+  - `voucher_review`
+- 실패 정책
+  - 필수 입력 누락 시 계산 중단
+  - 실패형 `summary_sentence` 강제 생성
+- strict 모드
+  - `strict=True` 기본값
+  - ambiguity / inferred-only 핵심 계산 실패
+  - `strict=False`는 warning 후 가능한 범위만 계속
+
+현재 acceptance 기준 계산은 아래를 통과한다.
+
+- `MOVING_AVERAGE = 22500`
+- `FIFO = 25000`
+- `missing exchange_rates -> can_calculate = false`
+- `summary_sentence` 성공/실패 문장 동기화
+- result package / polish bundle 회계 섹션 생성
 
 ## 3. workflow 실문서 검증 결과
 
@@ -407,7 +583,7 @@ status 계약은 결과 상태만 남기지 않고 입력 상태와 결과 상�
 
 ```text
 pytest -q mellow_link/tests/test_phase1_run_flow.py mellow_link/tests/test_module_registry_and_runs.py mellow_link/tests/test_anonymization_mvp.py
-122 passed
+159 passed
 ```
 
 현재 회귀는 아래를 포함한다.
@@ -423,6 +599,16 @@ pytest -q mellow_link/tests/test_phase1_run_flow.py mellow_link/tests/test_modul
 - amount_threshold verification 비검증형 문장 회귀
 - query_filter / amount_threshold 중복 토큰 및 조사 오류 회귀
 - amount_threshold 결과 문자열 전체 `검증` 비노출 회귀
+- accounting 입력 책임 / 계산 가능 여부 / 실패형 summary 회귀
+- report purpose 자동 생성 / 회계 목적 우선 / 질문 원문 비노출 회귀
+- accounting 상단 narrative 성공 / 실패 / 경고형 회귀
+- accounting invalid schema failure humanize 회귀
+- report purpose와 visible narrative 축 정렬 회귀
+- `rca_exception_case_01` 단일 패턴 narrative 회귀
+- accounting success 하단 섹션 회계 전용 분리 회귀
+- 공통 조사/서술 조합 오류 회귀
+- accounting 입력 책임 / 계산 가능 여부 / 실패형 summary 회귀
+- report purpose 자동 생성 / 회계 목적 우선 / 질문 원문 비노출 회귀
 
 ## 6. 남은 작업
 

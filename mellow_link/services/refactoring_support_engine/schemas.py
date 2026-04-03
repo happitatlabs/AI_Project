@@ -1,0 +1,302 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field, field_validator
+
+from mellow_link.modules.rebuild_assistant.schemas import (
+    AppliedJudgmentTemplate,
+    DesignOption,
+    DecisionItem,
+    ExtractedRulesEnvelope,
+    ExecutionPlanWeek,
+    GroundedBusinessRule,
+    LayeredListResult,
+    MissingContextItem,
+    PatternCandidate,
+    PrioritySplitItem,
+    RecommendedOption,
+    RetainedContract,
+    VerificationItem,
+)
+from mellow_link.services.anonymization.schemas import SafeAnalysisBundle, StructureArtifact
+
+
+def stable_hash(*parts: object) -> str:
+    payload = json.dumps(parts, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+
+
+def make_stable_id(prefix: str, *parts: object) -> str:
+    return f"{prefix}-{stable_hash(prefix, *parts)[:10].upper()}"
+
+
+def normalize_fingerprint_text(text: str) -> str:
+    normalized = (text or "").lower()
+    normalized = re.sub(r'"(?:\\.|[^"])*"', '"STR"', normalized)
+    normalized = re.sub(r"'(?:\\.|[^'])*'", "'STR'", normalized)
+    normalized = re.sub(r"\b\d+(?:\.\d+)?\b", "NUM", normalized)
+    normalized = re.sub(r"\s*([=!<>]+|\(|\)|,|\+|-|\*|/)\s*", r" \1 ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip()
+
+
+class AssetInventoryItem(BaseModel):
+    asset_id: str
+    name: str
+    asset_type: str
+    size: int = 0
+    language: str = ""
+    kind_hint: str = ""
+
+
+class SourceBlock(BaseModel):
+    block_id: str
+    asset_id: str
+    asset_name: str
+    asset_type: str
+    content: str
+    fingerprint: str = ""
+
+    @field_validator("fingerprint", mode="before")
+    @classmethod
+    def default_fingerprint(cls, value: str, info) -> str:
+        if value:
+            return value
+        content = ""
+        if isinstance(info.data, dict):
+            content = str(info.data.get("content") or "")
+        return stable_hash(normalize_fingerprint_text(content))
+
+
+class RefactoringAnalysisInput(BaseModel):
+    analysis_scope: Literal["feature_slice"] = "feature_slice"
+    goal: str
+    constraints: list[str] = Field(default_factory=list)
+    safe_bundle_id: str = ""
+    safe_bundle: SafeAnalysisBundle | None = None
+    asset_inventory: list[AssetInventoryItem] = Field(default_factory=list)
+    source_blocks: list[SourceBlock] = Field(default_factory=list)
+    seed_structures: list[StructureArtifact] = Field(default_factory=list)
+    missing_context: list[MissingContextItem] = Field(default_factory=list)
+    input_fingerprint: str = ""
+
+    @field_validator("input_fingerprint", mode="before")
+    @classmethod
+    def build_fingerprint(cls, value: str, info) -> str:
+        if value:
+            return value
+        if not isinstance(info.data, dict):
+            return ""
+        return stable_hash(
+            info.data.get("goal", ""),
+            info.data.get("constraints", []),
+            [
+                {
+                    "asset_id": item.asset_id,
+                    "name": item.name,
+                    "asset_type": item.asset_type,
+                    "fingerprint": stable_hash(item.name, item.asset_type),
+                }
+                for item in info.data.get("asset_inventory", [])
+            ],
+            [item.fingerprint for item in info.data.get("source_blocks", [])],
+            [
+                {
+                    "asset_id": item.asset_id,
+                    "node_count": len(item.nodes),
+                    "edge_count": len(item.edges),
+                }
+                for item in info.data.get("seed_structures", [])
+            ],
+        )
+
+
+class ComponentNode(BaseModel):
+    component_id: str
+    name: str
+    component_type: str
+    layer: str
+    asset_ids: list[str] = Field(default_factory=list)
+    responsibility_families: list[str] = Field(default_factory=list)
+
+
+class DependencyEdge(BaseModel):
+    from_component: str
+    to_component: str
+    dependency_type: str
+
+
+class LayerAssignment(BaseModel):
+    component_id: str
+    layer: str
+
+
+class StructuralHotspot(BaseModel):
+    component_id: str
+    reasons: list[str] = Field(default_factory=list)
+    score: int = 0
+
+
+class CoverageSummary(BaseModel):
+    asset_count: int = 0
+    source_block_count: int = 0
+    component_count: int = 0
+    slice_count: int = 0
+    missing_context_count: int = 0
+
+
+class FunctionSlice(BaseModel):
+    slice_id: str
+    name: str
+    entry_points: list[str] = Field(default_factory=list)
+    related_components: list[str] = Field(default_factory=list)
+    related_tables: list[str] = Field(default_factory=list)
+    business_rules: list[str] = Field(default_factory=list)
+    dependencies: list[str] = Field(default_factory=list)
+
+
+class StructureSnapshot(BaseModel):
+    feature_slices: list[FunctionSlice] = Field(default_factory=list)
+    components: list[ComponentNode] = Field(default_factory=list)
+    dependencies: list[DependencyEdge] = Field(default_factory=list)
+    hotspots: list[StructuralHotspot] = Field(default_factory=list)
+    layer_map: list[LayerAssignment] = Field(default_factory=list)
+    coverage_summary: CoverageSummary = Field(default_factory=CoverageSummary)
+
+
+class StructureAnalysisResult(BaseModel):
+    analysis_input: RefactoringAnalysisInput
+    structure_snapshot: StructureSnapshot
+    seed_structures: list[StructureArtifact] = Field(default_factory=list)
+    component_text_map: dict[str, str] = Field(default_factory=dict)
+    component_asset_map: dict[str, str] = Field(default_factory=dict)
+    component_layer_map: dict[str, str] = Field(default_factory=dict)
+    component_responsibility_map: dict[str, list[str]] = Field(default_factory=dict)
+    component_name_map: dict[str, str] = Field(default_factory=dict)
+    slice_component_map: dict[str, list[str]] = Field(default_factory=dict)
+    table_usage_map: dict[str, list[str]] = Field(default_factory=dict)
+
+
+class EvidenceLink(BaseModel):
+    evidence_id: str
+    asset_id: str
+    asset_name: str
+    asset_type: str
+    locator: str
+    excerpt: str
+    fingerprint: str
+
+
+class StructuralIssue(BaseModel):
+    issue_id: str
+    detector_id: str
+    category: str
+    severity: int
+    blast_radius: int
+    effort: int
+    summary: str
+    affected_component_ids: list[str] = Field(default_factory=list)
+    affected_slice_ids: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+    confidence: float = 0.0
+
+
+class DetectorStat(BaseModel):
+    detector_id: str
+    issue_count: int = 0
+    evidence_count: int = 0
+
+
+class DiagnosisReport(BaseModel):
+    issues: list[StructuralIssue] = Field(default_factory=list)
+    coverage_summary: CoverageSummary = Field(default_factory=CoverageSummary)
+    detector_stats: list[DetectorStat] = Field(default_factory=list)
+
+
+class DiagnosisArtifacts(BaseModel):
+    diagnosis_report: DiagnosisReport = Field(default_factory=DiagnosisReport)
+    evidence_index: list[EvidenceLink] = Field(default_factory=list)
+    extracted_rules: ExtractedRulesEnvelope = Field(default_factory=ExtractedRulesEnvelope)
+    missing_context_details: list[MissingContextItem] = Field(default_factory=list)
+    core_business_rules: list[str] = Field(default_factory=list)
+    grounded_business_rules: list[GroundedBusinessRule] = Field(default_factory=list)
+    retained_contracts: list[RetainedContract] = Field(default_factory=list)
+    analysis_summary: list[str] = Field(default_factory=list)
+
+
+class DecisionRecord(BaseModel):
+    decision_id: str
+    issue_ids: list[str] = Field(default_factory=list)
+    decision_type: Literal["refactor", "redesign", "migration_consideration"]
+    target_component_ids: list[str] = Field(default_factory=list)
+    priority_score: int = 0
+    score_breakdown: dict[str, int] = Field(default_factory=dict)
+    rationale: str
+    confidence: float = 0.0
+    evidence_ids: list[str] = Field(default_factory=list)
+
+
+class DecisionSummary(BaseModel):
+    decisions: list[DecisionRecord] = Field(default_factory=list)
+    recommended_strategy: str = ""
+    priority_queue: list[str] = Field(default_factory=list)
+
+
+class DecisionArtifacts(BaseModel):
+    decision_summary: DecisionSummary = Field(default_factory=DecisionSummary)
+    applied_templates: list[AppliedJudgmentTemplate] = Field(default_factory=list)
+    pattern_candidates: list[PatternCandidate] = Field(default_factory=list)
+    primary_judgment: str = ""
+    primary_judgment_reason: str = ""
+    selected_narrative_judgment: str = ""
+    decision_items: list[DecisionItem] = Field(default_factory=list)
+
+
+class RiskCheckpoint(BaseModel):
+    checkpoint_id: str
+    title: str
+    description: str
+    decision_ids: list[str] = Field(default_factory=list)
+
+
+class ExecutionStage(BaseModel):
+    stage_id: str
+    title: str
+    tasks: list[str] = Field(default_factory=list)
+    decision_ids: list[str] = Field(default_factory=list)
+    verification_checkpoint_ids: list[str] = Field(default_factory=list)
+    risk_ids: list[str] = Field(default_factory=list)
+    depends_on: list[str] = Field(default_factory=list)
+
+
+class ImprovementPlanBundle(BaseModel):
+    design_options: list[dict[str, Any]] = Field(default_factory=list)
+    recommended_option: dict[str, Any] | None = None
+    execution_stages: list[ExecutionStage] = Field(default_factory=list)
+    risk_checkpoints: list[RiskCheckpoint] = Field(default_factory=list)
+
+
+class ImprovementArtifacts(BaseModel):
+    improvement_plan_bundle: ImprovementPlanBundle = Field(default_factory=ImprovementPlanBundle)
+    priority_split_items: list[PrioritySplitItem] = Field(default_factory=list)
+    verification_checkpoints: list[VerificationItem] = Field(default_factory=list)
+    design_options: list[DesignOption] = Field(default_factory=list)
+    recommended_option: RecommendedOption | None = None
+    execution_plan: list[ExecutionPlanWeek] = Field(default_factory=list)
+    rebuild_strategy: list[str] = Field(default_factory=list)
+    layer_reconstruction: LayeredListResult = Field(default_factory=LayeredListResult)
+    recomposition_draft: LayeredListResult = Field(default_factory=LayeredListResult)
+    risks: list[str] = Field(default_factory=list)
+    recommended_directions: list[str] = Field(default_factory=list)
+
+
+class StructuredRefactoringResult(BaseModel):
+    structure_snapshot: StructureSnapshot = Field(default_factory=StructureSnapshot)
+    diagnosis_report: DiagnosisReport = Field(default_factory=DiagnosisReport)
+    decision_summary: DecisionSummary = Field(default_factory=DecisionSummary)
+    improvement_plan_bundle: ImprovementPlanBundle = Field(default_factory=ImprovementPlanBundle)
+    appendix: dict[str, Any] = Field(default_factory=dict)

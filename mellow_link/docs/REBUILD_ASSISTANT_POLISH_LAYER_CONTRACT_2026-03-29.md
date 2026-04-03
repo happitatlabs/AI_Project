@@ -4,6 +4,13 @@
 상태: Contract  
 대상: `mellow_link/modules/rebuild_assistant`
 
+2026-04-03 정합성 메모:
+
+- 현재 엔진 구조와 authoritative payload 기준 문서는
+  [`refactoring_support_engine.md`](/C:/Users/Hyein/ClaudeAI/AI_Project/refactoring_support_engine.md)다.
+- 이 문서는 `structured_result` 이후 `polish_bundle` 표현 후처리 계약만 다룬다.
+- 구조 분석, 진단, 의사결정, 개선안 생성 규칙은 이 문서가 아니라 엔진 기준 문서를 따른다.
+
 ## 1. 목적
 
 안정화된 `structured_result` 위에 표현 전용 후처리 레이어를 추가한다.

@@ -4,6 +4,15 @@
 상태: Contract  
 대상: `rebuild_assistant` 판단 템플릿 후보 수집 / 최종 선택 / 디버깅 경로
 
+2026-04-03 정합성 메모:
+
+- 현재 엔진 구조와 authoritative payload 기준 문서는
+  [`refactoring_support_engine.md`](/C:/Users/Hyein/ClaudeAI/AI_Project/refactoring_support_engine.md)다.
+- 판단 템플릿 canonical source는
+  [`mellow_link/services/refactoring_support_engine/decision_catalog.py`](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/services/refactoring_support_engine/decision_catalog.py)다.
+- [`mellow_link/modules/rebuild_assistant/judgment_templates.py`](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/modules/rebuild_assistant/judgment_templates.py)는 compatibility re-export만 유지한다.
+- 이 문서는 패턴 선택 계약과 디버깅 기준을 설명하는 보조 문서다.
+
 ## 1. 목적
 
 `rebuild_assistant`의 판단 템플릿 선택을 단순 점수 최대값이 아니라 후보 수집 + 조건 기반 선택 구조로 고정한다.

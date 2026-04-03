@@ -93,8 +93,11 @@ def truncate_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     # 크기 초과 시 긴 필드 자르기
     truncated = payload.copy()
     preserve_structured_result = isinstance(truncated.get("structured_result"), dict)
+    preserve_authoritative_payload = isinstance(truncated.get("authoritative_payload"), dict)
     for key, value in truncated.items():
         if key == "structured_result" and preserve_structured_result:
+            continue
+        if key == "authoritative_payload" and preserve_authoritative_payload:
             continue
         if isinstance(value, str) and len(value) > 500:
             truncated[key] = value[:500] + "[TRUNCATED]"
@@ -110,6 +113,8 @@ def truncate_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             compact = {}
             for key, value in truncated.items():
                 if key == "structured_result":
+                    compact[key] = value
+                elif key == "authoritative_payload" and preserve_authoritative_payload:
                     compact[key] = value
                 elif key in {"success", "module_id", "run_kind", "primary_feature_mode", "secondary_feature_mode", "confidence", "needs_more_input", "scope_limited"}:
                     compact[key] = value

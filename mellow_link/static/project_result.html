@@ -20,7 +20,7 @@
             <div>
                 <p class="text-xs uppercase tracking-[0.28em] text-cyan-300/80">Result Package</p>
                 <h1 class="mt-2 text-3xl font-semibold">결과 패키지</h1>
-                <p class="mt-2 text-sm text-slate-400">컨설턴트가 회의에서 바로 판단할 수 있도록 근거, 결정 항목, 추천안, 실행 계획을 한 화면에 제공합니다.</p>
+                <p class="mt-2 text-sm text-slate-400">분석 목표, 판단 근거, 추천안, 우선순위, 실행 준비 계획을 한 화면에 제공해 컨설턴트가 읽고 방향을 결정할 수 있도록 돕습니다.</p>
             </div>
             <nav class="flex flex-wrap gap-2 text-sm">
                 <a id="workspaceLink" href="#" class="rounded-full border border-white/10 px-4 py-2 hover:bg-white/5">워크스페이스</a>
@@ -41,6 +41,28 @@
                 <p class="text-xs uppercase tracking-[0.24em] text-slate-500">프로젝트</p>
                 <h2 id="projectTitle" class="mt-3 text-3xl font-semibold">-</h2>
                 <p id="projectMeta" class="mt-3 text-sm text-slate-400">-</p>
+            </section>
+
+            <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                <p class="text-xs uppercase tracking-[0.24em] text-slate-500">읽는 방법</p>
+                <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                        <div class="text-xs uppercase tracking-[0.2em] text-slate-500">분석 목표</div>
+                        <div class="mt-3 text-sm leading-7 text-slate-200">레거시 기능 또는 화면 1개에 대해 무엇을 유지하고 무엇을 바꿔야 하는지 판단합니다.</div>
+                    </div>
+                    <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                        <div class="text-xs uppercase tracking-[0.2em] text-slate-500">읽는 순서</div>
+                        <div class="mt-3 text-sm leading-7 text-slate-200">핵심 결론 -> 추천안 -> 분리 우선순위 -> 설계 선택지 비교 -> 실행 계획 순서로 확인하면 됩니다.</div>
+                    </div>
+                    <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                        <div class="text-xs uppercase tracking-[0.2em] text-slate-500">회의에서 결정할 것</div>
+                        <div class="mt-3 text-sm leading-7 text-slate-200">어떤 방향을 채택할지, 무엇부터 바꿀지, 추가 자료가 필요한지, 다음 단계 검토를 진행할지를 결정합니다.</div>
+                    </div>
+                    <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                        <div class="text-xs uppercase tracking-[0.2em] text-slate-500">근거 및 추적</div>
+                        <div class="mt-3 text-sm leading-7 text-slate-200">핵심 업무 규칙 카드의 근거 자산, 부록의 provenance, 입력 자산 목록으로 판단 근거를 추적할 수 있습니다.</div>
+                    </div>
+                </div>
             </section>
 
             <section class="print-card rounded-[2rem] border border-cyan-300/20 bg-cyan-500/5 p-6">
@@ -93,7 +115,47 @@
 
             <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
                 <p class="text-xs uppercase tracking-[0.24em] text-slate-500">실행 계획</p>
+                <p class="mt-2 text-sm leading-7 text-slate-400">코드 자동 변경이나 배포가 아니라 적용 전 검토를 위한 실행 준비 계획입니다.</p>
                 <div id="planBox" class="mt-4 space-y-4 text-sm text-slate-300"></div>
+            </section>
+
+            <section id="accountingSection" class="print-card hidden rounded-[2rem] border border-emerald-300/20 bg-emerald-500/5 p-6">
+                <div class="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                        <p class="text-xs uppercase tracking-[0.24em] text-emerald-200">회계 확장</p>
+                        <h3 class="mt-3 text-2xl font-semibold text-slate-100">회계 결과와 표현 변형본</h3>
+                        <p class="mt-2 text-sm text-slate-300">원문 계산 결과는 유지하고, 열람 대상과 납품 톤에 따른 회계 표현 변형본을 병렬로 제공합니다.</p>
+                    </div>
+                    <div class="no-print flex flex-wrap gap-3">
+                        <label class="block text-xs text-slate-400">
+                            <span class="mb-2 block uppercase tracking-[0.18em] text-slate-500">열람 대상</span>
+                            <select id="polishAudienceSelect" class="rounded-2xl border border-white/10 bg-slate-950/80 px-3 py-2 text-sm text-slate-100">
+                                <option value="developer">개발자</option>
+                                <option value="manager">관리자</option>
+                                <option value="client">고객</option>
+                            </select>
+                        </label>
+                        <label class="block text-xs text-slate-400">
+                            <span class="mb-2 block uppercase tracking-[0.18em] text-slate-500">납품 톤</span>
+                            <select id="polishDeliverySelect" class="rounded-2xl border border-white/10 bg-slate-950/80 px-3 py-2 text-sm text-slate-100">
+                                <option value="internal_review">내부 검토용</option>
+                                <option value="client_report">고객 보고용</option>
+                                <option value="proposal_appendix">제안 부록용</option>
+                            </select>
+                        </label>
+                    </div>
+                </div>
+                <div class="mt-6 grid gap-6 xl:grid-cols-2">
+                    <div>
+                        <p class="text-xs uppercase tracking-[0.24em] text-slate-500">원문 회계 결과</p>
+                        <div id="accountingRawBox" class="mt-4 space-y-4 text-sm text-slate-300"></div>
+                    </div>
+                    <div>
+                        <p class="text-xs uppercase tracking-[0.24em] text-slate-500">선택된 표현 변형본</p>
+                        <div id="accountingPolishBox" class="mt-4 space-y-4 text-sm text-slate-300"></div>
+                    </div>
+                </div>
+                <div id="accountingWarningsBox" class="mt-4 hidden rounded-2xl border border-amber-300/20 bg-amber-500/10 px-4 py-4 text-sm text-amber-100"></div>
             </section>
 
             <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
@@ -120,6 +182,17 @@
 
     <script>
         const projectId = window.location.pathname.split('/')[2] || '';
+        const accountingSectionKeys = ['accounting_summary', 'accounting_status', 'accounting_analysis', 'fx_calculation', 'voucher_review'];
+        const accountingSectionTitles = {
+            accounting_summary: '회계 계산 요약',
+            accounting_status: '계산 가능 여부',
+            accounting_analysis: '회계 방식 분석',
+            fx_calculation: '외화 계산 결과',
+            voucher_review: '전표 검토 결과'
+        };
+        const audienceLabels = { developer: '개발자 요약', manager: '관리자 요약', client: '고객 요약' };
+        const deliveryLabels = { internal_review: '내부 검토 톤', client_report: '고객 보고 톤', proposal_appendix: '제안 부록 톤' };
+        let currentPackage = null;
 
         function authHeaders() {
             const token = localStorage.getItem('authToken') || localStorage.getItem('auth_token') || '';
@@ -309,6 +382,162 @@
             }).join('');
         }
 
+        function renderTextBlock(text, emptyMessage) {
+            const normalized = String(text == null ? '' : text).trim();
+            if (!normalized) {
+                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + escapeHtml(emptyMessage || '데이터 없음') + '</div>';
+            }
+            const lines = normalized.split(/\r?\n+/).filter(function (line) { return line.trim(); });
+            return '<div class="space-y-2">' + lines.map(function (line) {
+                return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm leading-7 text-slate-200">' + escapeHtml(line) + '</div>';
+            }).join('') + '</div>';
+        }
+
+        function sectionByKey(bundle, key) {
+            const sections = ((bundle || {}).polished_sections || []);
+            return sections.find(function (section) { return section.section_key === key; }) || null;
+        }
+
+        function accountingPolishSections(bundle) {
+            const sections = ((bundle || {}).polished_sections || []);
+            return sections.filter(function (section) {
+                return accountingSectionKeys.includes(section.section_key);
+            });
+        }
+
+        function humanizeAccountingSectionTitle(section) {
+            if (!section) return '-';
+            return accountingSectionTitles[section.section_key] || section.title || section.section_key || '-';
+        }
+
+        function humanizeAccountingMissingInput(key) {
+            const mapping = {
+                transactions: '거래 데이터',
+                exchange_rates: '환율 데이터',
+                policies: '회계 정책 데이터',
+                vouchers: '전표 데이터',
+                account_mappings: '계정 매핑'
+            };
+            return mapping[key] || key || '-';
+        }
+
+        function renderAccountingRaw(accounting) {
+            if (!accounting || !Object.keys(accounting).length) {
+                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">회계 확장 결과가 없습니다.</div>';
+            }
+            const blocks = [];
+            if (accounting.summary_sentence) {
+                blocks.push('<div class="rounded-3xl border border-emerald-300/20 bg-emerald-500/10 px-4 py-4"><div class="text-xs uppercase tracking-[0.2em] text-emerald-200">요약</div><div class="mt-3 text-base leading-8 text-slate-100">' + escapeHtml(accounting.summary_sentence) + '</div></div>');
+            }
+            if (accounting.calculation_status || accounting.input_validation) {
+                const statusLines = [];
+                const calcStatus = accounting.calculation_status || {};
+                const validation = accounting.input_validation || {};
+                if (Object.prototype.hasOwnProperty.call(calcStatus, 'can_calculate')) {
+                    statusLines.push('- 계산 가능 여부: ' + (calcStatus.can_calculate ? '가능' : '불가'));
+                }
+                if (calcStatus.reason) statusLines.push('- 판단 근거: ' + calcStatus.reason);
+                if (calcStatus.blocking_issue) statusLines.push('- 차단 사유: ' + calcStatus.blocking_issue);
+                if ((validation.missing_required_inputs || []).length) {
+                    statusLines.push('- 누락 입력: ' + validation.missing_required_inputs.map(humanizeAccountingMissingInput).join(', '));
+                }
+                blocks.push('<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">계산 가능 여부</div><div class="mt-3">' + renderTextBlock(statusLines.join('\n'), '계산 상태 정보가 없습니다.') + '</div></div>');
+            }
+            if (accounting.accounting_analysis) {
+                const analysisLines = [];
+                const analysis = accounting.accounting_analysis;
+                if ((analysis.candidate_methods || []).length) analysisLines.push('- 후보 방식: ' + analysis.candidate_methods.join(', '));
+                if (analysis.recommended_method) analysisLines.push('- 추천 방식: ' + analysis.recommended_method);
+                (analysis.reasons || []).forEach(function (reason) {
+                    analysisLines.push('- ' + (reason.message || '-'));
+                });
+                blocks.push('<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">회계 방식 분석</div><div class="mt-3">' + renderTextBlock(analysisLines.join('\n'), '회계 방식 분석 데이터가 없습니다.') + '</div></div>');
+            }
+            if (accounting.fx_calculation) {
+                const calcLines = [];
+                const fx = accounting.fx_calculation;
+                if (fx.method) calcLines.push('- 방식: ' + fx.method);
+                if (fx.realized_gain_loss_krw != null) calcLines.push('- 환차손익: ' + Number(fx.realized_gain_loss_krw).toLocaleString('ko-KR') + '원');
+                if (fx.failure_reason) calcLines.push('- 실패 사유: ' + fx.failure_reason);
+                (fx.detail_steps || []).forEach(function (step) {
+                    calcLines.push('- ' + (step.message || '-'));
+                });
+                blocks.push('<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">외화 계산 결과</div><div class="mt-3">' + renderTextBlock(calcLines.join('\n'), '외화 계산 결과가 없습니다.') + '</div></div>');
+            }
+            if (accounting.voucher_review) {
+                const reviewLines = [];
+                const review = accounting.voucher_review;
+                if (review.status) reviewLines.push('- 상태: ' + review.status);
+                if (review.balance_ok == null) reviewLines.push('- 차변/대변 균형: 검토 불가');
+                else if (Object.prototype.hasOwnProperty.call(review, 'balance_ok')) reviewLines.push('- 차변/대변 균형: ' + (review.balance_ok ? '예' : '아니오'));
+                if (review.policy_consistent == null) reviewLines.push('- 정책 일치: 검토 불가');
+                else if (Object.prototype.hasOwnProperty.call(review, 'policy_consistent')) reviewLines.push('- 정책 일치: ' + (review.policy_consistent ? '예' : '아니오'));
+                if (review.failure_reason) reviewLines.push('- 실패 사유: ' + review.failure_reason);
+                (review.review_points || []).forEach(function (item) { reviewLines.push('- ' + (item.message || '-')); });
+                (review.mismatches || []).forEach(function (item) { reviewLines.push('- 불일치: ' + (item.message || '-')); });
+                blocks.push('<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">전표 검토 결과</div><div class="mt-3">' + renderTextBlock(reviewLines.join('\n'), '전표 검토 결과가 없습니다.') + '</div></div>');
+            }
+            return blocks.join('');
+        }
+
+        function renderAccountingPolish(bundle) {
+            const sections = accountingPolishSections(bundle);
+            if (!sections.length) {
+                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">회계 표현 변형본이 없습니다.</div>';
+            }
+            const audienceMode = document.getElementById('polishAudienceSelect').value || (bundle && bundle.audience) || 'manager';
+            const deliveryMode = document.getElementById('polishDeliverySelect').value || (bundle && bundle.delivery_mode) || 'client_report';
+            return sections.map(function (section) {
+                const audienceText = (section.audience_variants || {})[audienceMode] || section.polished_text || section.original_text || '';
+                const deliveryText = (section.delivery_variants || {})[deliveryMode] || section.polished_text || section.original_text || '';
+                return '<div class="rounded-3xl border border-white/10 bg-black/20 px-4 py-4">' +
+                    '<div class="text-base font-medium text-slate-100">' + escapeHtml(humanizeAccountingSectionTitle(section)) + '</div>' +
+                    '<div class="mt-4 grid gap-4 xl:grid-cols-3">' +
+                        '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">문장 정제본</div><div class="mt-3">' + renderTextBlock(section.polished_text || section.original_text || '', '정제된 문장이 없습니다.') + '</div></div>' +
+                        '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">' + escapeHtml(audienceLabels[audienceMode] || audienceMode) + '</div><div class="mt-3">' + renderTextBlock(audienceText, '열람 대상 변형본이 없습니다.') + '</div></div>' +
+                        '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">' + escapeHtml(deliveryLabels[deliveryMode] || deliveryMode) + '</div><div class="mt-3">' + renderTextBlock(deliveryText, '납품 톤 변형본이 없습니다.') + '</div></div>' +
+                    '</div>' +
+                    '</div>';
+            }).join('');
+        }
+
+        function renderAccountingWarnings(bundle) {
+            const warningBox = document.getElementById('accountingWarningsBox');
+            const warnings = ((bundle || {}).warnings || []).filter(function (item) { return String(item || '').trim(); });
+            if (!warnings.length) {
+                warningBox.classList.add('hidden');
+                warningBox.innerHTML = '';
+                return;
+            }
+            warningBox.classList.remove('hidden');
+            warningBox.innerHTML = '<div class="text-xs uppercase tracking-[0.2em] text-amber-200">표현 보정 경고</div><div class="mt-3 space-y-2">' +
+                warnings.map(function (warning) {
+                    return '<div class="rounded-2xl border border-amber-300/20 bg-black/20 px-3 py-2">' + escapeHtml(warning) + '</div>';
+                }).join('') +
+                '</div>';
+        }
+
+        function renderAccountingSection(pkg) {
+            const accounting = pkg.accounting || {};
+            const bundle = pkg.polish_bundle || {};
+            const section = document.getElementById('accountingSection');
+            const rawBox = document.getElementById('accountingRawBox');
+            const polishBox = document.getElementById('accountingPolishBox');
+            const hasAccounting = Object.keys(accounting).length > 0;
+            const hasPolish = accountingPolishSections(bundle).length > 0;
+            if (!hasAccounting && !hasPolish) {
+                section.classList.add('hidden');
+                rawBox.innerHTML = '';
+                polishBox.innerHTML = '';
+                renderAccountingWarnings(null);
+                return;
+            }
+            section.classList.remove('hidden');
+            rawBox.innerHTML = renderAccountingRaw(accounting);
+            polishBox.innerHTML = renderAccountingPolish(bundle);
+            renderAccountingWarnings(bundle);
+        }
+
         function escapeHtml(value) {
             return String(value == null ? '' : value)
                 .replace(/&/g, '&amp;')
@@ -402,8 +631,11 @@
                 '</div>';
         }
 
-        function renderExecutiveSummary(summary) {
-            const executive = summary || {};
+        function renderExecutiveSummary(pkg) {
+            const executive = (pkg || {}).executive_summary || {};
+            const reportPurpose = String((pkg || {}).report_purpose || '').trim();
+            const reportScope = (pkg || {}).report_scope || [];
+            const reportQuestions = (pkg || {}).report_questions || [];
             if (!executive.title) {
                 return '<div class="rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-4 text-sm text-rose-200">executive_summary missing</div>';
             }
@@ -423,11 +655,17 @@
                     '<div class="text-lg font-semibold text-slate-100">' + escapeHtml(executive.title || '-') + '</div>' +
                     '<div class="rounded-full border border-cyan-300/20 bg-cyan-500/10 px-3 py-1 text-xs text-cyan-200">' + escapeHtml(executive.state || '-') + '</div>' +
                 '</div>' +
+                '<div class="mt-4 rounded-2xl border border-cyan-300/20 bg-cyan-500/5 px-4 py-4">' +
+                    '<div class="text-xs uppercase tracking-[0.2em] text-cyan-200">보고서 목적</div>' +
+                    '<div class="mt-3 text-sm leading-7 text-slate-100">' + escapeHtml(reportPurpose || '이 실행의 목적이 아직 정리되지 않았습니다.') + '</div>' +
+                '</div>' +
                 '<div class="mt-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
                     '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">핵심 결론</div>' +
                     '<div class="mt-3 text-sm leading-7 text-slate-100">' + escapeHtml(executive.core_message || '-') + '</div>' +
                 '</div>' +
                 '<div class="mt-4 grid gap-4 md:grid-cols-3">' +
+                    renderBulletGroup('분석 범위', reportScope || []) +
+                    renderBulletGroup('검증 질문', reportQuestions || []) +
                     renderBulletGroup('핵심 판단', executive.summary_lines || []) +
                     renderBulletGroup('이번 회의 결정 항목', executive.decision_focus || []) +
                     renderBulletGroup('주요 리스크', executive.key_risks || []) +
@@ -438,12 +676,13 @@
         }
 
         function renderPackage(pkg) {
+            currentPackage = pkg;
             document.getElementById('loadingState').classList.add('hidden');
             document.getElementById('resultView').classList.remove('hidden');
             document.getElementById('workspaceLink').href = '/projects/' + encodeURIComponent(projectId);
             document.getElementById('projectTitle').textContent = pkg.project.project_name || '프로젝트';
             document.getElementById('projectMeta').textContent = (pkg.project.client_name || '-') + ' · 상태 ' + (pkg.project.status || '-') + ' · 템플릿 ' + (pkg.project.template_key || '-');
-            document.getElementById('executiveSummaryBox').innerHTML = renderExecutiveSummary(pkg.executive_summary || {});
+            document.getElementById('executiveSummaryBox').innerHTML = renderExecutiveSummary(pkg || {});
             document.getElementById('conclusionBox').textContent = pkg.core_conclusion || '결과 생성 중';
             document.getElementById('coreRulesBox').innerHTML = renderGroundedRules(pkg.grounded_business_rules || [], pkg.diagnosis.state || '결과 생성 중');
             document.getElementById('recommendedOptionBox').innerHTML = renderCardList(pkg.recommended_option ? [pkg.recommended_option] : [], pkg.design.state || '결과 생성 중', 'name', 'structure_summary', 'selection_reason');
@@ -477,6 +716,11 @@
                     renderLayerSection('backend', recomposition.backend) +
                     renderLayerSection('frontend', recomposition.frontend) +
                 '</div>';
+
+            const bundle = pkg.polish_bundle || {};
+            document.getElementById('polishAudienceSelect').value = (bundle.audience || 'manager');
+            document.getElementById('polishDeliverySelect').value = (bundle.delivery_mode || 'client_report');
+            renderAccountingSection(pkg);
 
             const appendix = pkg.appendix || {};
             const assets = pkg.assets || appendix.asset_manifest || [];
@@ -531,6 +775,12 @@
                 document.getElementById('errorState').classList.remove('hidden');
                 document.getElementById('errorState').textContent = error.message || String(error);
             }
+        });
+        document.getElementById('polishAudienceSelect').addEventListener('change', function () {
+            if (currentPackage) renderAccountingSection(currentPackage);
+        });
+        document.getElementById('polishDeliverySelect').addEventListener('change', function () {
+            if (currentPackage) renderAccountingSection(currentPackage);
         });
         document.addEventListener('click', async function (event) {
             const button = event.target.closest('.asset-download-btn');

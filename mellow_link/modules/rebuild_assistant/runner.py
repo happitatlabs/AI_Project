@@ -19,11 +19,11 @@ from .service import RebuildAssistantService
 
 def _rebuild_todos() -> list[dict[str, str]]:
     return [
-        {"todo_id": "B1", "title": "입력 정리", "status": "pending"},
-        {"todo_id": "B2", "title": "자산 분석", "status": "pending"},
-        {"todo_id": "B3", "title": "설계 초안 생성", "status": "pending"},
-        {"todo_id": "B4", "title": "설계 초안 보강", "status": "pending"},
-        {"todo_id": "B5", "title": "결과 패키지 정리", "status": "pending"},
+        {"todo_id": "B1", "title": "입력 정규화", "status": "pending"},
+        {"todo_id": "B2", "title": "구조 분석", "status": "pending"},
+        {"todo_id": "B3", "title": "진단 및 판단", "status": "pending"},
+        {"todo_id": "B4", "title": "개선안 생성", "status": "pending"},
+        {"todo_id": "B5", "title": "결과 패키징", "status": "pending"},
     ]
 
 
@@ -69,12 +69,12 @@ def _spawn_rebuild_run(
             emit_event(run_id, EVENT_TYPE_TODO_STARTED, todos[1])
             analysis_summary = service.analyze_assets(prepared)
             emit_event(run_id, EVENT_TYPE_LOG, {"level": "info", "message": "legacy analysis complete", "findings": analysis_summary[:3]})
-            emit_event(run_id, EVENT_TYPE_TODO_DONE, {**todos[1], "detail": "레거시 구조와 결합 지점을 분석했습니다."})
+            emit_event(run_id, EVENT_TYPE_TODO_DONE, {**todos[1], "detail": "레거시 구조와 기능 슬라이스 후보를 분석했습니다."})
 
             emit_event(run_id, EVENT_TYPE_TODO_STARTED, todos[2])
             strategy = service.infer_target_architecture(prepared)
             emit_event(run_id, EVENT_TYPE_LOG, {"level": "info", "message": "rebuild design complete", "strategy": strategy[:3]})
-            emit_event(run_id, EVENT_TYPE_TODO_DONE, {**todos[2], "detail": "목표 아키텍처와 레이어별 재구성 방향을 설계했습니다."})
+            emit_event(run_id, EVENT_TYPE_TODO_DONE, {**todos[2], "detail": "구조 진단과 의사결정 방향을 확정했습니다."})
 
             emit_event(run_id, EVENT_TYPE_TODO_STARTED, todos[3])
             draft = service.build_recomposition_draft(prepared)
@@ -87,7 +87,7 @@ def _spawn_rebuild_run(
                     "draft_layers": {"database": len(draft.database), "backend": len(draft.backend), "frontend": len(draft.frontend)},
                 },
             )
-            emit_event(run_id, EVENT_TYPE_TODO_DONE, {**todos[3], "detail": "레이어별 재구성 초안을 생성했습니다."})
+            emit_event(run_id, EVENT_TYPE_TODO_DONE, {**todos[3], "detail": "설계 옵션과 단계별 개선안을 생성했습니다."})
 
             emit_event(run_id, EVENT_TYPE_TODO_STARTED, todos[4])
             result = service.build_result(prepared)
@@ -119,6 +119,13 @@ def _spawn_rebuild_run(
                     "success": True,
                     "summary": summary[:4000],
                     "structured_result": result.model_dump(),
+                    "authoritative_payload": {
+                        "structure_snapshot": result.structure_snapshot,
+                        "diagnosis_report": result.diagnosis_report,
+                        "decision_summary": result.decision_summary,
+                        "improvement_plan_bundle": result.improvement_plan_bundle,
+                        "appendix": result.appendix,
+                    },
                     "polish_bundle": polish_bundle.model_dump(),
                     "primary_feature_mode": prepared.signals.primary_feature_mode,
                     "secondary_feature_mode": prepared.signals.secondary_feature_mode,

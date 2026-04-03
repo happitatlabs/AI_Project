@@ -10,6 +10,12 @@ EXACT_REPLACEMENTS = {
     "여부을": "여부를",
     "조건을을": "조건을",
     "정책 정책": "정책",
+    "누락로": "누락으로",
+    "금지을": "금지를",
+    "규칙야 합니다": "규칙이어야 합니다",
+    "이동평균법로": "이동평균법으로",
+    "입니다. 입니다.": "입니다.",
+    "입니다. 입니다": "입니다.",
 }
 
 PATTERN_FORBIDDEN_EXPRESSIONS: dict[str, list[str]] = {
@@ -52,6 +58,8 @@ def apply_sentence_polish(text: str) -> str:
     polished = (text or "").strip()
     for before, after in EXACT_REPLACEMENTS.items():
         polished = polished.replace(before, after)
+    polished = re.sub(r"([가-힣A-Za-z0-9_]+)(?<!으)로 명확하므로", r"\1으로 명확하므로", polished)
+    polished = re.sub(r"([가-힣A-Za-z0-9_]+)(?<!으)로 판단되므로", r"\1으로 판단되므로", polished)
     polished = collapse_adjacent_duplicate_tokens(polished)
     polished = dedupe_repeated_clauses(polished)
     polished = normalize_whitespace(polished)

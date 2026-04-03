@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 
 from mellow_link.modules.rebuild_assistant.schemas import StructuredRebuildResult
@@ -65,7 +66,10 @@ class StructuredResultPolishService:
         )
 
     def _build_sections(self, result: StructuredRebuildResult) -> list[tuple[str, str, str]]:
-        return [
+        sections = [
+            ("report_purpose", "보고서 목적", result.report_purpose),
+            ("report_scope", "분석 범위", self._join_lines(result.report_scope)),
+            ("report_questions", "검증 질문", self._join_lines(result.report_questions)),
             ("one_line_conclusion", "핵심 결론", result.one_line_conclusion),
             ("executive_summary_v2", "Executive Summary", self._join_lines(result.executive_summary_v2)),
             ("grounded_business_rules", "핵심 업무 규칙", self._join_grounded_rules(result)),
@@ -77,6 +81,18 @@ class StructuredResultPolishService:
             ("risks", "주요 리스크", self._join_lines(result.risks)),
             ("recomposition_draft", "전환 초안", self._join_recomposition_draft(result)),
         ]
+        accounting = self._accounting_extension(result)
+        if accounting:
+            sections.extend(
+                [
+                    ("accounting_summary", "회계 계산 요약", str(accounting.get("summary_sentence") or "")),
+                    ("accounting_status", "계산 가능 여부", self._join_accounting_status(accounting)),
+                    ("accounting_analysis", "회계 방식 분석", self._join_accounting_analysis(accounting)),
+                    ("fx_calculation", "외화 계산 결과", self._join_fx_calculation(accounting)),
+                    ("voucher_review", "전표 검토 결과", self._join_voucher_review(accounting)),
+                ]
+            )
+        return sections
 
     def _join_lines(self, items: list[str]) -> str:
         return "\n".join(f"- {item}" for item in items if (item or "").strip())
@@ -145,12 +161,85 @@ class StructuredResultPolishService:
             lines.extend(f"- {item.strip()}" for item in result.recomposition_draft.frontend if item.strip())
         return "\n".join(lines)
 
+    def _join_accounting_status(self, accounting: dict) -> str:
+        status = accounting.get("calculation_status") or {}
+        validation = accounting.get("input_validation") or {}
+        lines = []
+        if "can_calculate" in status:
+            lines.append(f"- can_calculate: {'true' if status.get('can_calculate') else 'false'}")
+        if status.get("reason"):
+            lines.append(f"- reason: {status.get('reason')}")
+        if status.get("blocking_issue"):
+            lines.append(f"- blocking_issue: {status.get('blocking_issue')}")
+        if validation.get("missing_required_inputs"):
+            lines.append(f"- missing_required_inputs: {', '.join(validation.get('missing_required_inputs') or [])}")
+        return "\n".join(lines)
+
+    def _join_accounting_analysis(self, accounting: dict) -> str:
+        analysis = accounting.get("accounting_analysis") or {}
+        lines = []
+        candidates = analysis.get("candidate_methods") or []
+        if candidates:
+            lines.append(f"- 후보 방식: {', '.join(candidates)}")
+        if analysis.get("recommended_method"):
+            lines.append(f"- 추천 방식: {analysis.get('recommended_method')}")
+        for reason in analysis.get("reasons") or []:
+            lines.append(f"- {reason.get('message') or '-'}")
+        return "\n".join(lines)
+
+    def _join_fx_calculation(self, accounting: dict) -> str:
+        calc = accounting.get("fx_calculation") or {}
+        lines = []
+        if calc.get("method"):
+            lines.append(f"- 방식: {calc.get('method')}")
+        if calc.get("realized_gain_loss_krw") is not None:
+            lines.append(f"- 환차손익: {calc.get('realized_gain_loss_krw'):,}원")
+        if calc.get("failure_reason"):
+            lines.append(f"- 실패 사유: {calc.get('failure_reason')}")
+        for step in calc.get("detail_steps") or []:
+            message = step.get("message") or "-"
+            lines.append(f"- {message}")
+        return "\n".join(lines)
+
+    def _join_voucher_review(self, accounting: dict) -> str:
+        review = accounting.get("voucher_review") or {}
+        lines = []
+        if review.get("status"):
+            lines.append(f"- 상태: {review.get('status')}")
+        if review.get("balance_ok") is None and review.get("status") == "input_missing":
+            lines.append("- 차변/대변 균형: 검토 불가")
+        elif review.get("balance_ok") is not None:
+            lines.append(f"- 차변/대변 균형: {'예' if review.get('balance_ok') else '아니오'}")
+        if review.get("policy_consistent") is None and review.get("status") == "input_missing":
+            lines.append("- 정책 일치: 검토 불가")
+        elif review.get("policy_consistent") is not None:
+            lines.append(f"- 정책 일치: {'예' if review.get('policy_consistent') else '아니오'}")
+        if review.get("failure_reason"):
+            lines.append(f"- 실패 사유: {review.get('failure_reason')}")
+        for item in review.get("review_points") or []:
+            lines.append(f"- {item.get('message') or '-'}")
+        for item in review.get("mismatches") or []:
+            lines.append(f"- 불일치: {item.get('message') or '-'}")
+        return "\n".join(lines)
+
+    def _accounting_extension(self, result: StructuredRebuildResult) -> dict:
+        extensions = result.extensions if isinstance(result.extensions, dict) else {}
+        accounting = extensions.get("accounting") if isinstance(extensions, dict) else None
+        return accounting if isinstance(accounting, dict) else {}
+
     def _collect_preserved_facts(self, result: StructuredRebuildResult) -> list[str]:
         facts: list[str] = []
         facts.extend(item.title for item in result.grounded_business_rules if item.title)
         facts.extend(item.item for item in result.retained_contracts if item.item)
         if result.recommended_option and result.recommended_option.name:
             facts.append(result.recommended_option.name)
+        accounting = self._accounting_extension(result)
+        if accounting:
+            accounting_text = json.dumps(accounting, ensure_ascii=False)
+            facts.extend(re.findall(r"\b\d[\d,]*\b", accounting_text))
+            facts.extend(re.findall(r"\b[A-Z][A-Z0-9_]{2,}\b", accounting_text))
+            if accounting.get("summary_sentence"):
+                facts.append(str(accounting.get("summary_sentence")))
         important_text = "\n".join(
             [
                 result.one_line_conclusion,

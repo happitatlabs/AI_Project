@@ -3,6 +3,13 @@
 버전: 2026-03-29  
 상태: Contract
 
+추가 메모 (2026-04-03)
+
+- 현재 workflow 포함 judgment template canonical source는
+  [`mellow_link/services/refactoring_support_engine/decision_catalog.py`](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/services/refactoring_support_engine/decision_catalog.py)다.
+- [`mellow_link/modules/rebuild_assistant/judgment_templates.py`](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/modules/rebuild_assistant/judgment_templates.py)는 compatibility re-export만 유지한다.
+- 아래 반영 대상 파일 목록은 당시 작업 계약 기준이고, 현재 구조 해석은 engine catalog를 우선한다.
+
 ## 목적
 
 `workflow (승인형)` 판단 템플릿을 `rebuild_assistant`에 추가한다.
@@ -68,7 +75,8 @@
 
 ## 반영 대상 파일
 
-- `mellow_link/modules/rebuild_assistant/judgment_templates.py`
+- `mellow_link/services/refactoring_support_engine/decision_catalog.py`
+- `mellow_link/modules/rebuild_assistant/judgment_templates.py` (compatibility re-export)
 - `mellow_link/modules/rebuild_assistant/service.py`
 - `mellow_link/tests/test_module_registry_and_runs.py`
 - `mellow_link/docs/REBUILD_ASSISTANT_RESULT_STATUS_2026-03-28.md`

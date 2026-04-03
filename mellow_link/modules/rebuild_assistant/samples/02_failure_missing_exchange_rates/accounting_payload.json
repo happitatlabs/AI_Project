@@ -1,0 +1,21 @@
+{
+  "transactions": [
+    {
+      "tx_id": "T1",
+      "tx_type": "BUY_FX",
+      "currency": "USD",
+      "amount_fc": 100,
+      "rate": 1200,
+      "occurred_at": "2026-03-01"
+    }
+  ],
+  "exchange_rates": [],
+  "policies": [
+    {
+      "policy_id": "P1",
+      "fx_cost_method": "MOVING_AVERAGE"
+    }
+  ],
+  "vouchers": [],
+  "account_mappings": []
+}

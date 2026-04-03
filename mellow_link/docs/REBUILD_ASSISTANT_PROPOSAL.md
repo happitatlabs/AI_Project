@@ -4,6 +4,9 @@ Overview
 Status note (2026-03-25)
 
 This document is an early proposal. The current implementation has moved to a project-scoped safe bundle flow.
+Current engine architecture is now split between a thin module adapter and
+`services/refactoring_support_engine`. For current structure, treat
+`refactoring_support_engine.md` as the primary source of truth.
 
 Current public execution line:
 
@@ -19,6 +22,7 @@ Current differences from this proposal:
 For current behavior, read these first:
 
 - `mellow_link/modules/rebuild_assistant/README.md`
+- `refactoring_support_engine.md`
 - `mellow_link/docs/ANONYMIZATION_MVP_STATUS.md`
 - `mellow_link/docs/AI_PROJECT_STRUCTURE_AND_SPEC.md`
 
@@ -254,21 +258,26 @@ Module Components
 The module follows the existing module structure.
 
 modules/rebuild_assistant
-├ adapter.py
-├ runner.py
 ├ service.py
-└ tests/
-adapter
+├ runner.py
+└ postprocess/
+
+services/refactoring_support_engine
+├ facade.py
+├ input_assembler.py
+├ structure_analyzer.py
+├ diagnosis_engine.py
+├ decision_engine.py
+├ improvement_planner.py
+└ result_packager.py
+
+service.py
 
 Responsibilities:
 
-normalize input
-
-parse assets and goal
-
-validate minimum requirements
-
-prepare run metadata
+- thin public module adapter
+- facade 호출
+- public schema compatibility 유지
 
 runner
 
@@ -292,15 +301,19 @@ service
 
 Responsibilities:
 
-legacy code analysis
+- postprocess / extension 연결
+- public module boundary 유지
 
-architecture inference
+refactoring_support_engine
 
-modernization strategy generation
+Responsibilities:
 
-recomposition draft generation
-
-result formatting
+- input normalization
+- structure analysis
+- diagnosis
+- decision
+- improvement planning
+- result packaging
 
 tests
 

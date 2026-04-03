@@ -129,6 +129,18 @@ def _extract_structured_result(events: list[dict[str, Any]]) -> StructuredRebuil
     return None
 
 
+def _extract_polish_bundle(events: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for event in reversed(events):
+        if event.get("type") != "run_finished":
+            continue
+        payload = event.get("payload") or {}
+        polish_bundle = payload.get("polish_bundle")
+        if isinstance(polish_bundle, dict):
+            return polish_bundle
+        return None
+    return None
+
+
 def _extract_project_insights(events: list[dict[str, Any]], structured: StructuredRebuildResult | None) -> dict[str, Any]:
     feature_mode = "-"
     findings: list[str] = []
@@ -581,14 +593,260 @@ def _build_result_provenance(
 
 def _trim_items(items: list[str] | None, *, limit: int = 3) -> list[str]:
     normalized = [str(item).strip() for item in (items or []) if str(item).strip()]
-    return normalized[:limit]
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in normalized:
+        key = re.sub(r"\s+", " ", item).strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped[:limit]
+
+
+def _dedupe_dict_items(items: list[dict[str, Any]], key_field: str) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in items:
+        value = str(item.get(key_field) or "").strip()
+        key = re.sub(r"\s+", " ", value).strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        output.append(item)
+    return output
+
+
+def _humanize_summary_state(state: str) -> str:
+    mapping = {
+        "ready": "준비 완료",
+        "partial": "부분 준비",
+        "pending": "생성 중",
+    }
+    return mapping.get((state or "").strip().lower(), state)
+
+
+def _humanize_accounting_method(value: str) -> str:
+    mapping = {
+        "MOVING_AVERAGE": "이동평균법",
+        "FIFO": "선입선출법",
+        "SPECIFIC_ID": "개별식별법",
+    }
+    return mapping.get((value or "").strip().upper(), value)
+
+
+def _humanize_accounting_status(value: str) -> str:
+    mapping = {
+        "completed": "완료",
+        "failed": "실패",
+        "skipped": "건너뜀",
+        "input_missing": "입력 부족",
+    }
+    return mapping.get((value or "").strip().lower(), value)
+
+
+def _humanize_accounting_reason(value: str) -> str:
+    text = (value or "").strip()
+    mapping = {
+        "all required inputs present": "필수 입력이 모두 제공되었습니다.",
+        "voucher_review requires vouchers and account_mappings": "전표 데이터와 계정 매핑이 없어 전표 검토를 수행할 수 없습니다.",
+        "missing exchange_rates": "환율 데이터가 누락되었습니다.",
+        "missing required inputs: transactions": "거래 데이터가 누락되었습니다.",
+        "missing required inputs: exchange_rates": "환율 데이터가 누락되었습니다.",
+        "missing required inputs: policies": "회계 정책 데이터가 누락되었습니다.",
+        "multiple active policies matched transaction dates": "복수 정책이 거래일과 동시에 일치해 적용 정책을 확정할 수 없습니다.",
+        "no active policy covers transaction dates": "거래일을 포괄하는 활성 정책이 없습니다.",
+    }
+    if text in mapping:
+        return mapping[text]
+    if text.startswith("invalid accounting payload schema:"):
+        lowered = text.lower()
+        if "occurred_at" in lowered:
+            return "거래일(occurred_at) 입력이 누락되었습니다."
+        if "rate_date" in lowered:
+            return "환율 기준일(rate_date) 입력이 누락되었습니다."
+        if "currency" in lowered:
+            return "통화(currency) 입력이 누락되었습니다."
+        return "회계 입력 형식이 올바르지 않습니다."
+    if text.startswith("invalid accounting payload json:"):
+        return "회계 입력 JSON 형식이 올바르지 않습니다."
+    if text.startswith("missing required inputs:"):
+        missing = text.split(":", 1)[1].strip()
+        labels = {
+            "transactions": "거래 데이터",
+            "exchange_rates": "환율 데이터",
+            "policies": "회계 정책 데이터",
+            "vouchers": "전표 데이터",
+            "account_mappings": "계정 매핑",
+        }
+        humanized = ", ".join(labels.get(item.strip(), item.strip()) for item in missing.split(",") if item.strip())
+        return f"필수 입력이 누락되었습니다. ({humanized})"
+    if "ambiguous exchange rate" in text.lower() or "multiple exchange rates" in text.lower():
+        return "복수 환율이 감지되어 적용 환율을 확정할 수 없습니다."
+    for raw, replacement in (
+        ("MOVING_AVERAGE", "이동평균법"),
+        ("FIFO", "선입선출법"),
+        ("SPECIFIC_ID", "개별식별법"),
+        ("input_missing", "입력 부족"),
+        ("completed", "완료"),
+        ("failed", "실패"),
+    ):
+        text = re.sub(rf"\b{re.escape(raw)}\b", replacement, text)
+    text = text.replace("일치해", "일치하여")
+    return text
+
+
+def _accounting_reason_label(value: str) -> str:
+    text = (value or "").strip()
+    if not text:
+        return "입력 확인 필요"
+    mapping = {
+        "all required inputs present": "필수 입력 충족",
+        "voucher_review requires vouchers and account_mappings": "전표 데이터 및 계정 매핑 부족",
+        "missing exchange_rates": "환율 데이터 누락",
+        "missing required inputs: transactions": "거래 데이터 누락",
+        "missing required inputs: exchange_rates": "환율 데이터 누락",
+        "missing required inputs: policies": "회계 정책 데이터 누락",
+        "missing required inputs: vouchers": "전표 데이터 누락",
+        "missing required inputs: account_mappings": "계정 매핑 누락",
+        "multiple active policies matched transaction dates": "복수 정책 충돌",
+        "no active policy covers transaction dates": "정책 유효기간 불일치",
+    }
+    if text in mapping:
+        return mapping[text]
+    lowered = text.lower()
+    if text.startswith("invalid accounting payload schema:"):
+        if "occurred_at" in lowered:
+            return "거래일 입력 누락"
+        if "rate_date" in lowered:
+            return "환율 기준일 입력 누락"
+        if "currency" in lowered:
+            return "통화 입력 누락"
+        return "회계 입력 형식 오류"
+    if text.startswith("invalid accounting payload json:"):
+        return "회계 입력 JSON 형식 오류"
+    if "multiple exchange rates" in lowered or "ambiguous exchange rate" in lowered:
+        return "복수 환율 충돌"
+    if "policy" in lowered or "version" in lowered:
+        return "회계 정책 경고"
+    if "voucher" in lowered or "전표" in lowered:
+        return "전표 검토 입력 부족"
+    return _humanize_accounting_reason(text).rstrip(".")
+
+
+def _humanize_accounting_message(value: str) -> str:
+    text = _humanize_accounting_reason(value)
+    text = re.sub(
+        r"^([A-Za-z0-9_-]+)\s전표는\s차변/대변이 일치하지 않습니다\.$",
+        r"\1 전표의 차변/대변이 일치하지 않습니다.",
+        text,
+    )
+    text = re.sub(
+        r"^([A-Za-z0-9_-]+)\s전표는\s차변/대변 균형이 맞습니다\.$",
+        r"\1 전표의 차변/대변 균형이 맞습니다.",
+        text,
+    )
+    return text
+
+
+def _humanize_accounting_summary_sentence(value: str) -> str:
+    text = (value or "").strip()
+    prefix = "회계 계산을 수행할 수 없습니다."
+    if text.startswith(prefix):
+        detail = text[len(prefix):].strip()
+        return f"{prefix} {_humanize_accounting_reason(detail)}".strip()
+    return text
+
+
+def _build_accounting_package_view(accounting: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(accounting, dict):
+        return None
+    output = deepcopy(accounting)
+    if output.get("summary_sentence"):
+        output["summary_sentence"] = _humanize_accounting_summary_sentence(str(output.get("summary_sentence") or ""))
+    calc_status = output.get("calculation_status")
+    if isinstance(calc_status, dict):
+        if calc_status.get("reason"):
+            calc_status["reason"] = _humanize_accounting_reason(str(calc_status.get("reason") or ""))
+        if calc_status.get("blocking_issue"):
+            calc_status["blocking_issue"] = _humanize_accounting_reason(str(calc_status.get("blocking_issue") or ""))
+    analysis = output.get("accounting_analysis")
+    if isinstance(analysis, dict):
+        if isinstance(analysis.get("candidate_methods"), list):
+            analysis["candidate_methods"] = [_humanize_accounting_method(str(item)) for item in analysis.get("candidate_methods") or []]
+        if analysis.get("recommended_method"):
+            analysis["recommended_method"] = _humanize_accounting_method(str(analysis.get("recommended_method") or ""))
+        for item in analysis.get("reasons") or []:
+            if isinstance(item, dict) and item.get("message"):
+                item["message"] = _humanize_accounting_message(str(item.get("message") or ""))
+    fx_calc = output.get("fx_calculation")
+    if isinstance(fx_calc, dict):
+        if fx_calc.get("status"):
+            fx_calc["status"] = _humanize_accounting_status(str(fx_calc.get("status") or ""))
+        if fx_calc.get("method"):
+            fx_calc["method"] = _humanize_accounting_method(str(fx_calc.get("method") or ""))
+        if fx_calc.get("failure_reason"):
+            fx_calc["failure_reason"] = _humanize_accounting_reason(str(fx_calc.get("failure_reason") or ""))
+        for item in fx_calc.get("detail_steps") or []:
+            if isinstance(item, dict) and item.get("message"):
+                item["message"] = _humanize_accounting_message(str(item.get("message") or ""))
+    voucher_review = output.get("voucher_review")
+    if isinstance(voucher_review, dict):
+        if voucher_review.get("status"):
+            voucher_review["status"] = _humanize_accounting_status(str(voucher_review.get("status") or ""))
+        if voucher_review.get("failure_reason"):
+            voucher_review["failure_reason"] = _humanize_accounting_reason(str(voucher_review.get("failure_reason") or ""))
+        for item in voucher_review.get("review_points") or []:
+            if isinstance(item, dict) and item.get("message"):
+                item["message"] = _humanize_accounting_message(str(item.get("message") or ""))
+        for item in voucher_review.get("mismatches") or []:
+            if isinstance(item, dict) and item.get("message"):
+                item["message"] = _humanize_accounting_message(str(item.get("message") or ""))
+    return output
 
 
 def _build_executive_next_steps(
     *,
     missing_context_details: list[dict[str, Any]],
     recommended_directions: list[str],
+    accounting: dict[str, Any] | None = None,
 ) -> list[str]:
+    if isinstance(accounting, dict):
+        calc_status = accounting.get("calculation_status") or {}
+        input_validation = accounting.get("input_validation") or {}
+        fx_calc = accounting.get("fx_calculation") or {}
+        voucher_review = accounting.get("voucher_review") or {}
+        warnings: list[str] = []
+        warnings.extend(str(item or "").strip() for item in (input_validation.get("warnings") or []))
+        warnings.extend(str(item or "").strip() for item in (input_validation.get("ambiguous_inputs") or []))
+        warnings.extend(str(item or "").strip() for item in (fx_calc.get("warnings") or []))
+        warnings.extend(str(item or "").strip() for item in (voucher_review.get("warnings") or []))
+        warning_text = _humanize_accounting_reason(next((item for item in warnings if item), ""))
+        if not bool(calc_status.get("can_calculate")):
+            issue = _accounting_reason_label(str(calc_status.get("blocking_issue") or calc_status.get("reason") or "필수 입력이 누락되었습니다."))
+            return [
+                f"{issue} 항목을 우선 보완하는 것이 필요합니다.",
+                "환율, 정책, 거래일 기준을 다시 확인하는 것이 필요합니다.",
+                "보완 후 재계산과 전표 재검토를 수행하는 것이 필요합니다.",
+            ]
+        if warning_text:
+            warning_label = _accounting_reason_label(next((item for item in warnings if item), ""))
+            return [
+                f"{warning_label} 경고를 먼저 확인하는 것이 필요합니다.",
+                "입력과 정책 기준을 보완하는 것이 필요합니다.",
+                "재계산 후 최종 기준을 확정하는 것이 필요합니다.",
+            ]
+        if str(voucher_review.get("status") or "").strip().lower() == "input_missing":
+            return [
+                "계산 결과와 적용 회계 방식을 먼저 확정하는 것이 필요합니다.",
+                "전표 데이터와 계정 매핑을 보완해 전표 정합성 검토를 완료하는 것이 필요합니다.",
+                "후속 운영 기준과 재계산 조건을 정리하는 것이 필요합니다.",
+            ]
+        return [
+            "계산 결과와 적용 회계 방식을 먼저 확정하는 것이 필요합니다.",
+            "전표 정합성 검토 결과를 함께 확인하는 것이 필요합니다.",
+            "후속 운영 기준과 재계산 조건을 정리하는 것이 필요합니다.",
+        ]
     if missing_context_details:
         first_required = str(missing_context_details[0].get("required_material") or "").strip() or "-"
         first = f"{first_required} 자료를 확보해 확인 필요 항목을 확정하는 것이 필요합니다."
@@ -610,11 +868,14 @@ def _build_executive_summary(
     decision_items: list[dict[str, Any]],
     diagnosis: dict[str, Any],
     recommended_option: dict[str, Any] | None,
+    accounting: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     missing_context_details = list(diagnosis.get("missing_context_details") or [])
     key_risks = _trim_items(list(diagnosis.get("risks") or []))[:3]
     summary_lines = _trim_items(executive_summary_v2)[:4]
-    decision_lines = [str(item.get("statement") or "").strip() for item in (decision_items or []) if str(item.get("statement") or "").strip()][:3]
+    decision_lines = _trim_items(
+        [str(item.get("statement") or "").strip() for item in (decision_items or []) if str(item.get("statement") or "").strip()]
+    )[:3]
     modernization_direction = _trim_items(recommended_directions or summary_lines)[:3]
     recommended_name = str((recommended_option or {}).get("name") or "").strip()
     has_core = bool(core_conclusion) or bool(summary_lines)
@@ -648,6 +909,7 @@ def _build_executive_summary(
         "next_steps": _build_executive_next_steps(
             missing_context_details=missing_context_details,
             recommended_directions=decision_lines,
+            accounting=accounting,
         ),
     }
 
@@ -692,11 +954,12 @@ def build_result_package(
     result: StructuredRebuildResult | None,
     *,
     assets: list[dict[str, Any]],
+    polish_bundle: dict[str, Any] | None = None,
     app_version: str | None = None,
 ) -> dict[str, Any]:
     run_state = _project_status_from_run(snapshot)
     core_conclusion = (result.one_line_conclusion if result else "").strip()
-    recommended_directions = list(result.recommended_directions[:3]) if result else []
+    recommended_directions = _trim_items(list(result.recommended_directions) if result else [], limit=3)
     layer_dump = result.layer_reconstruction.model_dump() if result else {}
     recomposition_dump = result.recomposition_draft.model_dump() if result else {}
     diagnosis_state = "ready" if result and (result.analysis_summary or result.core_business_rules or result.risks or result.missing_context_details or result.grounded_business_rules) else ("결과 생성 중" if run_state == "running" else "데이터 없음")
@@ -730,15 +993,33 @@ def build_result_package(
     }
     provenance = _build_result_provenance(project, snapshot, assets=assets, app_version=app_version)
     scope_notice = deepcopy(PROJECT_SCOPE_NOTICE)
-    executive_summary_v2 = list(result.executive_summary_v2) if result else []
+    executive_summary_v2 = _trim_items(list(result.executive_summary_v2) if result else [], limit=6)
     grounded_business_rules = [_build_grounded_rule_view(item.model_dump()) for item in (result.grounded_business_rules if result else [])]
-    decision_items = [{"statement": item.statement, "rationale": item.rationale} for item in (result.decision_items if result else [])]
-    retained_contracts = [{"item": item.item, "basis": item.basis} for item in (result.retained_contracts if result else [])]
+    decision_items = _dedupe_dict_items(
+        [{"statement": item.statement, "rationale": item.rationale} for item in (result.decision_items if result else [])],
+        "statement",
+    )
+    retained_contracts = _dedupe_dict_items(
+        [{"item": item.item, "basis": item.basis} for item in (result.retained_contracts if result else [])],
+        "item",
+    )
     priority_split_items = [item.model_dump() for item in (result.priority_split_items if result else [])]
     verification_checkpoints = [{"item": item.item, "reason": item.reason} for item in (result.verification_checkpoints if result else [])]
     design_options = [item.model_dump() for item in (result.design_options if result else [])]
     recommended_option = result.recommended_option.model_dump() if result and result.recommended_option else None
     execution_plan = [item.model_dump() for item in (result.execution_plan if result else [])]
+    accounting = None
+    if result and isinstance(result.extensions, dict):
+        accounting_block = result.extensions.get("accounting")
+        if isinstance(accounting_block, dict):
+            accounting = _build_accounting_package_view(accounting_block)
+    authoritative_payload = {
+        "structure_snapshot": deepcopy(result.structure_snapshot) if result else {},
+        "diagnosis_report": deepcopy(result.diagnosis_report) if result else {},
+        "decision_summary": deepcopy(result.decision_summary) if result else {},
+        "improvement_plan_bundle": deepcopy(result.improvement_plan_bundle) if result else {},
+        "appendix": deepcopy(result.appendix) if result else {},
+    }
     executive_summary = _build_executive_summary(
         run_state=run_state,
         core_conclusion=core_conclusion,
@@ -747,6 +1028,7 @@ def build_result_package(
         decision_items=decision_items,
         diagnosis=diagnosis,
         recommended_option=recommended_option,
+        accounting=accounting,
     )
     return _sanitize_user_value({
         "project": {
@@ -759,6 +1041,9 @@ def build_result_package(
         "assets": assets,
         "provenance": provenance,
         "executive_summary": executive_summary,
+        "report_purpose": (result.report_purpose if result else "").strip(),
+        "report_scope": list(result.report_scope) if result else [],
+        "report_questions": list(result.report_questions) if result else [],
         "executive_summary_v2": executive_summary_v2,
         "scope_notice": scope_notice,
         "core_conclusion": core_conclusion,
@@ -772,6 +1057,9 @@ def build_result_package(
         "recommended_option": recommended_option,
         "execution_plan": execution_plan,
         "recommended_directions": recommended_directions,
+        "accounting": accounting,
+        "authoritative_payload": authoritative_payload,
+        "polish_bundle": deepcopy(polish_bundle) if isinstance(polish_bundle, dict) else None,
         "diagnosis": diagnosis,
         "design": design,
         "transition_draft": transition_draft,
@@ -922,6 +1210,12 @@ def _result_package_markdown(pkg: dict[str, Any]) -> str:
     executive_summary = pkg.get("executive_summary") or {}
     provenance = pkg.get("provenance") or {}
     scope_notice = pkg.get("scope_notice") or {}
+    executive_state = _humanize_summary_state(str(executive_summary.get("state") or ""))
+    diagnosis_state = _humanize_summary_state(str((pkg.get("diagnosis") or {}).get("state") or ""))
+    draft_state = _humanize_summary_state(str((pkg.get("transition_draft") or {}).get("state") or ""))
+    report_purpose = str(pkg.get("report_purpose") or "").strip()
+    report_scope = _trim_items(pkg.get("report_scope") or [], limit=6)
+    report_questions = _trim_items(pkg.get("report_questions") or [], limit=6)
     summary_lines = executive_summary.get("summary_lines") or []
     decision_focus = executive_summary.get("decision_focus") or []
     risk_lines = executive_summary.get("key_risks") or []
@@ -935,7 +1229,7 @@ def _result_package_markdown(pkg: dict[str, Any]) -> str:
         "",
         "## Executive Summary",
         f"- 제목: {executive_summary.get('title') or '-'}",
-        f"- 상태: {executive_summary.get('state') or '-'}",
+        f"- 상태: {executive_state or '-'}",
         "",
         "### 결정 요약",
         f"- {executive_summary.get('core_message') or '-'}",
@@ -951,6 +1245,15 @@ def _result_package_markdown(pkg: dict[str, Any]) -> str:
         "",
         "### 다음 실행",
         *next_step_markdown,
+        "",
+        "## 보고서 목적",
+        f"- {report_purpose or '이 실행의 목적이 아직 정리되지 않았습니다.'}",
+        "",
+        "## 분석 범위",
+        *([f"- {item}" for item in report_scope] if report_scope else ["- 해당 없음"]),
+        "",
+        "## 검증 질문",
+        *([f"- {item}" for item in report_questions] if report_questions else ["- 해당 없음"]),
         "",
         "## 핵심 결론",
         f"- {(pkg.get('core_conclusion') or '결과 생성 중')}",
@@ -979,7 +1282,11 @@ def _result_package_markdown(pkg: dict[str, Any]) -> str:
                     lines.append(f"    - 설계 반영 위치: {', '.join(evidence.get('design_targets') or []) or '-'}")
                     lines.append(f"    - 신뢰도: {evidence.get('confidence') or '-'}")
     else:
-        lines.append(f"- {pkg['diagnosis']['state']}")
+        fallback_core_rules = _trim_items(pkg.get("core_business_rules") or [], limit=4)
+        if fallback_core_rules:
+            lines.extend(f"- {item}" for item in fallback_core_rules)
+        else:
+            lines.append("- 직접 확인된 핵심 업무 규칙이 없습니다.")
     lines.extend(
         [
             "",
@@ -992,7 +1299,7 @@ def _result_package_markdown(pkg: dict[str, Any]) -> str:
             lines.append(f"- {item.get('statement') or '-'}")
             lines.append(f"  - 근거: {item.get('rationale') or '-'}")
     else:
-        lines.append(f"- {pkg['diagnosis']['state']}")
+        lines.append("- 즉시 결정할 항목이 없습니다.")
     lines.extend(
         [
             "",
@@ -1005,7 +1312,7 @@ def _result_package_markdown(pkg: dict[str, Any]) -> str:
             lines.append(f"- {item.get('item') or '-'}")
             lines.append(f"  - 근거: {item.get('basis') or '-'}")
     else:
-        lines.append(f"- {pkg['diagnosis']['state']}")
+        lines.append("- 직접 확인된 유지 계약이 없습니다.")
     lines.extend(["", "## 분리 우선순위"])
     for item in pkg.get("priority_split_items") or []:
         lines.extend(
@@ -1063,20 +1370,71 @@ def _result_package_markdown(pkg: dict[str, Any]) -> str:
             [
                 f"### {week.get('week_label') or '-'}",
                 f"- 목표: {week.get('goal') or '-'}",
-                f"- 작업: {' / '.join(week.get('tasks') or []) or '-'}",
-                f"- 관련 규칙: {', '.join(week.get('related_rules') or []) or '-'}",
-                f"- 관련 계약: {', '.join(week.get('related_contracts') or []) or '-'}",
-                f"- 인력: {' / '.join(week.get('roles') or []) or '-'}",
+                f"- 작업: {' / '.join(week.get('tasks') or []) or '해당 없음'}",
+                f"- 관련 규칙: {', '.join(week.get('related_rules') or []) or '해당 없음'}",
+                f"- 관련 계약: {', '.join(week.get('related_contracts') or []) or '해당 없음'}",
+                f"- 인력: {' / '.join(week.get('roles') or []) or '해당 없음'}",
                 f"- 기간: {week.get('duration_weeks') or 0}주",
-                f"- 산출물: {' / '.join(week.get('deliverables') or []) or '-'}",
+                f"- 산출물: {' / '.join(week.get('deliverables') or []) or '해당 없음'}",
             ]
         )
+    accounting = pkg.get("accounting") or {}
+    if accounting:
+        calc_status = accounting.get("calculation_status") or {}
+        input_validation = accounting.get("input_validation") or {}
+        analysis = accounting.get("accounting_analysis") or {}
+        fx_calc = accounting.get("fx_calculation") or {}
+        voucher_review = accounting.get("voucher_review") or {}
+        lines.extend(
+            [
+                "",
+                "## 회계 계산 요약",
+                f"- {accounting.get('summary_sentence') or '-'}",
+                "",
+                "## 계산 가능 여부",
+                f"- 계산 가능: {'예' if calc_status.get('can_calculate') else '아니오'}",
+                f"- 사유: {calc_status.get('reason') or calc_status.get('blocking_issue') or '-'}",
+            ]
+        )
+        if input_validation.get("missing_required_inputs"):
+            lines.append(f"- 누락 입력: {', '.join(input_validation.get('missing_required_inputs') or [])}")
+        lines.extend(["", "## 회계 방식 분석"])
+        if analysis.get("candidate_methods"):
+            lines.append(f"- 후보 방식: {', '.join(analysis.get('candidate_methods') or [])}")
+        lines.append(f"- 추천 방식: {analysis.get('recommended_method') or '-'}")
+        for item in analysis.get("reasons") or []:
+            lines.append(f"- {item.get('message') or '-'}")
+        lines.extend(["", "## 외화 계산 결과"])
+        lines.append(f"- 계산 상태: {fx_calc.get('status') or '-'}")
+        lines.append(f"- 적용 방식: {fx_calc.get('method') or '-'}")
+        if fx_calc.get("realized_gain_loss_krw") is not None:
+            lines.append(f"- 환차손익: {fx_calc.get('realized_gain_loss_krw'):,}원")
+        if fx_calc.get("failure_reason"):
+            lines.append(f"- 실패 사유: {fx_calc.get('failure_reason')}")
+        for step in fx_calc.get("detail_steps") or []:
+            lines.append(f"- {step.get('message') or '-'}")
+        lines.extend(["", "## 전표 검토 결과"])
+        lines.append(f"- 검토 상태: {voucher_review.get('status') or '-'}")
+        if voucher_review.get("status") == "입력 부족":
+            lines.append("- 차변/대변 균형: 검토 불가")
+            lines.append("- 정책 일치: 검토 불가")
+        else:
+            if voucher_review.get("balance_ok") is not None:
+                lines.append(f"- 차변/대변 균형: {'예' if voucher_review.get('balance_ok') else '아니오'}")
+            if voucher_review.get("policy_consistent") is not None:
+                lines.append(f"- 정책 일치: {'예' if voucher_review.get('policy_consistent') else '아니오'}")
+        if voucher_review.get("failure_reason"):
+            lines.append(f"- 실패 사유: {voucher_review.get('failure_reason')}")
+        for item in voucher_review.get("review_points") or []:
+            lines.append(f"- {item.get('message') or '-'}")
+        for item in voucher_review.get("mismatches") or []:
+            lines.append(f"- 불일치: {item.get('message') or '-'}")
     lines.extend(["", "## 리스크"])
     risks = pkg["diagnosis"].get("risks") or []
     if risks:
         lines.extend(f"- {item}" for item in risks)
     else:
-        lines.append(f"- {pkg['diagnosis']['state']}")
+        lines.append(f"- {diagnosis_state}")
     lines.extend(["", "## 전환 초안"])
     draft = (pkg["transition_draft"].get("recomposition_draft") or {})
     draft_lines = []
@@ -1089,7 +1447,7 @@ def _result_package_markdown(pkg: dict[str, Any]) -> str:
     if draft_lines:
         lines.extend(draft_lines[:-1])
     else:
-        lines.append(f"- {pkg['transition_draft']['state']}")
+        lines.append(f"- {draft_state}")
     lines.extend(["", "## 부록"])
     lines.extend(
         [
@@ -1613,12 +1971,14 @@ async def project_result(
     _sync_project_status(project, snapshot, db)
     events = get_run_events(project.run_id, db=db)
     structured = _extract_structured_result(events)
+    polish_bundle = _extract_polish_bundle(events)
     assets = _build_assets_payload(project, db)
     result_package = build_result_package(
         project,
         snapshot,
         structured,
         assets=assets,
+        polish_bundle=polish_bundle,
         app_version=getattr(request.app, "version", None),
     )
     if format == "md":

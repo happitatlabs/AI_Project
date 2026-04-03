@@ -1,17 +1,18 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Any
 
 from mellow_link.services.anonymization.schemas import SafeAnalysisBundle
-
-from .judgment_templates import (
+from mellow_link.services.refactoring_support_engine.decision_catalog import (
     JudgmentTemplateId,
     JudgmentTemplateSpec,
     get_judgment_template_spec,
     get_judgment_template_specs,
 )
+
 from .schemas import (
     AppliedJudgmentTemplate,
     AssetPresenceSummary,
@@ -54,6 +55,7 @@ class PreparedRebuildInput:
     assets: RebuildAssetsPayload
     constraints: list[str]
     asset_presence: AssetPresenceSummary = field(default_factory=AssetPresenceSummary)
+    safe_bundle: SafeAnalysisBundle | None = None
     temp_context: str = ""
     legacy_bundle: str = ""
     scope_limited: bool = False
@@ -61,7 +63,11 @@ class PreparedRebuildInput:
     signals: FeatureSignals = field(default_factory=FeatureSignals)
     selected_primary_judgment: str = ""
     selected_primary_judgment_reason: str = ""
+    selected_narrative_judgment: str = ""
     pattern_candidates: list[PatternCandidate] = field(default_factory=list)
+    accounting_input: Any | None = None
+    accounting_asset_name: str = ""
+    accounting_input_error: str = ""
 
     def __post_init__(self) -> None:
         if self.missing_context is None:
@@ -129,6 +135,7 @@ class RebuildAssistantService:
             assets=cleaned_assets,
             constraints=constraints,
             asset_presence=self._build_asset_presence_from_payload(cleaned_assets),
+            safe_bundle=None,
             temp_context=(temp_context or "").strip(),
             legacy_bundle="\n\n".join(part for part in parts if part),
             scope_limited=self.is_scope_limited(goal),
@@ -150,11 +157,22 @@ class RebuildAssistantService:
         schema_blocks: list[str] = []
         sql_blocks: list[str] = []
         ui_blocks: list[str] = []
+        accounting_input = None
+        accounting_asset_name = ""
+        accounting_input_error = ""
         for source in safe_bundle.sources:
             content = (source.content or "").strip()
             if not content:
                 continue
             asset_name = asset_name_by_id.get(source.asset_id, "")
+            if self._looks_like_accounting_payload_asset(asset_name, content):
+                if accounting_input is not None or accounting_input_error:
+                    accounting_input_error = "multiple accounting payload assets found"
+                    accounting_asset_name = asset_name or accounting_asset_name
+                    continue
+                accounting_input, accounting_input_error = self._parse_accounting_payload(content)
+                accounting_asset_name = asset_name
+                continue
             block = f"[SAFE SOURCE: {source.asset_id} | {asset_name or '-'}]\n{content}"
             if self._is_schema_asset_name(asset_name):
                 schema_blocks.append(block)
@@ -183,8 +201,12 @@ class RebuildAssistantService:
         ]
         prepared = self.prepare_input(goal=goal, assets=assets, constraints=normalized_constraints, temp_context="")
         prepared.asset_presence = asset_presence
+        prepared.safe_bundle = safe_bundle
         prepared.signals = self.extract_feature_signals(prepared)
         prepared.missing_context = self.detect_missing_context(prepared)
+        prepared.accounting_input = accounting_input
+        prepared.accounting_asset_name = accounting_asset_name
+        prepared.accounting_input_error = accounting_input_error
         return prepared
 
     def is_scope_limited(self, goal: str) -> bool:
@@ -846,57 +868,9 @@ class RebuildAssistantService:
         return max(0.0, min(1.0, round(score, 2)))
 
     def build_result(self, prepared: PreparedRebuildInput) -> StructuredRebuildResult:
-        confidence = self.estimate_confidence(prepared)
-        extracted_rules = self.extract_rules(prepared)
-        missing_context_details = self.build_missing_context_details(prepared)
-        core_business_rules = self.extract_core_business_rules(prepared)
-        grounded_business_rules = self.build_grounded_business_rules(prepared, core_business_rules)
-        retained_contracts = self.build_retained_contracts(prepared, grounded_business_rules)
-        applied_templates = self.build_applied_templates(prepared, grounded_business_rules, retained_contracts)
-        pattern_candidates = self.collect_pattern_candidates(prepared, applied_templates)
-        primary_judgment, primary_judgment_reason, pattern_candidates = self.select_primary_judgment(prepared, pattern_candidates)
-        prepared.selected_primary_judgment = primary_judgment
-        prepared.selected_primary_judgment_reason = primary_judgment_reason
-        prepared.pattern_candidates = list(pattern_candidates)
-        verification_checkpoints = self.build_verification_checkpoints(
-            prepared,
-            grounded_business_rules,
-            retained_contracts,
-            applied_templates=applied_templates,
-        )
-        decision_items = self.build_decision_items(prepared, grounded_business_rules, applied_templates)
-        priority_split_items = self.build_priority_split_items(prepared, grounded_business_rules, retained_contracts, applied_templates)
-        design_options = self.build_design_options(prepared, grounded_business_rules, retained_contracts, applied_templates)
-        design_options = self._apply_recommended_selection_reason(prepared, design_options, grounded_business_rules, retained_contracts, applied_templates)
-        recommended_option = self.pick_recommended_option(design_options, prepared, grounded_business_rules, retained_contracts, applied_templates)
-        execution_plan = self.build_execution_plan(prepared, grounded_business_rules, retained_contracts, recommended_option, applied_templates)
-        result = StructuredRebuildResult(
-            primary_judgment=primary_judgment,
-            primary_judgment_reason=primary_judgment_reason,
-            pattern_candidates=pattern_candidates,
-            core_business_rules=core_business_rules,
-            one_line_conclusion=self._build_conclusion_with_templates(prepared, confidence, grounded_business_rules, applied_templates),
-            executive_summary_v2=self.build_executive_summary_v2(prepared, grounded_business_rules, recommended_option, applied_templates),
-            grounded_business_rules=grounded_business_rules,
-            decision_items=decision_items,
-            retained_contracts=retained_contracts,
-            priority_split_items=priority_split_items,
-            verification_checkpoints=verification_checkpoints,
-            design_options=design_options,
-            recommended_option=recommended_option,
-            execution_plan=execution_plan,
-            analysis_summary=self.analyze_assets(prepared),
-            rebuild_strategy=self.infer_target_architecture(prepared),
-            layer_reconstruction=self.build_layer_reconstruction(prepared),
-            recomposition_draft=self.build_recomposition_draft(prepared, applied_templates),
-            risks=self.build_risks(prepared, grounded_business_rules, retained_contracts, applied_templates),
-            extracted_rules=extracted_rules,
-            recommended_directions=self.build_recommended_directions(prepared),
-            confidence=confidence,
-            missing_context=[item.required_material for item in missing_context_details],
-            missing_context_details=missing_context_details,
-        )
-        return self._sanitize_structured_result(result)
+        from mellow_link.services.refactoring_support_engine.facade import RefactoringSupportEngineFacade
+
+        return RefactoringSupportEngineFacade(self).build_result(prepared)
 
     def build_polish_bundle(
         self,
@@ -915,10 +889,1086 @@ class RebuildAssistantService:
             use_ai_rewrite=use_ai_rewrite,
         )
 
+    def _build_extensions(self, prepared: PreparedRebuildInput) -> dict[str, Any]:
+        if not prepared.accounting_asset_name and not prepared.accounting_input_error:
+            return {}
+        from mellow_link.services.accounting_mvp.service import build_accounting_extension
+
+        extension = build_accounting_extension(
+            accounting_input=prepared.accounting_input,
+            context_text=prepared.legacy_bundle,
+            accounting_input_error=prepared.accounting_input_error,
+        )
+        return {"accounting": extension.model_dump()}
+
+    def attach_report_purpose(
+        self,
+        result: StructuredRebuildResult,
+        user_question: str | None = None,
+        narrative_judgment: str | None = None,
+    ) -> StructuredRebuildResult:
+        report_purpose, report_scope, report_questions = self._build_report_metadata(
+            result,
+            user_question,
+            narrative_judgment=narrative_judgment,
+        )
+        return result.model_copy(
+            update={
+                "report_purpose": report_purpose,
+                "report_scope": report_scope,
+                "report_questions": report_questions,
+            }
+        )
+
+    def _apply_accounting_top_narrative(
+        self,
+        prepared: PreparedRebuildInput,
+        result: StructuredRebuildResult,
+    ) -> StructuredRebuildResult:
+        accounting = result.extensions.get("accounting") if isinstance(result.extensions, dict) else None
+        if not isinstance(accounting, dict):
+            return result
+        updates = self._build_accounting_top_narrative_updates(prepared, result, accounting)
+        if not updates:
+            return result
+        return result.model_copy(update=updates)
+
+    def _apply_accounting_bottom_sections(
+        self,
+        prepared: PreparedRebuildInput,
+        result: StructuredRebuildResult,
+    ) -> StructuredRebuildResult:
+        accounting = result.extensions.get("accounting") if isinstance(result.extensions, dict) else None
+        if not isinstance(accounting, dict):
+            return result
+        updates = self._build_accounting_bottom_section_updates(prepared, result, accounting)
+        if not updates:
+            return result
+        return result.model_copy(update=updates)
+
+    def _build_accounting_top_narrative_updates(
+        self,
+        prepared: PreparedRebuildInput,
+        result: StructuredRebuildResult,
+        accounting: dict[str, Any],
+    ) -> dict[str, Any]:
+        mode = self._accounting_narrative_mode(accounting)
+        context = self._build_accounting_narrative_context(accounting)
+        if not context:
+            return {}
+
+        if mode == "failure":
+            return self._build_accounting_failure_narrative_updates(result, context)
+        if mode == "warning":
+            return self._build_accounting_warning_narrative_updates(result, context)
+        return self._build_accounting_success_narrative_updates(result, context)
+
+    def _build_accounting_bottom_section_updates(
+        self,
+        prepared: PreparedRebuildInput,
+        result: StructuredRebuildResult,
+        accounting: dict[str, Any],
+    ) -> dict[str, Any]:
+        mode = self._accounting_narrative_mode(accounting)
+        context = self._build_accounting_narrative_context(accounting)
+        if not context:
+            return {}
+
+        method_label = context["method_label"]
+        failure_text = context["humanized_failure"]
+        warning_text = context["warning_text"]
+        voucher_status = context["voucher_status"]
+        voucher_issue = context["voucher_issue"]
+
+        if mode == "failure":
+            grounded_rules = [
+                self._make_accounting_grounded_rule(
+                    "계산 입력 책임",
+                    "거래 데이터, 환율 데이터, 회계 정책 입력이 모두 확보되어야 회계 계산을 수행할 수 있습니다.",
+                    ["입력 검증", "회계 계산"],
+                    confidence="확정",
+                    needs_verification=False,
+                ),
+                self._make_accounting_grounded_rule(
+                    "계산 차단 사유",
+                    f"현재 계산 차단 사유는 {failure_text.rstrip('.')}입니다.",
+                    ["입력 검증", "회계 계산"],
+                    confidence="확정",
+                    needs_verification=False,
+                ),
+                self._make_accounting_grounded_rule(
+                    "재실행 조건",
+                    "누락 입력과 기준 정보를 보완하면 같은 정책 기준으로 재계산할 수 있습니다.",
+                    ["회계 계산", "전표 검토"],
+                    confidence="조건부",
+                    needs_verification=True,
+                ),
+            ]
+            retained_contracts = [
+                self._make_accounting_contract(
+                    "환율 기준 계약은 유지하는 것이 필요합니다.",
+                    "거래일 기준 환율이 확보되어야 계산 결과를 산출할 수 있습니다.",
+                ),
+                self._make_accounting_contract(
+                    "회계 정책 적용 기준 계약은 유지하는 것이 필요합니다.",
+                    "정책 버전과 유효기간이 확정되어야 계산 방식을 결정할 수 있습니다.",
+                ),
+                self._make_accounting_contract(
+                    "거래일 입력 계약은 유지하는 것이 필요합니다.",
+                    "거래일이 누락되면 환율과 정책 선택 근거를 확정할 수 없습니다.",
+                ),
+            ]
+            recomposition_draft = LayeredListResult(
+                database=[
+                    "누락된 거래일, 환율 기준일, 정책 유효기간 입력을 먼저 보완합니다.",
+                    "거래 입력과 환율 데이터의 필수 필드를 다시 확인합니다.",
+                ],
+                backend=[
+                    "계산을 막는 입력 누락 사유를 명시적으로 반환하는지 점검합니다.",
+                    "입력 보완 후 동일 기준으로 재계산할 수 있도록 검증 경로를 확인합니다.",
+                ],
+                frontend=[
+                    "계산 불가 사유와 누락 입력을 사용자에게 바로 표시합니다.",
+                    "보완 후 재실행 조건을 같은 화면에서 안내합니다.",
+                ],
+            )
+            recommended_directions = [
+                "누락 입력과 기준 정보를 먼저 보완하는 것이 필요합니다.",
+                "환율과 정책 기준을 확정한 뒤 재계산하는 것이 필요합니다.",
+                "재계산 이후 전표 정합성 검토를 다시 수행하는 것이 필요합니다.",
+            ]
+        else:
+            voucher_rule = (
+                "전표는 계산 결과와 정합성을 유지해야 합니다."
+                if voucher_status == "completed"
+                else "전표 데이터와 계정 매핑이 보완되어야 전표 정합성을 검토할 수 있습니다."
+                if voucher_status == "input_missing"
+                else f"전표 검토에서는 {voucher_issue or '추가 확인 항목'}을 후속 확인해야 합니다."
+            )
+            warning_suffix = ""
+            if mode == "warning" and warning_text:
+                warning_suffix = f" 다만 {warning_text.rstrip('.')} 항목은 최종 확정 전에 추가 확인이 필요합니다."
+            grounded_rules = [
+                self._make_accounting_grounded_rule(
+                    "적용 회계 방식",
+                    f"환차손익은 {method_label} 기준으로 계산됩니다.{warning_suffix}",
+                    ["회계 계산", "정책 적용"],
+                    confidence="확정",
+                    needs_verification=False,
+                ),
+                self._make_accounting_grounded_rule(
+                    "환율 적용 기준",
+                    "환율은 거래일 기준으로 적용되며 계산 근거와 동일하게 유지되어야 합니다.",
+                    ["입력 검증", "회계 계산"],
+                    confidence="확정",
+                    needs_verification=False,
+                ),
+                self._make_accounting_grounded_rule(
+                    "전표 정합성 유지",
+                    voucher_rule,
+                    ["전표 검토", "회계 계산"],
+                    confidence="조건부" if voucher_status != "completed" else "확정",
+                    needs_verification=voucher_status != "completed",
+                ),
+            ]
+            retained_contracts = [
+                self._make_accounting_contract(
+                    "환율 기준 계약은 유지하는 것이 필요합니다.",
+                    "거래일 기준 환율과 실제 계산에 사용한 환율이 일치해야 합니다.",
+                ),
+                self._make_accounting_contract(
+                    "회계 정책 적용 기준 계약은 유지하는 것이 필요합니다.",
+                    f"{method_label} 기준과 정책 버전이 계산 결과에 그대로 반영되어야 합니다.",
+                ),
+                self._make_accounting_contract(
+                    "전표-거래 매핑 계약은 유지하는 것이 필요합니다.",
+                    "거래 데이터와 전표 검토 결과가 같은 기준으로 연결되어야 합니다.",
+                ),
+            ]
+            recomposition_draft = LayeredListResult(
+                database=[
+                    "거래 입력, 환율 기준일, 정책 버전 필드를 같은 회계 기준으로 점검합니다.",
+                    "전표와 거래를 연결하는 매핑 키를 함께 확인합니다.",
+                ],
+                backend=[
+                    "계산 방식, 환율 선택 기준, 전표 검토 로직을 회계 기준으로 점검합니다.",
+                    "불일치 항목과 경고를 계산 결과와 함께 반환하도록 확인합니다.",
+                ],
+                frontend=[
+                    "계산 결과, 경고 항목, 전표 검토 상태를 같은 화면에서 보여줍니다.",
+                    "입력 누락과 후속 확인 필요 항목을 사용자에게 명확히 안내합니다.",
+                ],
+            )
+            recommended_directions = [
+                "적용 회계 방식과 계산 기준을 먼저 확인하는 것이 필요합니다.",
+                "전표 정합성 또는 입력 경고를 함께 검토하는 것이 필요합니다.",
+                "후속 운영 기준과 재계산 조건을 확정하는 것이 필요합니다.",
+            ]
+
+        return {
+            "grounded_business_rules": grounded_rules,
+            "core_business_rules": [item.description for item in grounded_rules],
+            "retained_contracts": retained_contracts,
+            "recomposition_draft": recomposition_draft,
+            "recommended_directions": recommended_directions,
+        }
+
+    def _make_accounting_grounded_rule(
+        self,
+        title: str,
+        description: str,
+        design_targets: list[str],
+        *,
+        confidence: str,
+        needs_verification: bool,
+    ) -> GroundedBusinessRule:
+        return GroundedBusinessRule(
+            title=title,
+            description=description,
+            evidence=[],
+            design_targets=design_targets,
+            confidence=confidence,
+            confidence_reason="회계 확장 결과를 기준으로 생성한 보고서용 규칙입니다.",
+            needs_verification=needs_verification,
+        )
+
+    def _make_accounting_contract(self, item: str, basis: str) -> RetainedContract:
+        return RetainedContract(item=item, basis=basis, evidence=[])
+
+    def _accounting_narrative_mode(self, accounting: dict[str, Any]) -> str:
+        calc_status = accounting.get("calculation_status") or {}
+        if not bool(calc_status.get("can_calculate")):
+            return "failure"
+        warnings = self._collect_accounting_warnings(accounting)
+        return "warning" if warnings else "success"
+
+    def _build_accounting_narrative_context(self, accounting: dict[str, Any]) -> dict[str, Any]:
+        calc_status = accounting.get("calculation_status") or {}
+        validation = accounting.get("input_validation") or {}
+        fx_calc = accounting.get("fx_calculation") or {}
+        voucher_review = accounting.get("voucher_review") or {}
+        analysis = accounting.get("accounting_analysis") or {}
+
+        method = (
+            str(fx_calc.get("method") or "").strip()
+            or str(analysis.get("recommended_method") or "").strip()
+        )
+        method_label = self._humanize_accounting_method(method) or "회계 방식"
+
+        amount_value = fx_calc.get("realized_gain_loss_krw")
+        amount_text = ""
+        if amount_value is not None:
+            try:
+                amount_text = f"{int(amount_value):,}원"
+            except Exception:
+                amount_text = str(amount_value)
+
+        warnings = self._collect_accounting_warnings(accounting)
+        warning_text = self._humanize_accounting_issue(warnings[0]) if warnings else ""
+        warning_label = self._accounting_issue_label(warnings[0]) if warnings else ""
+
+        failure_issue = (
+            str(calc_status.get("blocking_issue") or "").strip()
+            or str(validation.get("failure_reason") or "").strip()
+            or str(fx_calc.get("failure_reason") or "").strip()
+        )
+        humanized_failure = self._humanize_accounting_issue(failure_issue)
+        humanized_failure_label = self._accounting_issue_label(failure_issue)
+
+        voucher_status = str(voucher_review.get("status") or "").strip().lower()
+        voucher_summary = self._build_accounting_voucher_summary(voucher_review)
+        voucher_issue = self._build_accounting_voucher_issue(voucher_review)
+
+        return {
+            "method_label": method_label,
+            "amount_text": amount_text,
+            "warnings": warnings,
+            "warning_text": warning_text,
+            "warning_label": warning_label,
+            "humanized_failure": humanized_failure,
+            "humanized_failure_label": humanized_failure_label,
+            "voucher_status": voucher_status,
+            "voucher_summary": voucher_summary,
+            "voucher_issue": voucher_issue,
+            "report_purpose": accounting.get("report_purpose") or "",
+            "summary_sentence": str(accounting.get("summary_sentence") or "").strip(),
+            "can_calculate": bool(calc_status.get("can_calculate")),
+        }
+
+    def _collect_accounting_warnings(self, accounting: dict[str, Any]) -> list[str]:
+        validation = accounting.get("input_validation") or {}
+        fx_calc = accounting.get("fx_calculation") or {}
+        voucher_review = accounting.get("voucher_review") or {}
+        candidates = []
+        candidates.extend(str(item or "").strip() for item in (validation.get("ambiguous_inputs") or []))
+        candidates.extend(str(item or "").strip() for item in (fx_calc.get("warnings") or []))
+        candidates.extend(str(item or "").strip() for item in (validation.get("warnings") or []))
+        candidates.extend(str(item or "").strip() for item in (voucher_review.get("warnings") or []))
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for item in candidates:
+            key = re.sub(r"\s+", " ", item).strip().lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            deduped.append(item)
+        return deduped
+
+    def _humanize_accounting_method(self, value: str) -> str:
+        mapping = {
+            "MOVING_AVERAGE": "이동평균법",
+            "FIFO": "선입선출법",
+            "SPECIFIC_ID": "개별식별법",
+        }
+        return mapping.get((value or "").strip().upper(), (value or "").strip())
+
+    def _humanize_accounting_issue(self, value: str) -> str:
+        text = (value or "").strip()
+        if not text:
+            return "추가 입력 확인이 필요합니다."
+        mapping = {
+            "all required inputs present": "필수 입력이 모두 제공되었습니다.",
+            "voucher_review requires vouchers and account_mappings": "전표 데이터와 계정 매핑이 없어 전표 검토를 수행할 수 없습니다.",
+            "missing exchange_rates": "환율 데이터가 누락되었습니다.",
+            "missing required inputs: transactions": "거래 데이터가 누락되었습니다.",
+            "missing required inputs: exchange_rates": "환율 데이터가 누락되었습니다.",
+            "missing required inputs: policies": "회계 정책 데이터가 누락되었습니다.",
+            "missing required inputs: vouchers": "전표 데이터가 누락되었습니다.",
+            "missing required inputs: account_mappings": "계정 매핑이 누락되었습니다.",
+            "multiple active policies matched transaction dates": "복수 정책이 거래일과 동시에 일치해 적용 정책을 확정할 수 없습니다.",
+            "no active policy covers transaction dates": "거래일을 포괄하는 활성 정책이 없습니다.",
+        }
+        if text in mapping:
+            return mapping[text]
+        if text.startswith("invalid accounting payload schema:"):
+            lowered = text.lower()
+            if "occurred_at" in lowered:
+                return "거래일(occurred_at) 입력이 누락되었습니다."
+            if "rate_date" in lowered:
+                return "환율 기준일(rate_date) 입력이 누락되었습니다."
+            if "currency" in lowered:
+                return "통화(currency) 입력이 누락되었습니다."
+            return "회계 입력 형식이 올바르지 않습니다."
+        if text.startswith("invalid accounting payload json:"):
+            return "회계 입력 JSON 형식이 올바르지 않습니다."
+        if text.startswith("missing required inputs:"):
+            missing = text.split(":", 1)[1].strip()
+            return f"필수 입력이 누락되었습니다. ({missing})"
+        lowered = text.lower()
+        if "ambiguous exchange rate" in lowered or "multiple exchange rates" in lowered:
+            return "복수 환율이 감지되어 적용 환율을 확정할 수 없습니다."
+        if "exchange rate" in lowered:
+            return "환율 선택 근거가 불명확합니다."
+        if "policy" in lowered:
+            return "적용할 회계 정책을 확정할 수 없습니다."
+        if "lot" in lowered or "source lot" in lowered:
+            return "lot/source 지정이 없어 계산을 확정할 수 없습니다."
+        return text.rstrip(".") + "."
+
+    def _accounting_issue_label(self, value: str) -> str:
+        text = (value or "").strip()
+        if not text:
+            return "입력 확인 필요"
+        mapping = {
+            "all required inputs present": "필수 입력 충족",
+            "voucher_review requires vouchers and account_mappings": "전표 데이터 및 계정 매핑 부족",
+            "missing exchange_rates": "환율 데이터 누락",
+            "missing required inputs: transactions": "거래 데이터 누락",
+            "missing required inputs: exchange_rates": "환율 데이터 누락",
+            "missing required inputs: policies": "회계 정책 데이터 누락",
+            "missing required inputs: vouchers": "전표 데이터 누락",
+            "missing required inputs: account_mappings": "계정 매핑 누락",
+            "multiple active policies matched transaction dates": "복수 정책 충돌",
+            "no active policy covers transaction dates": "정책 유효기간 불일치",
+        }
+        if text in mapping:
+            return mapping[text]
+        lowered = text.lower()
+        if text.startswith("invalid accounting payload schema:"):
+            if "occurred_at" in lowered:
+                return "거래일 입력 누락"
+            if "rate_date" in lowered:
+                return "환율 기준일 입력 누락"
+            if "currency" in lowered:
+                return "통화 입력 누락"
+            return "회계 입력 형식 오류"
+        if text.startswith("invalid accounting payload json:"):
+            return "회계 입력 JSON 형식 오류"
+        if "차변/대변이 일치하지 않습니다" in text:
+            return "차변/대변 불일치"
+        if "환차익 계정이 전표에 반영되지 않았습니다" in text:
+            return "환차익 계정 미반영"
+        if "환차손 계정이 전표에 반영되지 않았습니다" in text:
+            return "환차손 계정 미반영"
+        if "ambiguous exchange rate" in lowered or "multiple exchange rates" in lowered:
+            return "복수 환율 충돌"
+        if "exchange rate" in lowered:
+            return "환율 선택 기준 불명확"
+        if "policy" in lowered:
+            return "회계 정책 확정 필요"
+        if "lot" in lowered or "source lot" in lowered:
+            return "lot/source 지정 누락"
+        return self._humanize_accounting_issue(text).rstrip(".")
+
+    def _build_accounting_voucher_summary(self, voucher_review: dict[str, Any]) -> str:
+        status = str(voucher_review.get("status") or "").strip().lower()
+        if status == "input_missing":
+            return "전표 검토는 입력 부족으로 아직 수행되지 않았습니다."
+        if status == "failed":
+            issue = self._humanize_accounting_issue(str(voucher_review.get("failure_reason") or ""))
+            return f"전표 검토는 완료되지 않았으며 주요 사유는 {issue}"
+        if status == "completed":
+            if voucher_review.get("mismatches"):
+                return "전표 검토 결과 일부 불일치 항목이 확인되어 후속 검토가 필요합니다."
+            balance_ok = voucher_review.get("balance_ok")
+            policy_consistent = voucher_review.get("policy_consistent")
+            if balance_ok is True and policy_consistent is True:
+                return "전표 검토 결과 차변·대변 균형과 정책 일치가 확인되었습니다."
+            if balance_ok is False or policy_consistent is False:
+                return "전표 검토 결과 불일치 항목이 확인되어 수정 전 검토가 필요합니다."
+            return "전표 검토 결과 추가 확인이 필요합니다."
+        return "전표 검토 결과를 아직 확정할 수 없습니다."
+
+    def _build_accounting_voucher_issue(self, voucher_review: dict[str, Any]) -> str:
+        status = str(voucher_review.get("status") or "").strip().lower()
+        if status == "input_missing":
+            return "전표 데이터와 계정 매핑 보완"
+        if status == "failed":
+            return self._accounting_issue_label(str(voucher_review.get("failure_reason") or ""))
+        mismatches = voucher_review.get("mismatches") or []
+        if mismatches:
+            first = mismatches[0]
+            if isinstance(first, dict):
+                return self._accounting_issue_label(str(first.get("message") or "전표 불일치"))
+            return self._accounting_issue_label(str(first))
+        balance_ok = voucher_review.get("balance_ok")
+        policy_consistent = voucher_review.get("policy_consistent")
+        if balance_ok is False:
+            return "차변·대변 균형 불일치"
+        if policy_consistent is False:
+            return "회계 정책 불일치"
+        return ""
+
+    def _build_accounting_success_narrative_updates(
+        self,
+        result: StructuredRebuildResult,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        method_label = context["method_label"]
+        amount_text = context["amount_text"] or "산출 금액"
+        voucher_summary = context["voucher_summary"]
+        voucher_issue = context["voucher_issue"]
+
+        summary_lines = [
+            result.report_purpose or "이 문서는 외환 거래의 환차손익 계산 결과와 적용 회계 방식을 검토한 결과입니다.",
+            f"현재 기준 계산 방식은 {method_label}이며, 산출된 환차손익은 {amount_text}입니다.",
+            voucher_summary,
+        ]
+        if context["warning_text"]:
+            summary_lines.append(f"추가 확인이 필요한 경고는 {context['warning_label'] or context['warning_text'].rstrip('.')}입니다.")
+
+        decision_items = [
+            DecisionItem(
+                statement=f"본 거래는 {method_label} 기준으로 계산하는 것이 타당합니다.",
+                rationale="정책 입력과 계산 결과가 현재 적용 방식과 일치합니다.",
+            ),
+            DecisionItem(
+                statement=f"현재 기준 환차손익은 {amount_text}으로 산출됩니다.",
+                rationale="입력 거래와 환율을 기준으로 계산된 금액입니다.",
+            ),
+            DecisionItem(
+                statement=(
+                    f"전표 또는 입력 항목 중 {voucher_issue}는 후속 확인이 필요합니다."
+                    if voucher_issue
+                    else "전표 검토 결과와 입력 상태를 함께 유지하는 것이 필요합니다."
+                ),
+                rationale=voucher_summary,
+            ),
+        ]
+
+        priority_items = [
+            PrioritySplitItem(
+                priority=1,
+                item="계산 방식과 환차손익 수치를 먼저 확정하는 것이 필요합니다.",
+                title="회계 계산 결과 확정",
+                reason=f"{method_label} 기준 계산 결과 {amount_text}을 우선 확인해야 이후 검토 기준이 흔들리지 않습니다.",
+                impact_scope="회계 방식, 환차손익 수치, 계산 근거",
+                prerequisite="거래 입력과 환율 기준 확정",
+                linked_rules=[method_label, amount_text],
+                linked_contracts=["회계 정책 기준", "환율 데이터"],
+            ),
+            PrioritySplitItem(
+                priority=2,
+                item="전표 정합성 검토 범위를 다음 단계로 정리하는 것이 필요합니다.",
+                title="전표 정합성 검토",
+                reason=voucher_summary,
+                impact_scope="전표 검토 범위, 불일치 항목, 계정 매핑",
+                prerequisite="계산 결과 초안 확정",
+                linked_rules=["전표 검토 결과"],
+                linked_contracts=["전표 데이터", "계정 매핑"],
+            ),
+            PrioritySplitItem(
+                priority=3,
+                item="계산 결과와 운영 기준을 최종 확정하는 것이 필요합니다.",
+                title="운영 기준 확정",
+                reason="계산 방식, 환율 기준, 전표 검토 결과를 함께 확정해야 운영 해석이 흔들리지 않습니다.",
+                impact_scope="운영 기준, 재실행 조건, 후속 보고",
+                prerequisite="계산 결과와 전표 검토 1차 완료",
+                linked_rules=["회계 정책", "환율 기준"],
+                linked_contracts=["정책 기준", "입력 통제 기준"],
+            ),
+        ]
+
+        design_options = [
+            DesignOption(
+                name="옵션 A. 현재 회계 방식 유지 및 입력 통제 강화",
+                structure_summary=f"{method_label} 계산 방식을 유지하면서 입력 기준과 전표 검토 절차를 함께 강화합니다.",
+                advantages=["현재 계산 결과를 바로 설명할 수 있습니다.", "입력 통제와 전표 검토 기준을 함께 정리할 수 있습니다."],
+                risks=["입력 경고가 남아 있으면 후속 검토가 필요할 수 있습니다."],
+                difficulty="LOW",
+                duration_weeks=4,
+                recommended=True,
+                selection_reason=f"현재 계산 결과 {amount_text}과 {method_label} 적용 근거가 확인되어, 기존 계산 방식은 유지하되 입력 통제와 전표 검토 기준을 강화하는 편이 가장 안정적입니다.",
+            ),
+            DesignOption(
+                name="옵션 B. 계산 방식 변경 검토 및 전표 기준 재정렬",
+                structure_summary="계산 방식 후보를 다시 비교하고 전표 기준을 함께 재정렬합니다.",
+                advantages=["정책 변경 가능성을 함께 검토할 수 있습니다."],
+                risks=["기존 계산 결과와의 비교 검토가 추가로 필요합니다."],
+                difficulty="MEDIUM",
+                duration_weeks=5,
+                recommended=False,
+                selection_reason="계산 방식 재검토는 가능하지만 현재 계산 결과와 정책 일관성이 유지되는 상황에서는 후순위입니다.",
+            ),
+            DesignOption(
+                name="옵션 C. 전표 검토 중심 운영 보완",
+                structure_summary="전표 검토와 운영 기준 보완을 먼저 수행하고 계산 방식은 유지합니다.",
+                advantages=["운영 통제 기준을 빠르게 보완할 수 있습니다."],
+                risks=["계산 방식 검토 범위는 상대적으로 좁아질 수 있습니다."],
+                difficulty="MEDIUM",
+                duration_weeks=4,
+                recommended=False,
+                selection_reason="전표 검토 보완은 유효하지만 현재는 계산 결과와 정책 일관성 확정이 더 우선입니다.",
+            ),
+        ]
+        recommended_option = RecommendedOption(
+            name=design_options[0].name,
+            structure_summary=design_options[0].structure_summary,
+            selection_reason=design_options[0].selection_reason,
+            expected_outcomes=["계산 결과를 그대로 설명할 수 있습니다.", "전표 검토와 입력 통제 기준을 함께 유지할 수 있습니다."],
+        )
+
+        execution_plan = [
+            ExecutionPlanWeek(
+                week_label="1주차",
+                goal="거래 입력, 환율, 정책 기준을 확인합니다.",
+                tasks=["외화 거래 입력과 거래일 기준을 확인합니다.", "환율 데이터와 적용 정책 버전을 확정합니다."],
+                related_rules=[method_label, "환율 기준"],
+                related_contracts=["외화 거래 데이터", "회계 정책"],
+                roles=["업무 분석가", "회계 담당자"],
+                duration_weeks=1,
+                deliverables=["입력 확인표", "정책 기준표"],
+            ),
+            ExecutionPlanWeek(
+                week_label="2주차",
+                goal="계산 방식과 수치를 검토합니다.",
+                tasks=[f"{method_label} 계산 근거와 {amount_text} 산출 과정을 확인합니다.", "경고 항목이 있으면 계산 근거와 함께 검토합니다."],
+                related_rules=[method_label, amount_text],
+                related_contracts=["계산 방식", "환율 데이터"],
+                roles=["회계 담당자", "컨설턴트"],
+                duration_weeks=1,
+                deliverables=["계산 검토 메모", "수치 확인표"],
+            ),
+            ExecutionPlanWeek(
+                week_label="3주차",
+                goal="전표 정합성과 mismatch를 검토합니다.",
+                tasks=["전표 데이터와 계정 매핑을 계산 결과와 비교합니다.", "불일치 항목이 있으면 후속 조치 기준을 정리합니다."],
+                related_rules=["전표 정합성", voucher_issue or "전표 검토"],
+                related_contracts=["전표 데이터", "계정 매핑"],
+                roles=["회계 담당자", "QA"],
+                duration_weeks=1,
+                deliverables=["전표 검토 결과", "불일치 항목 목록"],
+            ),
+            ExecutionPlanWeek(
+                week_label="4주차",
+                goal="후속 보정 또는 운영 기준을 확정합니다.",
+                tasks=["계산 결과, 전표 검토 결과, 경고 항목을 함께 정리합니다.", "재계산 필요 여부와 운영 기준을 최종 확정합니다."],
+                related_rules=["운영 기준", "재계산 조건"],
+                related_contracts=["정책 기준", "입력 통제 기준"],
+                roles=["컨설턴트", "회계 담당자"],
+                duration_weeks=1,
+                deliverables=["운영 기준서", "후속 조치 목록"],
+            ),
+        ]
+
+        return {
+            "one_line_conclusion": f"회계 기능은 {method_label} 기준으로 환차손익 {amount_text}을 산출했으며, {voucher_summary}",
+            "executive_summary_v2": summary_lines[:4],
+            "decision_items": decision_items,
+            "priority_split_items": priority_items,
+            "design_options": design_options,
+            "recommended_option": recommended_option,
+            "execution_plan": execution_plan,
+            "recommended_directions": [
+                "계산 방식과 수치를 먼저 확정하는 것이 필요합니다.",
+                "전표 검토 결과와 입력 상태를 함께 확인하는 것이 필요합니다.",
+                "후속 운영 기준과 재계산 조건을 정리하는 것이 필요합니다.",
+            ],
+            "risks": [
+                voucher_summary,
+                "환율 기준이나 정책 버전이 바뀌면 계산 결과가 달라질 수 있습니다.",
+            ],
+        }
+
+    def _build_accounting_failure_narrative_updates(
+        self,
+        result: StructuredRebuildResult,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        failure_reason = context["humanized_failure"]
+        failure_label = context["humanized_failure_label"] or failure_reason.rstrip(".")
+        summary_lines = [
+            "이 문서는 외환 거래의 환차손익 계산 가능 여부를 검토한 결과입니다.",
+            "현재 입력 기준으로는 회계 계산을 수행할 수 없습니다.",
+            f"주요 사유는 {failure_label}입니다.",
+            "필수 입력이 보완되면 재계산이 가능합니다.",
+        ]
+        design_options = [
+            DesignOption(
+                name="옵션 A. 누락 입력 보완 후 동일 방식으로 재계산",
+                structure_summary="현재 계산 방식을 유지한 채 누락 입력을 먼저 보완하고 재계산합니다.",
+                advantages=["기존 정책 가정을 유지한 상태에서 재실행할 수 있습니다."],
+                risks=["누락 입력이 계속 남으면 계산을 확정할 수 없습니다."],
+                difficulty="LOW",
+                duration_weeks=4,
+                recommended=True,
+                selection_reason=f"현재 계산 실패 원인이 {failure_label}로 명확하므로, 누락 입력을 보완한 뒤 동일 방식으로 재계산하는 것이 가장 직접적입니다.",
+            ),
+            DesignOption(
+                name="옵션 B. 정책/환율 기준 정리 후 재실행",
+                structure_summary="정책 버전과 환율 기준을 먼저 정리한 뒤 계산을 다시 수행합니다.",
+                advantages=["입력 해석 기준을 먼저 고정할 수 있습니다."],
+                risks=["입력 보완 없이 기준만 정리하면 재계산이 다시 막힐 수 있습니다."],
+                difficulty="MEDIUM",
+                duration_weeks=4,
+                recommended=False,
+                selection_reason="정책과 환율 기준 정리는 필요할 수 있지만, 현재는 누락 입력 보완이 우선입니다.",
+            ),
+            DesignOption(
+                name="옵션 C. 전표 검토만 우선 수행",
+                structure_summary="가능한 범위의 전표 검토를 먼저 수행하고 계산은 후속으로 넘깁니다.",
+                advantages=["입력 보완 전에도 일부 검토 범위를 확보할 수 있습니다."],
+                risks=["최종 환차손익 수치는 여전히 산출할 수 없습니다."],
+                difficulty="MEDIUM",
+                duration_weeks=3,
+                recommended=False,
+                selection_reason="전표 검토 선행은 가능하지만 계산 실패 상태를 직접 해소하지는 못하므로 후순위입니다.",
+            ),
+        ]
+        recommended_option = RecommendedOption(
+            name=design_options[0].name,
+            structure_summary=design_options[0].structure_summary,
+            selection_reason=design_options[0].selection_reason,
+            expected_outcomes=["누락 입력이 정리됩니다.", "재계산 가능 여부를 다시 판단할 수 있습니다."],
+        )
+        execution_plan = [
+            ExecutionPlanWeek(
+                week_label="1주차",
+                goal="누락 입력을 확인하고 보완합니다.",
+                tasks=["필수 거래 입력, 환율, 정책 데이터를 다시 확인합니다.", "현재 실패 사유와 직접 연결된 입력 항목을 보완합니다."],
+                related_rules=["필수 입력", failure_label],
+                related_contracts=["외화 거래 데이터", "환율 데이터", "회계 정책"],
+                roles=["업무 분석가", "회계 담당자"],
+                duration_weeks=1,
+                deliverables=["누락 입력 목록", "보완 계획"],
+            ),
+            ExecutionPlanWeek(
+                week_label="2주차",
+                goal="환율, 정책, 거래일 기준을 검토합니다.",
+                tasks=["적용 환율과 정책 버전을 다시 확인합니다.", "거래일과 정책 유효기간이 맞는지 점검합니다."],
+                related_rules=["환율 기준", "정책 유효기간"],
+                related_contracts=["환율 데이터", "회계 정책"],
+                roles=["회계 담당자", "컨설턴트"],
+                duration_weeks=1,
+                deliverables=["기준 검토 메모", "재실행 조건표"],
+            ),
+            ExecutionPlanWeek(
+                week_label="3주차",
+                goal="보완된 입력으로 재계산을 수행합니다.",
+                tasks=["보완 입력으로 외화 계산을 다시 실행합니다.", "계산 방식과 산출 결과가 정상적으로 생성되는지 확인합니다."],
+                related_rules=["재계산", "계산 방식"],
+                related_contracts=["거래 입력", "정책 기준"],
+                roles=["회계 담당자", "QA"],
+                duration_weeks=1,
+                deliverables=["재계산 결과", "입력 검증 결과"],
+            ),
+            ExecutionPlanWeek(
+                week_label="4주차",
+                goal="전표 정합성과 후속 기준을 다시 확인합니다.",
+                tasks=["재계산 결과를 기준으로 전표 정합성을 검토합니다.", "후속 운영 기준과 재실행 기준을 확정합니다."],
+                related_rules=["전표 정합성", "운영 기준"],
+                related_contracts=["전표 데이터", "계정 매핑"],
+                roles=["회계 담당자", "컨설턴트"],
+                duration_weeks=1,
+                deliverables=["전표 재검토 결과", "운영 기준서"],
+            ),
+        ]
+        return {
+            "one_line_conclusion": f"회계 기능은 현재 입력 기준으로 계산을 수행할 수 없으며, 주요 사유는 {failure_label}입니다.",
+            "executive_summary_v2": summary_lines,
+            "decision_items": [
+                DecisionItem(statement="현재 입력으로는 회계 계산을 진행할 수 없습니다.", rationale=failure_reason),
+                DecisionItem(statement="누락 또는 불명확한 입력은 현재 실패 사유와 직접 연결됩니다.", rationale=failure_reason),
+                DecisionItem(statement="계산 방식 검토는 가능하지만 최종 수치 산출은 보류해야 합니다.", rationale="필수 입력이 확보되기 전까지는 계산 결과를 확정할 수 없습니다."),
+            ],
+            "priority_split_items": [
+                PrioritySplitItem(priority=1, item="누락 입력을 먼저 보완하는 것이 필요합니다.", title="필수 입력 보완", reason=failure_reason, impact_scope="거래 입력, 환율, 정책 데이터", prerequisite="현재 입력 점검", linked_rules=["필수 입력"], linked_contracts=["거래 데이터", "환율 데이터", "회계 정책"]),
+                PrioritySplitItem(priority=2, item="환율과 정책 기준을 다시 정리하는 것이 필요합니다.", title="기준 재정렬", reason="입력 보완 뒤에도 적용 기준이 불명확하면 계산을 확정할 수 없습니다.", impact_scope="환율 기준, 정책 버전, 거래일", prerequisite="누락 입력 보완", linked_rules=["환율 기준", "정책 기준"], linked_contracts=["회계 정책", "환율 데이터"]),
+                PrioritySplitItem(priority=3, item="재계산과 전표 재검토를 후속으로 수행하는 것이 필요합니다.", title="재실행 및 재검토", reason="입력 보완 이후에만 계산 결과와 전표 검토를 다시 연결할 수 있습니다.", impact_scope="재계산 결과, 전표 정합성", prerequisite="입력과 기준 정리 완료", linked_rules=["재계산"], linked_contracts=["전표 데이터", "계정 매핑"]),
+            ],
+            "design_options": design_options,
+            "recommended_option": recommended_option,
+            "execution_plan": execution_plan,
+            "recommended_directions": [
+                "누락 입력을 먼저 보완하는 것이 필요합니다.",
+                "환율과 정책 기준을 다시 확인하는 것이 필요합니다.",
+                "보완 후 재계산과 전표 재검토를 수행하는 것이 필요합니다.",
+            ],
+            "risks": [
+                "필수 입력이 보완되지 않으면 계산 결과를 확정할 수 없습니다.",
+                f"현재 실패 사유는 {failure_label}입니다.",
+            ],
+        }
+
+    def _build_accounting_warning_narrative_updates(
+        self,
+        result: StructuredRebuildResult,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        method_label = context["method_label"]
+        amount_text = context["amount_text"] or "산출 금액"
+        warning_text = context["warning_text"] or "일부 입력 경고"
+        warning_label = context["warning_label"] or warning_text.rstrip(".")
+        design_options = [
+            DesignOption(
+                name="옵션 A. 현재 계산 결과를 초안으로 유지하고 입력 보완",
+                structure_summary="현재 계산 결과는 유지하되 경고 입력을 보완하고 재검토를 진행합니다.",
+                advantages=["현재 계산 결과를 바로 검토 자료로 활용할 수 있습니다."],
+                risks=["경고 입력이 해소되기 전에는 최종 수치로 확정하면 안 됩니다."],
+                difficulty="LOW",
+                duration_weeks=4,
+                recommended=True,
+                selection_reason=f"현재 계산 방식 {method_label}과 계산 결과 {amount_text}은 확보됐지만, {warning_label} 때문에 결과를 검토용 초안으로 유지하는 것이 적절합니다.",
+            ),
+            DesignOption(
+                name="옵션 B. 정책 기준 확정 후 재계산",
+                structure_summary="정책 버전과 입력 기준을 먼저 확정한 뒤 계산을 다시 수행합니다.",
+                advantages=["경고 원인을 직접 해소할 수 있습니다."],
+                risks=["재계산 전까지는 현재 결과를 확정값으로 사용할 수 없습니다."],
+                difficulty="MEDIUM",
+                duration_weeks=4,
+                recommended=False,
+                selection_reason="정책 기준 확정은 필요하지만, 현재 계산 결과를 바로 검토 자료로 활용할 수 있으므로 2순위입니다.",
+            ),
+            DesignOption(
+                name="옵션 C. 전표 검토를 먼저 진행해 입력 불일치 정리",
+                structure_summary="전표와 입력 불일치를 먼저 정리한 뒤 계산 기준을 재확인합니다.",
+                advantages=["입력 불일치 지점을 먼저 줄일 수 있습니다."],
+                risks=["정책 기준 경고가 남아 있으면 재계산이 다시 필요합니다."],
+                difficulty="MEDIUM",
+                duration_weeks=4,
+                recommended=False,
+                selection_reason="전표 검토 선행은 가능하지만 경고 원인을 직접 줄이는 입력 보완보다 후순위입니다.",
+            ),
+        ]
+        recommended_option = RecommendedOption(
+            name=design_options[0].name,
+            structure_summary=design_options[0].structure_summary,
+            selection_reason=design_options[0].selection_reason,
+            expected_outcomes=["현재 계산 결과를 검토용 초안으로 유지할 수 있습니다.", "경고 입력을 보완한 뒤 재계산할 수 있습니다."],
+        )
+        execution_plan = [
+            ExecutionPlanWeek(
+                week_label="1주차",
+                goal="경고 항목을 확인합니다.",
+                tasks=[f"현재 계산 결과와 함께 {warning_label} 경고를 확인합니다.", "경고가 발생한 입력과 정책 기준을 정리합니다."],
+                related_rules=["경고 항목", method_label],
+                related_contracts=["입력 데이터", "회계 정책"],
+                roles=["회계 담당자", "업무 분석가"],
+                duration_weeks=1,
+                deliverables=["경고 항목 목록", "입력 점검 메모"],
+            ),
+            ExecutionPlanWeek(
+                week_label="2주차",
+                goal="입력과 정책 기준을 보완합니다.",
+                tasks=["경고를 유발한 입력과 정책 기준을 보완합니다.", "필요한 환율 또는 정책 버전 기준을 확정합니다."],
+                related_rules=["입력 보완", "정책 기준"],
+                related_contracts=["환율 데이터", "회계 정책"],
+                roles=["회계 담당자", "컨설턴트"],
+                duration_weeks=1,
+                deliverables=["입력 보완 결과", "정책 기준표"],
+            ),
+            ExecutionPlanWeek(
+                week_label="3주차",
+                goal="재계산과 비교 검토를 수행합니다.",
+                tasks=[f"{method_label} 기준으로 재계산을 수행하고 기존 {amount_text} 결과와 비교합니다.", "변경 전후 계산 차이를 검토합니다."],
+                related_rules=["재계산", "비교 검토"],
+                related_contracts=["거래 데이터", "환율 데이터"],
+                roles=["회계 담당자", "QA"],
+                duration_weeks=1,
+                deliverables=["재계산 결과", "비교 검토표"],
+            ),
+            ExecutionPlanWeek(
+                week_label="4주차",
+                goal="최종 기준을 확정합니다.",
+                tasks=["경고 해소 여부와 전표 검토 결과를 함께 확인합니다.", "최종 운영 기준과 재실행 조건을 확정합니다."],
+                related_rules=["최종 기준", "운영 기준"],
+                related_contracts=["정책 기준", "전표 데이터"],
+                roles=["컨설턴트", "회계 담당자"],
+                duration_weeks=1,
+                deliverables=["최종 기준서", "후속 조치 목록"],
+            ),
+        ]
+        return {
+            "one_line_conclusion": f"회계 기능은 {method_label} 기준으로 계산을 수행했지만, {warning_label} 때문에 결과를 검토용 초안으로 해석해야 합니다.",
+            "executive_summary_v2": [
+                "이 문서는 외환 거래의 환차손익을 계산한 결과이며, 일부 입력 경고를 포함합니다.",
+                f"현재 기준 계산 방식은 {method_label}이며, 산출된 환차손익은 {amount_text}입니다.",
+                f"다만 {warning_label} 때문에 결과는 검토용 초안으로 해석해야 합니다.",
+                context["voucher_summary"],
+            ],
+            "decision_items": [
+                DecisionItem(statement="계산은 수행되었으나 일부 입력은 추가 확인이 필요합니다.", rationale=warning_text),
+                DecisionItem(statement=f"적용 방식은 {method_label}입니다.", rationale="현재 정책과 계산 결과가 해당 방식으로 정리됩니다."),
+                DecisionItem(statement=f"주요 경고는 {warning_label}이며 최종 확정 전 검토가 필요합니다.", rationale="경고 해소 전까지는 결과를 검토용 초안으로 유지해야 합니다."),
+            ],
+            "priority_split_items": [
+                PrioritySplitItem(priority=1, item="경고 항목을 먼저 확인하는 것이 필요합니다.", title="경고 항목 확인", reason=warning_text, impact_scope="입력 데이터, 정책 기준, 환율 선택", prerequisite="현재 계산 결과 확보", linked_rules=["경고 항목"], linked_contracts=["입력 데이터", "회계 정책"]),
+                PrioritySplitItem(priority=2, item="입력과 정책 기준을 보완하는 것이 필요합니다.", title="입력/정책 보완", reason="경고 원인을 해소해야 계산 결과를 확정할 수 있습니다.", impact_scope="입력 보완, 정책 버전, 환율 기준", prerequisite="경고 항목 확인", linked_rules=["정책 기준"], linked_contracts=["환율 데이터", "회계 정책"]),
+                PrioritySplitItem(priority=3, item="재계산과 최종 기준 확정을 수행하는 것이 필요합니다.", title="재계산 및 기준 확정", reason="보완 이후 계산 결과와 전표 검토 결과를 다시 확인해야 합니다.", impact_scope="재계산 결과, 전표 검토, 운영 기준", prerequisite="입력/정책 보완 완료", linked_rules=["재계산"], linked_contracts=["전표 데이터", "계정 매핑"]),
+            ],
+            "design_options": design_options,
+            "recommended_option": recommended_option,
+            "execution_plan": execution_plan,
+            "recommended_directions": [
+                "경고 항목을 먼저 확인하는 것이 필요합니다.",
+                "입력과 정책 기준을 보완하는 것이 필요합니다.",
+                "재계산 후 최종 기준을 확정하는 것이 필요합니다.",
+            ],
+            "risks": [
+                "주요 경고가 해소되지 않으면 계산 결과를 확정할 수 없습니다.",
+                "현재 결과는 검토용 초안으로만 사용해야 합니다.",
+            ],
+        }
+
+    def _build_report_metadata(
+        self,
+        result: StructuredRebuildResult,
+        user_question: str | None = None,
+        *,
+        narrative_judgment: str | None = None,
+    ) -> tuple[str, list[str], list[str]]:
+        accounting = result.extensions.get("accounting") if isinstance(result.extensions, dict) else None
+        if isinstance(accounting, dict):
+            accounting_metadata = self._build_accounting_report_metadata(accounting, user_question=user_question)
+            if accounting_metadata[0]:
+                return accounting_metadata
+        return self._build_general_report_metadata(
+            (narrative_judgment or "").strip() or (result.primary_judgment or "").strip()
+        )
+
+    def _build_accounting_report_metadata(
+        self,
+        accounting: dict[str, Any],
+        *,
+        user_question: str | None = None,
+    ) -> tuple[str, list[str], list[str]]:
+        del user_question
+        fx_calc = accounting.get("fx_calculation") or {}
+        voucher_review = accounting.get("voucher_review") or {}
+        analysis = accounting.get("accounting_analysis") or {}
+
+        has_fx = self._has_accounting_fx_result(fx_calc)
+        has_voucher = self._has_accounting_voucher_review(voucher_review)
+        has_analysis = self._has_accounting_analysis_result(analysis)
+
+        if has_fx and has_voucher:
+            return (
+                "외환 거래의 환차손익을 계산하고, 적용된 회계 방식과 전표 정합성을 함께 검토하기 위한 보고서입니다.",
+                ["외화 거래 데이터", "환율 데이터", "회계 정책", "전표 검토 결과"],
+                [
+                    "이 거래에서 환차익 또는 환차손은 얼마인가?",
+                    "어떤 계산 방식이 적용되었는가?",
+                    "전표와 계산 결과는 일치하는가?",
+                ],
+            )
+        if has_fx:
+            return (
+                "외환 거래의 환차손익을 계산하고, 적용된 회계 방식과 계산 근거를 검증하기 위한 보고서입니다.",
+                ["외화 거래 데이터", "환율 데이터", "회계 정책"],
+                [
+                    "이 거래에서 환차익 또는 환차손은 얼마인가?",
+                    "어떤 계산 방식이 적용되었는가?",
+                    "계산 근거는 무엇인가?",
+                ],
+            )
+        if has_voucher:
+            return (
+                "전표의 차변·대변 정합성과 회계 정책 일치 여부를 검토하기 위한 보고서입니다.",
+                ["전표 데이터", "계정 매핑", "회계 정책"],
+                [
+                    "전표는 차변·대변 균형이 맞는가?",
+                    "회계 정책과 일치하는가?",
+                    "불일치 항목은 무엇인가?",
+                ],
+            )
+        if has_analysis:
+            return (
+                "이 시스템에 적용된 회계 계산 방식과 정책 구조를 분석하기 위한 보고서입니다.",
+                ["코드/SQL", "회계 정책 신호", "계산 방식 후보"],
+                [
+                    "이 시스템은 어떤 회계 방식을 사용하는가?",
+                    "추천 방식은 무엇인가?",
+                    "근거는 무엇인가?",
+                ],
+            )
+        return (
+            "회계 계산 입력과 정책 전제 조건을 점검하기 위한 보고서입니다.",
+            ["회계 입력 데이터", "회계 정책", "계산 전제 조건"],
+            [
+                "회계 계산에 필요한 입력은 충분한가?",
+                "적용할 회계 정책은 무엇인가?",
+                "어떤 전제 조건이 계산을 막고 있는가?",
+            ],
+        )
+
+    def _has_accounting_fx_result(self, fx_calculation: dict[str, Any]) -> bool:
+        if not isinstance(fx_calculation, dict):
+            return False
+        return bool(
+            fx_calculation.get("status")
+            and str(fx_calculation.get("status") or "").strip().lower() != "skipped"
+        ) or bool(
+            fx_calculation.get("method")
+            or fx_calculation.get("detail_steps")
+            or fx_calculation.get("failure_reason")
+            or fx_calculation.get("realized_gain_loss_krw") is not None
+        )
+
+    def _has_accounting_voucher_review(self, voucher_review: dict[str, Any]) -> bool:
+        if not isinstance(voucher_review, dict):
+            return False
+        return bool(
+            voucher_review.get("status")
+            and str(voucher_review.get("status") or "").strip().lower() != "skipped"
+        ) or bool(
+            voucher_review.get("review_points")
+            or voucher_review.get("mismatches")
+            or voucher_review.get("failure_reason")
+            or voucher_review.get("basis")
+        )
+
+    def _has_accounting_analysis_result(self, analysis: dict[str, Any]) -> bool:
+        if not isinstance(analysis, dict):
+            return False
+        return bool(
+            analysis.get("candidate_methods")
+            or analysis.get("recommended_method")
+            or analysis.get("reasons")
+            or analysis.get("evidence_refs")
+        )
+
+    def _build_general_report_metadata(self, primary_judgment: str) -> tuple[str, list[str], list[str]]:
+        mapping: dict[str, tuple[str, list[str], list[str]]] = {
+            "query_filter": (
+                "조회 조건, 필터 조합, 정렬 및 결과 구성 규칙을 분석하기 위한 보고서입니다.",
+                ["조회 조건", "필터 조합", "정렬 기준", "결과 구성 규칙"],
+                [
+                    "어떤 조회 조건이 핵심 규칙을 결정하는가?",
+                    "필터와 정렬은 어떤 기준으로 조합되는가?",
+                    "결과 목록 구성 규칙은 어디서 통제되는가?",
+                ],
+            ),
+            "amount_threshold": (
+                "금액 기준, 한도 정책, 경계 조건을 분석하기 위한 보고서입니다.",
+                ["금액 기준", "한도 정책", "구간 경계", "후속 처리 경계"],
+                [
+                    "어떤 금액 기준과 한도 정책이 적용되는가?",
+                    "구간별 경계 조건은 어떻게 나뉘는가?",
+                    "한도 초과 시 어떤 후속 처리 규칙이 적용되는가?",
+                ],
+            ),
+            "workflow": (
+                "승인 트리거, 승인 단계, 예외 처리 흐름을 분석하기 위한 보고서입니다.",
+                ["승인 트리거", "승인 주체", "승인 단계", "예외 처리 흐름"],
+                [
+                    "어떤 조건에서 승인 흐름이 시작되는가?",
+                    "승인 단계와 의사결정 게이트는 어떻게 구성되는가?",
+                    "예외 승인 또는 보류 흐름은 어떻게 처리되는가?",
+                ],
+            ),
+            "access_control": (
+                "권한 체계, 승인 주체, 조직별 처리 범위를 분석하기 위한 보고서입니다.",
+                ["권한 체계", "승인 주체", "조직별 처리 범위", "예외 승인 규칙"],
+                [
+                    "누가 어떤 조건에서 처리가 가능한가?",
+                    "승인 주체와 조직별 심사 경로는 어떻게 나뉘는가?",
+                    "예외 승인 규칙은 어디서 통제되는가?",
+                ],
+            ),
+            "state_transition": (
+                "상태 전이 규칙과 처리 흐름을 분석하기 위한 보고서입니다.",
+                ["상태 전이 규칙", "처리 가능 상태", "전이 조건", "후속 처리 흐름"],
+                [
+                    "어떤 상태 전이가 허용되는가?",
+                    "처리 가능 상태와 차단 상태는 무엇인가?",
+                    "전이 이후 후속 처리 흐름은 어떻게 이어지는가?",
+                ],
+            ),
+            "validation": (
+                "입력 검증, 저장 전 차단 조건, 예외 처리 기준을 분석하기 위한 보고서입니다.",
+                ["입력 검증", "저장 전 차단 조건", "검증 순서", "예외 처리 기준"],
+                [
+                    "어떤 차단 조건과 검증 규칙이 적용되는가?",
+                    "저장 전 검증 순서는 어떻게 구성되는가?",
+                    "예외 처리 기준은 어디서 통제되는가?",
+                ],
+            ),
+        }
+        return mapping.get(
+            primary_judgment,
+            (
+                "레거시 기능의 핵심 업무 규칙과 전환 구조를 분석하기 위한 보고서입니다.",
+                ["핵심 업무 규칙", "유지 계약", "전환 구조"],
+                [
+                    "이 기능의 핵심 규칙은 무엇인가?",
+                    "어떤 계약을 유지해야 하는가?",
+                    "전환 시 우선 분리해야 할 구조는 무엇인가?",
+                ],
+            ),
+        )
+
+    def _resolve_narrative_judgment(
+        self,
+        prepared: PreparedRebuildInput,
+        grounded_rules: list[GroundedBusinessRule],
+        applied_templates: list[AppliedJudgmentTemplate],
+    ) -> str:
+        ordered = self._ordered_templates_for_generation(prepared, applied_templates, grounded_rules)
+        if ordered:
+            return ordered[0].template_id
+        return (prepared.selected_primary_judgment or "").strip()
+
+    def _active_narrative_judgment(self, prepared: PreparedRebuildInput) -> str:
+        return (
+            (prepared.selected_narrative_judgment or "").strip()
+            or (prepared.selected_primary_judgment or "").strip()
+        )
+
     def _primary_template(self, prepared: PreparedRebuildInput, applied_templates: list[AppliedJudgmentTemplate]) -> AppliedJudgmentTemplate | None:
         if not applied_templates:
             return None
-        primary_name = prepared.selected_primary_judgment
+        primary_name = self._active_narrative_judgment(prepared)
         if not primary_name:
             candidates = self.collect_pattern_candidates(prepared, applied_templates)
             primary_name, _, candidates = self.select_primary_judgment(prepared, candidates)
@@ -1300,6 +2350,43 @@ class RebuildAssistantService:
 
     def build_recommended_directions(self, prepared: PreparedRebuildInput) -> list[str]:
         concept = self._primary_concept(prepared)
+        narrative = self._active_narrative_judgment(prepared)
+        if narrative == "workflow":
+            return [
+                f"{concept} 기능의 승인 트리거와 승인 단계를 먼저 확정하는 것이 필요합니다.",
+                "승인 주체와 예외 승인 경로를 같은 워크플로우 기준으로 정리하는 것이 필요합니다.",
+                "상태 전이와 승인 결과 연결 기준을 후속 단계에서 확정하는 것이 필요합니다.",
+            ]
+        if narrative == "access_control":
+            return [
+                f"{concept} 기능의 승인 주체와 부서별 처리 범위를 먼저 확정하는 것이 필요합니다.",
+                "예외 승인 경로와 조직별 심사 책임을 같은 권한 정책 기준으로 정리하는 것이 필요합니다.",
+                "권한 계약과 승인 경로를 유지한 상태에서 후속 구조를 정리하는 것이 필요합니다.",
+            ]
+        if narrative == "query_filter":
+            return [
+                f"{concept} 기능의 조회 조건과 필터 조합을 먼저 확정하는 것이 필요합니다.",
+                "정렬과 페이징 기준을 같은 조회 정책으로 정리하는 것이 필요합니다.",
+                "조회 파라미터와 SQL 조건 매핑을 후속 단계에서 고정하는 것이 필요합니다.",
+            ]
+        if narrative == "amount_threshold":
+            return [
+                f"{concept} 기능의 금액 구간과 한도 기준을 먼저 확정하는 것이 필요합니다.",
+                "승인 경계와 고액 처리 기준을 같은 금액 정책으로 정리하는 것이 필요합니다.",
+                "재계산 또는 후속 처리 기준을 후속 단계에서 고정하는 것이 필요합니다.",
+            ]
+        if narrative == "state_transition":
+            return [
+                f"{concept} 기능의 상태 전이와 처리 가능 상태를 먼저 확정하는 것이 필요합니다.",
+                "후속 처리 흐름과 상태별 차단 조건을 같은 전이 기준으로 정리하는 것이 필요합니다.",
+                "운영 메시지와 화면 상태 표시를 후속 단계에서 고정하는 것이 필요합니다.",
+            ]
+        if narrative == "validation":
+            return [
+                f"{concept} 기능의 차단 조건과 저장 전 검증 순서를 먼저 확정하는 것이 필요합니다.",
+                "선행 조건과 예외 처리 기준을 같은 검증 흐름으로 정리하는 것이 필요합니다.",
+                "운영 메시지와 재시도 기준을 후속 단계에서 고정하는 것이 필요합니다.",
+            ]
         primary_label = self._feature_mode_label(prepared.signals.primary_feature_mode)
         directions = [
             f"{concept} 기능을 단일 현대화 범위로 고정하고 화면, 정책, 데이터 계약 기준으로 정리하는 것이 필요합니다.",
@@ -1492,8 +2579,6 @@ class RebuildAssistantService:
         primary_template = ordered_templates[0] if ordered_templates else self._primary_template(prepared, applied_templates)
         if prepared.scope_limited:
             return f"{concept} 기능을 단일 범위로 제한해 정책, 화면, 데이터 계약을 단계적으로 분리하는 것이 필요합니다."
-        if prepared.signals.primary_feature_mode == "search_filters":
-            return self._build_conclusion(prepared, confidence)
         if primary_template:
             lead_rule = primary_template.matched_rule_titles[0] if primary_template.matched_rule_titles else (grounded_rules[0].title if grounded_rules else "")
             lead_rule = self._normalize_conclusion_rule_anchor(lead_rule)
@@ -1510,6 +2595,87 @@ class RebuildAssistantService:
             if primary_template.template_id == "amount_threshold":
                 return f"{concept} 기능은 {lead_rule or '직접 확인된 금액 한도 규칙'}을 기준으로 금액 구간, 한도 정책, 고액 처리 경계를 분리하는 것이 필요합니다."
         return self._build_conclusion(prepared, confidence)
+
+    def _align_core_business_rules_for_narrative(
+        self,
+        prepared: PreparedRebuildInput,
+        grounded_rules: list[GroundedBusinessRule],
+        core_business_rules: list[str],
+    ) -> list[str]:
+        narrative = self._active_narrative_judgment(prepared)
+        if not grounded_rules or not narrative:
+            return core_business_rules
+        prioritized = [
+            item.description.strip()
+            for item in grounded_rules
+            if self._rule_matches_narrative_judgment(item, narrative)
+        ]
+        if prioritized:
+            return self._dedupe_list(prioritized)[:4]
+        fallback = [item.description.strip() for item in grounded_rules if item.description.strip()]
+        return self._dedupe_list(fallback or core_business_rules)[:4]
+
+    def _align_retained_contracts_for_narrative(
+        self,
+        prepared: PreparedRebuildInput,
+        retained_contracts: list[RetainedContract],
+    ) -> list[RetainedContract]:
+        narrative = self._active_narrative_judgment(prepared)
+        if not retained_contracts or not narrative:
+            return retained_contracts
+        prioritized = [
+            item for item in retained_contracts
+            if self._contract_matches_narrative_judgment(item, narrative)
+        ]
+        if not prioritized:
+            return retained_contracts
+        return self._dedupe_by_normalized_text(prioritized, attr="item")
+
+    def _rule_matches_narrative_judgment(
+        self,
+        rule: GroundedBusinessRule,
+        narrative_judgment: str,
+    ) -> bool:
+        text = " ".join(
+            [
+                rule.title,
+                rule.description,
+                " ".join(rule.design_targets),
+            ]
+        )
+        if narrative_judgment == "workflow":
+            return self._workflow_keyword_hit_count(text) > 0
+        if narrative_judgment == "access_control":
+            return self._access_control_keyword_hit_count(text) > 0
+        if narrative_judgment == "query_filter":
+            return self._query_filter_keyword_hit_count(text) > 0
+        if narrative_judgment == "amount_threshold":
+            return self._amount_threshold_keyword_hit_count(text) > 0 and self._query_filter_keyword_hit_count(text) == 0
+        if narrative_judgment == "state_transition":
+            return self._state_keyword_hit_count(text) > 0
+        if narrative_judgment == "validation":
+            return self._validation_keyword_hit_count(text) > 0
+        return True
+
+    def _contract_matches_narrative_judgment(
+        self,
+        contract: RetainedContract,
+        narrative_judgment: str,
+    ) -> bool:
+        text = f"{contract.item} {contract.basis}"
+        if narrative_judgment == "workflow":
+            return self._workflow_keyword_hit_count(text) > 0
+        if narrative_judgment == "access_control":
+            return self._access_control_keyword_hit_count(text) > 0
+        if narrative_judgment == "query_filter":
+            return self._query_filter_keyword_hit_count(text) > 0
+        if narrative_judgment == "amount_threshold":
+            return self._amount_threshold_keyword_hit_count(text) > 0 and self._query_filter_keyword_hit_count(text) == 0
+        if narrative_judgment == "state_transition":
+            return self._state_keyword_hit_count(text) > 0
+        if narrative_judgment == "validation":
+            return self._validation_keyword_hit_count(text) > 0
+        return True
 
     def _normalize_conclusion_rule_anchor(self, text: str) -> str:
         normalized = (text or "").strip()
@@ -1573,6 +2739,8 @@ class RebuildAssistantService:
         anchored = self._resolve_domain_anchor(prepared)
         if anchored:
             return anchored
+        if prepared.accounting_input is not None:
+            return "회계"
         if prepared.signals.primary_feature_mode == "search_filters":
             return "조회/필터"
         if self._has_amount_threshold_focus(prepared):
@@ -1838,6 +3006,33 @@ class RebuildAssistantService:
     def _is_ui_asset_name(self, name: str) -> bool:
         lowered = (name or "").strip().lower()
         return any(lowered.endswith(ext) for ext in (".jsp", ".html", ".ftl", ".vue"))
+
+    def _looks_like_accounting_payload_asset(self, asset_name: str, content: str) -> bool:
+        lowered = (asset_name or "").strip().lower()
+        if lowered == "accounting_payload.json":
+            return True
+        if not lowered.endswith(".json"):
+            return False
+        try:
+            payload = json.loads(content)
+        except Exception:
+            return False
+        if not isinstance(payload, dict):
+            return False
+        keys = set(payload.keys())
+        return bool(keys & {"transactions", "exchange_rates", "policies", "vouchers", "account_mappings"})
+
+    def _parse_accounting_payload(self, content: str) -> tuple[Any | None, str]:
+        try:
+            payload = json.loads(content)
+        except Exception as exc:
+            return None, f"invalid accounting payload json: {exc}"
+        try:
+            from mellow_link.services.accounting_mvp.schemas import AccountingInputBundle
+
+            return AccountingInputBundle.model_validate(payload), ""
+        except Exception as exc:
+            return None, f"invalid accounting payload schema: {exc}"
 
     def _is_source_asset_name(self, name: str) -> bool:
         lowered = (name or "").strip().lower()
@@ -3717,7 +4912,26 @@ class RebuildAssistantService:
                     linked_evidence=[evidence for rule in grounded_rules[:1] for evidence in rule.evidence][:2],
                 )
             )
-        return items[:3]
+        deduped: list[DecisionItem] = []
+        seen_statements: set[str] = set()
+        for item in items:
+            key = self._normalize_key(item.statement)
+            if not key or key in seen_statements:
+                continue
+            seen_statements.add(key)
+            deduped.append(item)
+        while len(deduped) < 3:
+            fallback = DecisionItem(
+                statement=f"{concept} 기능의 핵심 규칙과 유지 계약을 같은 실행 계획 안에서 고정하는 것이 필요합니다.",
+                rationale="핵심 규칙과 데이터 계약을 함께 정리해야 분리 순서가 흔들리지 않습니다.",
+                linked_evidence=[evidence for rule in grounded_rules[:1] for evidence in rule.evidence][:2],
+            )
+            key = self._normalize_key(fallback.statement)
+            if key in seen_statements:
+                break
+            seen_statements.add(key)
+            deduped.append(fallback)
+        return deduped[:3]
 
     def _build_template_priority_split_items(
         self,
@@ -5003,6 +6217,8 @@ class RebuildAssistantService:
 
     def _sanitize_text(self, text: str) -> str:
         sanitized = (text or "").strip()
+        from .postprocess.rules import apply_sentence_polish
+
         replacements = {
             "REDACTED_PATH": "",
             "role/status/action visibility": "역할별 액션 노출 규칙",
@@ -5051,6 +6267,11 @@ class RebuildAssistantService:
         sanitized = sanitized.replace("조회 조회", "조회")
         sanitized = sanitized.replace("규칙 규칙", "규칙")
         sanitized = sanitized.replace("정합성를", "정합성을")
+        sanitized = sanitized.replace("누락로", "누락으로")
+        sanitized = sanitized.replace("금지을", "금지를")
+        sanitized = sanitized.replace("규칙야 합니다", "규칙이어야 합니다")
+        sanitized = sanitized.replace("이동평균법로", "이동평균법으로")
+        sanitized = sanitized.replace("입니다. 입니다.", "입니다.")
         sanitized = sanitized.replace("조회 조건과 SQL 파라미터 조합 규칙을 명시적으로 정리해", "조회 조건과 SQL 파라미터 조합 규칙")
         sanitized = sanitized.replace("조회 조건과 SQL 파라미터 조합 규칙 규칙", "조회 조건과 SQL 파라미터 조합 규칙")
         sanitized = sanitized.replace("여부을", "여부를")
@@ -5060,6 +6281,7 @@ class RebuildAssistantService:
         sanitized = re.sub(r"\s{2,}", " ", sanitized)
         sanitized = re.sub(r"\s+([,.:])", r"\1", sanitized)
         sanitized = sanitized.replace("layered architecture", "계층 분리 구조")
+        sanitized = apply_sentence_polish(sanitized)
         return sanitized.strip()
 
     def _resource_name(self, prepared: PreparedRebuildInput) -> str:
