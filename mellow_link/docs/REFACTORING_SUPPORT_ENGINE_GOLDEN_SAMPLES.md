@@ -67,3 +67,17 @@
 1. 정책 조정, detector 튜닝, slice 규칙 변경 후에는 이 golden set을 먼저 돌린다.
 2. 기대값을 바꿔야 한다면 코드와 문서를 같은 변경에서 함께 갱신한다.
 3. golden sample이 깨졌는데 문서를 갱신하지 않았다면 변경은 완료로 보지 않는다.
+
+## 확장 샘플 풀
+
+고정 golden set과 별도로, Phase 3 전 회귀 축 확장을 위한 후보 샘플은 아래 경로에 보관한다.
+
+- [mellow_link/modules/rebuild_assistant/samples](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/modules/rebuild_assistant/samples)
+
+공통 템플릿과 pack 설명서는 아래 경로를 사용한다.
+
+- [samples/_templates/golden_samples_expansion](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/modules/rebuild_assistant/samples/_templates/golden_samples_expansion)
+
+확장 샘플용 QA 체크리스트는 아래 보조 문서를 사용한다.
+
+- [REFACTORING_SUPPORT_ENGINE_GOLDEN_SAMPLE_EXPANSION_QA_CHECKLIST.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/REFACTORING_SUPPORT_ENGINE_GOLDEN_SAMPLE_EXPANSION_QA_CHECKLIST.md)

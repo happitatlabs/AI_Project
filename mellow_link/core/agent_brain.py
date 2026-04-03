@@ -319,7 +319,8 @@ class AgentBrain:
             return False
         if tool_name in heavy_reasoning_tools:
             return True
-        return False
+        # Unknown tools are treated as heavy so FAST mode escalates before execution.
+        return True
 
     # ──────────────────────────────────────────
     # 메인 루프

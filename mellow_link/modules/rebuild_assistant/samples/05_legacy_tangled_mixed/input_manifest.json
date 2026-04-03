@@ -1,0 +1,13 @@
+{
+  "sample_id": "05_legacy_tangled_mixed",
+  "title": "레거시 뒤엉킴 구조형",
+  "category": "legacy_tangled_mixed",
+  "description": "여러 책임 혼합, boundary mismatch, mixed responsibility가 동시에 나오는 최악 구조 샘플 검증",
+  "assets": [],
+  "expected_focus": {
+    "feature_slices": 0,
+    "primary_judgment": "",
+    "top_decision_type": "",
+    "notes": []
+  }
+}

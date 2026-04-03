@@ -1,0 +1,13 @@
+{
+  "sample_id": "01_crud_simple",
+  "title": "CRUD 단순형",
+  "category": "crud_simple",
+  "description": "기본 CRUD 흐름에서 과잉 detector 없이 안정적인 feature slice / refactor 판단을 고정 검증",
+  "assets": [],
+  "expected_focus": {
+    "feature_slices": 0,
+    "primary_judgment": "",
+    "top_decision_type": "",
+    "notes": []
+  }
+}

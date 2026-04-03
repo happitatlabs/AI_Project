@@ -40,6 +40,9 @@
 - 관련 테스트:
   - [test_refactoring_support_doc_contract.py](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/tests/test_refactoring_support_doc_contract.py)
   - [test_scoring_policy.py](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/tests/test_scoring_policy.py)
+- 운영 규칙:
+  - Phase 3 전에는 detector/scoring policy 값을 변경하지 않는다.
+  - detector base severity, default effort, detector weight, multiplier, bonus 값 조정은 금지다.
 
 4. explainability가 score와 동일한 판단을 설명하는가
 - `decision_rule`
@@ -77,6 +80,7 @@
 8. 고정 샘플 회귀가 유지되는가
 - 기준 샘플은 [REFACTORING_SUPPORT_ENGINE_GOLDEN_SAMPLES.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/REFACTORING_SUPPORT_ENGINE_GOLDEN_SAMPLES.md)와 동일해야 한다.
 - `primary_judgment`, `execution_plan`, `design_options`, `recommended_option`은 stable hash 기준으로도 drift가 없어야 한다.
+- detector/scoring policy가 freeze 상태이므로 golden sample priority drift는 즉시 회귀로 간주한다.
 - 관련 테스트:
   - [test_refactoring_support_golden_samples.py](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/tests/test_refactoring_support_golden_samples.py)
 

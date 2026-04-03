@@ -1,0 +1,13 @@
+{
+  "sample_id": "03_state_transition_complex",
+  "title": "상태 전이 복잡형",
+  "category": "state_transition_complex",
+  "description": "상태값 분기와 전이 누수 탐지, redesign 또는 workflow 중심 권고의 안정성 검증",
+  "assets": [],
+  "expected_focus": {
+    "feature_slices": 0,
+    "primary_judgment": "",
+    "top_decision_type": "",
+    "notes": []
+  }
+}

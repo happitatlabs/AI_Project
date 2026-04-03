@@ -11,6 +11,11 @@ Umbrella module: 모든 agent tool 서브모듈 import로 @tool 자동 등록 �
   - from mellow_link.core.agent_tools import X    (re-export via *)
 """
 
+import mellow_link.core.agent_tools_base as _agent_tools_base
+
+# test/bootstrap 경계에서 agent_tools를 reload하면 현재 env 기준으로 frozen security를 재초기화한다.
+_agent_tools_base.refresh_security_from_env()
+
 # base (보안 초기화 + 경로 헬퍼) - 반드시 먼저 import
 from mellow_link.core.agent_tools_base import *     # noqa: F401,F403
 # 도메인별 도구 모듈

@@ -1,0 +1,13 @@
+{
+  "sample_id": "04_db_heavy_query_filter",
+  "title": "DB-heavy / Query Filter형",
+  "category": "db_heavy_query_filter",
+  "description": "query_filter_leak, duplicate predicate, DB-heavy 구조에서 판단/계획 안정성 검증",
+  "assets": [],
+  "expected_focus": {
+    "feature_slices": 0,
+    "primary_judgment": "",
+    "top_decision_type": "",
+    "notes": []
+  }
+}

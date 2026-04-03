@@ -314,6 +314,9 @@ class LLMService:
     def _session_matches_current_loop(self) -> bool:
         if not self._session or self._session.closed:
             return False
+        if not isinstance(self._session, aiohttp.ClientSession):
+            # Test doubles / injected mock sessions are treated as reusable.
+            return True
         try:
             current_loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -328,6 +331,9 @@ class LLMService:
             raise RuntimeError("LLMService requires a running asyncio task/loop") from e
 
         if self._session and not self._session.closed:
+            if not isinstance(self._session, aiohttp.ClientSession):
+                self._session_loop = current_loop
+                return
             session_loop = getattr(self._session, "_loop", None) or self._session_loop
             if session_loop is not None and session_loop is not current_loop:
                 logger.warning(

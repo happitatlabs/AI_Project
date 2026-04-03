@@ -11,13 +11,17 @@ logger = logging.getLogger(__name__)
 class NullSearchAdapter(SearchAdapter):
     """웹 검색 비활성화 시 사용. search() 호출 시 PermissionError."""
 
+    def __init__(self, *, blocked_flag: str = "ENABLE_WEB_SEARCH", detail: str = "웹 검색 비활성화") -> None:
+        self._blocked_flag = blocked_flag
+        self._detail = detail
+
     async def search(
         self,
         query: str,
         top_k: int = 5,
         scrape_content: bool = True,
     ) -> List[SearchResult]:
-        log_airgap_block("NullSearchAdapter.search", "ENABLE_WEB_SEARCH", "웹 검색 비활성화")
+        log_airgap_block("NullSearchAdapter.search", self._blocked_flag, self._detail)
         raise PermissionError(
-            "ENABLE_WEB_SEARCH=0. 웹 검색이 비활성화되었습니다(폐쇄망/정책)."
+            f"{self._blocked_flag}=0. {self._detail}(폐쇄망/정책)."
         )

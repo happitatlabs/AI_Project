@@ -1,5 +1,5 @@
 """
-Workspace Sandbox - 자율 에이전트 전용 작업 구역 제어
+Workspace Sandbox - 자율 에이전트 전용 작업 구역 제어.
 
 지침: mellow_link/workspace/ 폴더 내로만 파일 쓰기 허용.
 core/, config/, .env 등은 절대 수정 불가 (읽기만 허용).
@@ -20,8 +20,31 @@ _PROTECTED_FILES = (".env", "config.py", "settings.py")
 # 자율 작업 허용 구역
 WORKSPACE_SUBDIR = "workspace"
 
-# [ABSOLUTE_PATH_ANCHORING] 프로젝트 루트를 하드코딩된 상수로 고정
-_WORKSPACE_ROOT_CONSTANT = Path(r"D:\AI_Project\mellow_link\workspace")
+def _compute_workspace_root() -> Path:
+    """
+    현재 실행 중인 repo 기준 workspace 루트를 계산한다.
+
+    우선순위:
+    1. MELLOW_LINK_PROJECT_ROOT / PROJECT_ROOT
+    2. 현재 파일 위치 기준 mellow_link 루트
+    """
+    root_hint = Path(
+        (
+            __import__("os").environ.get("MELLOW_LINK_PROJECT_ROOT")
+            or __import__("os").environ.get("PROJECT_ROOT")
+            or ""
+        )
+    )
+    if str(root_hint).strip():
+        base = root_hint.resolve()
+        if (base / "core").exists() and (base / "config").exists():
+            return (base / WORKSPACE_SUBDIR).resolve()
+        if (base / "mellow_link" / "core").exists() and (base / "mellow_link" / "config").exists():
+            return (base / "mellow_link" / WORKSPACE_SUBDIR).resolve()
+    return (Path(__file__).resolve().parents[1] / WORKSPACE_SUBDIR).resolve()
+
+
+_WORKSPACE_ROOT_CONSTANT = _compute_workspace_root()
 
 
 class WorkspaceSandboxError(PermissionError):
@@ -30,10 +53,9 @@ class WorkspaceSandboxError(PermissionError):
 
 def get_workspace_root() -> Path:
     """
-    [ABSOLUTE_PATH_ANCHORING] mellow_link/workspace/ 절대 경로 반환.
-    하드코딩된 상수를 사용하여 경로 변형(melody_link 등)을 방지.
+    mellow_link/workspace 절대 경로 반환.
+    repo 루트 또는 명시적 프로젝트 루트 환경변수 기준으로 계산한다.
     """
-    # 상수 경로가 존재하지 않으면 생성
     _WORKSPACE_ROOT_CONSTANT.mkdir(parents=True, exist_ok=True)
     return _WORKSPACE_ROOT_CONSTANT
 

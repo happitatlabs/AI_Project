@@ -61,6 +61,30 @@ _FROZEN_SECURITY_LEVEL: str = "NORMAL"
 _FROZEN_SECURITY: Optional[SecurityManager] = None
 
 
+def refresh_security_from_env() -> SecurityManager:
+    """
+    agent_tools 모듈 reload 경계에서만 frozen security를 재초기화한다.
+
+    런타임 중 일반 도구 호출에서는 _get_security()가 고정 인스턴스를 그대로 사용한다.
+    """
+    global _FROZEN_SECURITY_LEVEL, _FROZEN_SECURITY
+    try:
+        _load_dotenv_once()
+    except Exception:
+        pass
+
+    level = (os.getenv("SECURITY_LEVEL") or os.getenv("MELLOW_SECURITY_LEVEL") or "").strip().upper()
+    if level not in {"EASY", "NORMAL", "HARD"}:
+        level = "NORMAL"
+
+    _FROZEN_SECURITY_LEVEL = level
+    _FROZEN_SECURITY = SecurityManager(
+        level=_FROZEN_SECURITY_LEVEL,
+        sandbox_root=_compute_sandbox_root_for_security(),
+    )
+    return _FROZEN_SECURITY
+
+
 def _get_security() -> SecurityManager:
     """
     보안 매니저 반환 (IMMUTABLE).
@@ -177,17 +201,7 @@ def _compute_sandbox_root_for_security() -> Path:
 # -----------------------------------------------------------------------------
 # Freeze Security Level at import time (IMMUTABLE)
 # -----------------------------------------------------------------------------
-try:
-    _load_dotenv_once()
-except Exception:
-    pass
-
-_lvl = (os.getenv("SECURITY_LEVEL") or os.getenv("MELLOW_SECURITY_LEVEL") or "").strip().upper()
-if _lvl not in {"EASY", "NORMAL", "HARD"}:
-    _lvl = "NORMAL"
-
-_FROZEN_SECURITY_LEVEL = _lvl
-_FROZEN_SECURITY = SecurityManager(level=_FROZEN_SECURITY_LEVEL, sandbox_root=_compute_sandbox_root_for_security())
+refresh_security_from_env()
 
 
 # ═══════════════════════════════════════════════

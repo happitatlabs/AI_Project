@@ -9,6 +9,8 @@
 - AI narrative layer는 runner에서만 동작하고, `build_result()` 직접 호출 경로는 항상 deterministic fallback 결과를 유지한다.
 - 현재 엔진 소유권은 `DecisionEngine + JudgmentSynthesizer`, `ImprovementPlanner + PlanningSynthesizer` 기준으로 정리한다.
 - `service.py`는 공개 입력/실행 진입점, polish, extension/accounting bridge, sanitize 중심의 compatibility adapter로 유지한다.
+- `detector policy`와 `scoring policy`는 Phase 3 시작 전까지 freeze 상태로 유지한다.
+- Phase 3 전에는 `DEFAULT_DETECTOR_POLICIES`, `DEFAULT_SCORING_POLICY`, detector weight, score formula, bonus 규칙을 변경하지 않는다.
 - 자동화, 코드 생성, 마이그레이션 스크립트는 MVP 제외다. `migration_consideration`은 판단만 제공한다.
 
 **Current vs Target 구조 비교**
@@ -68,6 +70,7 @@
 - `blast_radius`: 영향받는 `components + layers + slices`를 bucket 1~5로 환산
 - `effort`: helper 추출 1, service split 3, boundary redesign 5
 - `priority_score = severity*2 + blast_radius - effort + confidence_bonus`
+- 위 detector/scoring 정책값은 Phase 3 전까지 변경 금지다.
 
 **Data Schema**
 ```json
@@ -225,6 +228,7 @@ EvidenceLink:
   - score_breakdown / explainability 검증
   - feature_slice 규칙 검증
   - golden sample 회귀 검증
+- 단, Phase 3 전에는 구조 변경만 허용하고 detector/scoring policy 값 변경은 허용하지 않는다.
 
 **File Structure**
 ```text

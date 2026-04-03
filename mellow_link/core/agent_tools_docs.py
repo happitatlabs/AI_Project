@@ -31,7 +31,7 @@ def _resolve_docs_path(file_path: str) -> Tuple[Path, Optional[str]]:
     raw = file_path.strip()
     if ".." in raw:
         return Path(), "[Error] Path traversal (..) not allowed"
-    if Path(raw).is_absolute():
+    if raw.startswith(("/", "\\")) or Path(raw).is_absolute():
         return Path(), "[Error] Absolute paths not allowed"
     clean = raw.replace("\\", "/").lstrip("/")
     if clean.startswith("docs/"):
