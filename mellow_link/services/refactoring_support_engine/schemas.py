@@ -228,6 +228,14 @@ class DiagnosisArtifacts(BaseModel):
     analysis_summary: list[str] = Field(default_factory=list)
 
 
+class DecisionExplainability(BaseModel):
+    decision_rule: str = ""
+    score_formula: str = ""
+    score_summary: str = ""
+    evidence_count: int = 0
+    affected_slice_count: int = 0
+
+
 class DecisionRecord(BaseModel):
     decision_id: str
     issue_ids: list[str] = Field(default_factory=list)
@@ -235,6 +243,7 @@ class DecisionRecord(BaseModel):
     target_component_ids: list[str] = Field(default_factory=list)
     priority_score: int = 0
     score_breakdown: dict[str, int] = Field(default_factory=dict)
+    explainability: DecisionExplainability = Field(default_factory=DecisionExplainability)
     rationale: str
     confidence: float = 0.0
     evidence_ids: list[str] = Field(default_factory=list)

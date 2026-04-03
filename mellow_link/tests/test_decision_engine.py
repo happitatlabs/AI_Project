@@ -37,6 +37,8 @@ class OrderRepository:
 
     assert any(item.decision_type == "redesign" for item in decisions.decision_summary.decisions)
     assert all(item.score_breakdown["final_score"] == item.priority_score for item in decisions.decision_summary.decisions)
+    assert all(item.explainability.score_formula for item in decisions.decision_summary.decisions)
+    assert all("final_score=" in item.explainability.score_summary for item in decisions.decision_summary.decisions)
     assert decisions.primary_judgment
 
 
@@ -106,3 +108,5 @@ class ApprovalService:
         }
         for item in decisions.decision_summary.decisions
     )
+    assert all(item.explainability.decision_rule.startswith("detector_id=") for item in decisions.decision_summary.decisions)
+    assert all(item.explainability.evidence_count >= 1 for item in decisions.decision_summary.decisions)

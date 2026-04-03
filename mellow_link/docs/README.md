@@ -76,6 +76,10 @@
   - 현재 제품 구조, 디렉토리 구분, 대표 실행 흐름
 - [refactoring_support_engine.md](/C:/Users/Hyein/ClaudeAI/AI_Project/refactoring_support_engine.md)
   - `rebuild_assistant` Phase 1 엔진 구조, authoritative payload, feature slice/diagnosis/decision 흐름의 기준 문서
+- [REFACTORING_SUPPORT_ENGINE_QA_CHECKLIST.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/REFACTORING_SUPPORT_ENGINE_QA_CHECKLIST.md)
+  - 문서 기준 검증 루프, 자동/수동 QA 체크리스트, 권장 pytest 실행 기준
+- [REFACTORING_SUPPORT_ENGINE_GOLDEN_SAMPLES.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/REFACTORING_SUPPORT_ENGINE_GOLDEN_SAMPLES.md)
+  - 고정 샘플 5개와 기대 anchor, golden regression 운영 규칙
 - [PRODUCT_STRUCTURE_TEMPLATE.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/PRODUCT_STRUCTURE_TEMPLATE.md)
   - 새 분석형 제품을 붙일 때의 기준 구조
 - [ANALYSIS_OUTPUT_GAP_REPORT_2026-03-26.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/ANALYSIS_OUTPUT_GAP_REPORT_2026-03-26.md)

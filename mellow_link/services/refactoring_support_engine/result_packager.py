@@ -5,6 +5,7 @@ from typing import Any
 
 from mellow_link.modules.rebuild_assistant.schemas import StructuredRebuildResult
 
+from .narrative_fallback import DeterministicNarrativeBuilder
 from .schemas import (
     DecisionArtifacts,
     DiagnosisArtifacts,
@@ -15,6 +16,9 @@ from .schemas import (
 
 
 class ResultPackager:
+    def __init__(self) -> None:
+        self.narrative_builder = DeterministicNarrativeBuilder()
+
     def package(
         self,
         prepared: Any,
@@ -25,21 +29,13 @@ class ResultPackager:
         legacy_service: Any,
     ) -> StructuredRebuildResult:
         confidence = legacy_service.estimate_confidence(prepared)
-        core_business_rules = legacy_service._align_core_business_rules_for_narrative(
-            prepared,
-            diagnosis.grounded_business_rules,
-            diagnosis.core_business_rules,
-        )
-        retained_contracts = legacy_service._align_retained_contracts_for_narrative(
-            prepared,
-            diagnosis.retained_contracts,
-        )
+        extensions = legacy_service._build_extensions(prepared)
         feature_slices = []
         for item in structure.structure_snapshot.feature_slices:
             if item.business_rules:
                 feature_slices.append(item)
             else:
-                feature_slices.append(item.model_copy(update={"business_rules": core_business_rules[:2]}))
+                feature_slices.append(item.model_copy(update={"business_rules": diagnosis.core_business_rules[:2]}))
         authoritative = StructuredRefactoringResult(
             structure_snapshot=structure.structure_snapshot.model_copy(update={"feature_slices": feature_slices}),
             diagnosis_report=diagnosis.diagnosis_report,
@@ -49,24 +45,14 @@ class ResultPackager:
         )
         result = StructuredRebuildResult(
             primary_judgment=decisions.primary_judgment,
-            primary_judgment_reason=decisions.primary_judgment_reason,
+            primary_judgment_reason="",
             pattern_candidates=decisions.pattern_candidates,
-            one_line_conclusion=legacy_service._build_conclusion_with_templates(
-                prepared,
-                confidence,
-                diagnosis.grounded_business_rules,
-                decisions.applied_templates,
-            ),
-            core_business_rules=core_business_rules,
-            executive_summary_v2=legacy_service.build_executive_summary_v2(
-                prepared,
-                diagnosis.grounded_business_rules,
-                improvement.recommended_option,
-                decisions.applied_templates,
-            ),
+            one_line_conclusion="",
+            core_business_rules=list(diagnosis.core_business_rules),
+            executive_summary_v2=[],
             grounded_business_rules=diagnosis.grounded_business_rules,
             decision_items=decisions.decision_items,
-            retained_contracts=retained_contracts,
+            retained_contracts=list(diagnosis.retained_contracts),
             priority_split_items=improvement.priority_split_items,
             verification_checkpoints=improvement.verification_checkpoints,
             design_options=improvement.design_options,
@@ -82,20 +68,46 @@ class ResultPackager:
             confidence=confidence,
             missing_context=[item.required_material for item in diagnosis.missing_context_details],
             missing_context_details=diagnosis.missing_context_details,
-            extensions=legacy_service._build_extensions(prepared),
+            extensions=extensions,
             structure_snapshot=authoritative.structure_snapshot.model_dump(),
             diagnosis_report=authoritative.diagnosis_report.model_dump(),
             decision_summary=authoritative.decision_summary.model_dump(),
             improvement_plan_bundle=authoritative.improvement_plan_bundle.model_dump(),
             appendix=authoritative.appendix,
         )
-        result = self._soften_supporting_sentences(result)
-        result = legacy_service.attach_report_purpose(
-            result,
-            user_question=prepared.goal,
-            narrative_judgment=decisions.selected_narrative_judgment,
-        )
         result = legacy_service._apply_accounting_top_narrative(prepared, result)
+        narrative_bundle = self.narrative_builder.build(
+            prepared=prepared,
+            diagnosis=diagnosis,
+            decisions=decisions,
+            improvement=improvement,
+            confidence=confidence,
+            extensions=result.extensions,
+        )
+        merged_extensions = dict(result.extensions if isinstance(result.extensions, dict) else {})
+        merged_extensions["narrative"] = {
+            "source": "deterministic_fallback",
+            "fields_rewritten": [],
+            "model": "",
+            "prompt_version": "phase1.8-top-narrative-v1",
+            "validation_passed": True,
+            "failure_reason": "",
+            "axis": narrative_bundle.narrative_axis,
+        }
+        result = result.model_copy(
+            update={
+                "report_purpose": narrative_bundle.report_purpose,
+                "report_scope": narrative_bundle.report_scope,
+                "report_questions": narrative_bundle.report_questions,
+                "primary_judgment_reason": narrative_bundle.primary_judgment_reason or decisions.primary_judgment_reason,
+                "one_line_conclusion": narrative_bundle.one_line_conclusion,
+                "executive_summary_v2": narrative_bundle.executive_summary_v2,
+                "core_business_rules": narrative_bundle.core_business_rules,
+                "retained_contracts": narrative_bundle.retained_contracts,
+                "extensions": merged_extensions,
+            }
+        )
+        result = self._soften_supporting_sentences(result)
         result = legacy_service._apply_accounting_bottom_sections(prepared, result)
         return legacy_service._sanitize_structured_result(result)
 

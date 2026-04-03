@@ -44,6 +44,7 @@
   - `DecisionEngine`
   - `ImprovementPlanner`
   - `ResultPackager`
+  - `NarrativeAugmentationService` (runner 전용 설명 레이어)
 
 판단 템플릿 canonical source는
 [`decision_catalog.py`](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/services/refactoring_support_engine/decision_catalog.py)이며,
@@ -119,6 +120,17 @@ raw `assets` / `temp_session_id` 입력은 공개 API에서 사용하지 않습�
 
 `structured_result`는 기존 flat 결과와 함께 authoritative block을 병렬 유지한다.
 
+현재 top narrative 경로는 아래처럼 고정한다.
+
+- `build_result()`
+  - deterministic fallback 결과만 생성
+- `runner`
+  - optional `NarrativeAugmentationService`
+- `build_polish_bundle()`
+  - 표현 polish만 수행
+
+즉 AI는 설명 레이어에만 들어가고, canonical 구조/판단 block은 항상 deterministic source를 유지한다.
+
 [authoritative block]
 - `structure_snapshot`
   - `feature_slices`
@@ -185,6 +197,12 @@ raw `assets` / `temp_session_id` 입력은 공개 API에서 사용하지 않습�
   - `multi_slice_bonus`
   - `redesign_bonus`
   - `final_score`
+- `explainability`
+  - `decision_rule`
+  - `score_formula`
+  - `score_summary`
+  - `evidence_count`
+  - `affected_slice_count`
 
 `execution_plan`은 자동 실행이 아니라 `실행 준비 계획` 또는 `실행 준비 초안`이다.
 
@@ -212,6 +230,14 @@ raw `assets` / `temp_session_id` 입력은 공개 API에서 사용하지 않습�
   - `fx_calculation`
   - `voucher_review`
   - `summary_sentence`
+- `structured_result.extensions.narrative`
+  - `source`
+  - `fields_rewritten`
+  - `model`
+  - `prompt_version`
+  - `validation_passed`
+  - `failure_reason`
+  - `axis`
 
 `report_purpose`는 문서의 목적을 설명하고, `summary_sentence`는 실행 결과를 설명한다. 두 필드는 같은 역할로 재사용하지 않는다.
 
@@ -246,3 +272,8 @@ raw `assets` / `temp_session_id` 입력은 공개 API에서 사용하지 않습�
 - feature mode 분류 회귀
 - `status_permissions` / `search_filters` / `save_validation` 샘플의 결론 문구
 - todo 매핑과 runner payload
+
+문서 기준 검증과 고정 샘플 회귀는 아래를 추가 기준으로 사용한다.
+
+- [REFACTORING_SUPPORT_ENGINE_QA_CHECKLIST.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/REFACTORING_SUPPORT_ENGINE_QA_CHECKLIST.md)
+- [REFACTORING_SUPPORT_ENGINE_GOLDEN_SAMPLES.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/REFACTORING_SUPPORT_ENGINE_GOLDEN_SAMPLES.md)

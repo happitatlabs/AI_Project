@@ -9,6 +9,19 @@
 - `java_order_closure_case_01`
   - JSP/Java 기반 주문 마감 기능 레거시 샘플
 
+고정 회귀 샘플 세트는 아래 5개를 기준으로 사용한다.
+
+- `00. rca_exception_case_01`
+- `01. java_order_closure_case_01`
+- `02. python_claim_adjustment_case_01`
+- `04. amount_limit`
+- `01_success_full`
+
+위 샘플의 기대 결과는 아래 문서와 테스트로 함께 고정한다.
+
+- [REFACTORING_SUPPORT_ENGINE_GOLDEN_SAMPLES.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/REFACTORING_SUPPORT_ENGINE_GOLDEN_SAMPLES.md)
+- [test_refactoring_support_golden_samples.py](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/tests/test_refactoring_support_golden_samples.py)
+
 모든 샘플은 아래 파일 구성을 기본으로 맞춘다.
 
 - `README.md`

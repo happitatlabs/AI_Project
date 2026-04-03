@@ -5,6 +5,10 @@
 - 공개 실행선은 유지한다: `project -> anonymization -> SafeAnalysisBundle -> rebuild_assistant -> result package`.
 - 현재의 거대 단일 조립기인 [service.py](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/modules/rebuild_assistant/service.py)는 얇은 어댑터로 축소하고, 실제 엔진은 `services/refactoring_support_engine`로 분리한다.
 - 결과는 `structure_snapshot -> diagnosis_report -> decision_summary -> improvement_plan_bundle -> appendix`의 authoritative block을 기준으로 만들고, 기존 UI는 이 block에서 flat field를 파생한다.
+- 현재 제품 상태는 `deterministic engine core + optional AI narrative layer`다.
+- AI narrative layer는 runner에서만 동작하고, `build_result()` 직접 호출 경로는 항상 deterministic fallback 결과를 유지한다.
+- 현재 엔진 소유권은 `DecisionEngine + JudgmentSynthesizer`, `ImprovementPlanner + PlanningSynthesizer` 기준으로 정리한다.
+- `service.py`는 공개 입력/실행 진입점, polish, extension/accounting bridge, sanitize 중심의 compatibility adapter로 유지한다.
 - 자동화, 코드 생성, 마이그레이션 스크립트는 MVP 제외다. `migration_consideration`은 판단만 제공한다.
 
 **Current vs Target 구조 비교**
@@ -12,8 +16,8 @@
 |---|---|---|
 | `prepare_safe_bundle_input()`가 입력 정규화와 자산 분류를 함께 수행 | `InputAssembler`로 분리 | 재사용 후 이동 |
 | `analyze_assets`, `extract_rules`, `build_grounded_business_rules`가 혼재 | `StructureAnalyzer` + `DiagnosisEngine` | 분해 |
-| `judgment_templates.py` + `select_primary_judgment()`가 판단 담당 | `DecisionEngine` + `decision_catalog` | 부분 재사용 |
-| `build_design_options`, `build_execution_plan`이 결과 조립과 섞여 있음 | `ImprovementPlanner` 전담 | 이동 |
+| `judgment_templates.py` + `select_primary_judgment()`가 판단 담당 | `DecisionEngine` + `decision_catalog` + `JudgmentSynthesizer` | 엔진 소유 |
+| `build_design_options`, `build_execution_plan`이 결과 조립과 섞여 있음 | `ImprovementPlanner` + `PlanningSynthesizer` | 엔진 소유 |
 | `build_result()`가 전 단계를 일괄 조립 | `ResultPackager`가 authoritative payload 생성 | 분해 |
 | `postprocess` polish layer | 동일 유지 | 재사용 |
 | `/projects/{id}/result` 결과 패키지 | 동일 유지 | 호환 유지 |
@@ -33,12 +37,15 @@
 | `InputAssembler` | safe bundle, goal, constraint를 엔진용 정규 입력으로 변환 | `SafeAnalysisBundle`, `goal`, `constraints` | `RefactoringAnalysisInput` |
 | `StructureAnalyzer` | 컴포넌트/의존성/레이어/데이터 흐름/슬라이스 추출 | `RefactoringAnalysisInput` | `StructureAnalysisResult` |
 | `DiagnosisEngine` | detector 실행, issue 생성, evidence 연결 | `StructureAnalysisResult` | `DiagnosisReport` |
-| `DecisionEngine` | `refactor / redesign / migration_consideration` 판단, 우선순위 계산 | `StructureAnalysisResult`, `DiagnosisReport` | `DecisionSummary` |
+| `DecisionEngine` | `refactor / redesign / migration_consideration` 판단, 우선순위 계산, primary judgment/pattern candidate/decision item 생성 | `StructureAnalysisResult`, `DiagnosisReport` | `DecisionSummary` |
 | `ImprovementPlanner` | 설계 옵션, 추천안, 실행 단계 생성 | `StructureAnalysisResult`, `DiagnosisReport`, `DecisionSummary` | `ImprovementPlanBundle` |
 | `ResultPackager` | authoritative payload와 기존 UI 호환 flat field 생성 | 전 단계 결과 | `StructuredRefactoringResult` |
 
 - `FeatureSliceExtractor`는 `StructureAnalyzer` 내부 서브컴포넌트로 둔다.
 - `decision_catalog`는 기존 [judgment_templates.py](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/modules/rebuild_assistant/judgment_templates.py) 규칙을 초기 seed로 사용하되, 위치는 새 엔진 패키지로 옮기고 기존 파일은 compatibility re-export만 남긴다.
+- `JudgmentSynthesizer`는 template scoring, pattern candidate, primary judgment, decision item의 deterministic synthesis를 소유한다.
+- `PlanningSynthesizer`는 decision anchor를 기준으로 design option, recommended option, verification checkpoint, execution plan의 deterministic synthesis를 소유한다.
+- planner는 `DecisionArtifacts` 없이 실행하지 않는다.
 - detector는 slice-local 실행 후 cross-slice aggregate를 한 번 더 수행한다.
 - 모든 ID는 deterministic hash로 만든다. `slice_id`, `issue_id`, `evidence_id`, `decision_id`, `stage_id`는 입력 fingerprint가 같으면 항상 같아야 한다.
 
@@ -102,6 +109,22 @@ DecisionRecord:
   decision_type: Literal["refactor", "redesign", "migration_consideration"]
   target_component_ids: list[str]
   priority_score: int
+  score_breakdown:
+    severity_component: int
+    blast_radius_component: int
+    effort_component: int
+    confidence_bonus: int
+    detector_weight: int
+    hotspot_bonus: int
+    multi_slice_bonus: int
+    redesign_bonus: int
+    final_score: int
+  explainability:
+    decision_rule: str
+    score_formula: str
+    score_summary: str
+    evidence_count: int
+    affected_slice_count: int
   rationale: str
   confidence: float
   evidence_ids: list[str]
@@ -133,11 +156,36 @@ EvidenceLink:
 - `category`는 정책 기반 분류이며 UI/요약용이다.
 - `detector_id`는 로직 분기 및 판단 기준으로 사용된다.
 - 엔진 내부 분기는 항상 `detector_id` 기준으로 수행한다.
+- `score_breakdown`은 정책 계산 결과를 그대로 노출한다.
+- `explainability`는 새 판단을 추가하지 않고 `detector_id`, 정책식, 계산 결과를 설명하는 파생 레이어다.
+- `extensions["narrative"]`는 설명 레이어 provenance만 저장한다.
+  - `source`: `ai` 또는 `deterministic_fallback`
+  - `fields_rewritten`
+  - `model`
+  - `prompt_version`
+  - `validation_passed`
+  - `failure_reason`
+  - `axis`
 - 모든 `decision`은 최소 1개의 `issue_id`를 가진다.
 - 모든 `issue`는 최소 1개의 `evidence_id`를 가진다.
 - 모든 `execution_stage`는 최소 1개의 `decision_id`를 가진다.
 - summary text는 authoritative block에서만 파생하고 직접 수기 작성하지 않는다.
 - 기존 `StructuredRebuildResult` flat field는 authoritative block에서 계산한 파생값만 저장한다.
+
+**Narrative Layer**
+- canonical source는 항상 아래 5개 block이다.
+  - `structure_snapshot`
+  - `diagnosis_report`
+  - `decision_summary`
+  - `improvement_plan_bundle`
+  - `appendix`
+- Phase 1.8에서 AI가 수정 가능한 필드는 아래 4개로 고정한다.
+  - `report_purpose`
+  - `primary_judgment_reason`
+  - `one_line_conclusion`
+  - `executive_summary_v2`
+- AI는 `판단`, `점수`, `evidence`, `priority`, `execution stage linkage`를 수정하지 않는다.
+- AI validator는 허용 필드 외 key, 빈 값, 새 숫자/고유 토큰, 점수 불일치를 막고 실패 시 deterministic fallback으로 내려간다.
 
 **Execution Flow**
 1. `[routers/projects.py](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/routers/projects.py)`와 anonymization 흐름은 그대로 유지한다.
@@ -151,9 +199,10 @@ EvidenceLink:
 9. `StructureAnalyzer`가 component/layer/dependency/data-flow/hotspot을 확정한다.
 10. `DiagnosisEngine`가 8개 detector를 순서 고정으로 실행한다. 실행 순서는 표에 나온 순서를 그대로 사용한다.
 11. `DecisionEngine`가 issue를 `refactor`, `redesign`, `migration_consideration`으로 분류한다. 기준은 데이터 계약 변경 필요성, 경계 재정의 필요성, 스택/전환 필요성이다.
-12. `ImprovementPlanner`가 decision별 design option과 execution stage를 만든다.
+12. `ImprovementPlanner`가 `DecisionArtifacts`를 anchor로 사용해 decision별 design option과 execution stage를 만든다.
 13. `ResultPackager`가 authoritative payload를 만든 뒤 현재 결과 패키지용 flat field와 `polish_bundle` 입력을 파생한다.
-14. runner todo는 기존 `B1~B5`를 유지하되 의미만 `입력 정규화 -> 구조 분석 -> 진단/판단 -> 개선안 생성 -> 패키징`으로 바꾼다.
+14. `runner`는 `build_result()` 뒤에 optional `NarrativeAugmentationService`를 한 번 호출하고, 그 다음 `build_polish_bundle()`을 호출한다.
+15. runner todo는 기존 `B1~B5`를 유지하되 의미만 `입력 정규화 -> 구조 분석 -> 진단/판단 -> 개선안 생성 -> 패키징`으로 바꾼다.
 
 **Implementation Plan**
 1. `services/refactoring_support_engine` 패키지를 만들고 `schemas.py`, `facade.py`, `input_assembler.py`를 먼저 도입한다.
@@ -161,11 +210,21 @@ EvidenceLink:
 3. `structure_analyzer.py`에 `ComponentCollector`, `DependencyResolver`, `FeatureSliceExtractor`, `HotspotScorer`를 구현한다.
 4. feature slice 추출 회귀 테스트를 먼저 만든다. 기준 샘플은 endpoint 중심, UI action 중심, use case fallback, async split 케이스 4종으로 고정한다.
 5. `diagnosis_engine.py`에 8개 detector와 공통 fingerprint/evidence 유틸을 구현한다.
-6. `decision_engine.py`에 priority scoring, recommended strategy selection, current `judgment_templates` 기반 catalog adapter를 구현한다.
+6. `decision_engine.py`에 priority scoring, recommended strategy selection, engine 내부 `decision_catalog` 기반 판단 연결을 구현한다.
 7. `improvement_planner.py`에 design options, recommended option, execution stages를 구현한다.
 8. `result_packager.py`에서 authoritative payload를 만들고, 현재 `/projects/{id}/result`가 기대하는 flat field를 파생한다.
 9. 기존 [runner.py](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/modules/rebuild_assistant/runner.py)와 `run_events` 계약은 유지한다. 이벤트 payload에 authoritative payload 전체를 넣고 기존 `structured_result` 키는 계속 유지한다.
 10. 테스트는 엔진 단위와 통합 단위로 분리한다. 기존 `test_module_registry_and_runs.py` 호환성 테스트는 유지하고, 새 엔진 전용 테스트를 추가한다.
+
+**Validation Loop**
+- 문서 기준 검증은 [`REFACTORING_SUPPORT_ENGINE_QA_CHECKLIST.md`](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/REFACTORING_SUPPORT_ENGINE_QA_CHECKLIST.md)로 관리한다.
+- 고정 회귀 샘플은 [`REFACTORING_SUPPORT_ENGINE_GOLDEN_SAMPLES.md`](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/REFACTORING_SUPPORT_ENGINE_GOLDEN_SAMPLES.md)와 `test_refactoring_support_golden_samples.py`를 함께 기준으로 삼는다.
+- 구조/정책 변경은 아래를 동시에 통과해야 한다.
+  - authoritative payload shape 검증
+  - detector_id 기준 decision 분기 검증
+  - score_breakdown / explainability 검증
+  - feature_slice 규칙 검증
+  - golden sample 회귀 검증
 
 **File Structure**
 ```text

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .planning_synthesizer import PlanningSynthesizer
 from .schemas import (
     DecisionArtifacts,
     DiagnosisArtifacts,
@@ -15,6 +16,9 @@ from .schemas import (
 
 
 class ImprovementPlanner:
+    def __init__(self) -> None:
+        self.planning_synthesizer: PlanningSynthesizer | None = None
+
     def run(
         self,
         prepared: Any,
@@ -23,55 +27,58 @@ class ImprovementPlanner:
         decisions: DecisionArtifacts,
         legacy_service: Any,
     ) -> ImprovementArtifacts:
-        priority_split_items = legacy_service.build_priority_split_items(
+        planning_synthesizer = self.planning_synthesizer or PlanningSynthesizer(legacy_service)
+        if decisions is None:
+            raise ValueError("DecisionArtifacts are required for planning.")
+        priority_split_items = planning_synthesizer.build_priority_split_items(
             prepared,
             diagnosis.grounded_business_rules,
             diagnosis.retained_contracts,
-            decisions.applied_templates,
+            decisions,
         )
-        design_options = legacy_service.build_design_options(
+        design_options = planning_synthesizer.build_design_options(
             prepared,
             diagnosis.grounded_business_rules,
             diagnosis.retained_contracts,
-            decisions.applied_templates,
+            decisions,
         )
-        design_options = legacy_service._apply_recommended_selection_reason(
+        design_options = planning_synthesizer.apply_recommended_selection_reason(
             prepared,
             design_options,
             diagnosis.grounded_business_rules,
             diagnosis.retained_contracts,
-            decisions.applied_templates,
+            decisions,
         )
-        recommended_option = legacy_service.pick_recommended_option(
+        recommended_option = planning_synthesizer.pick_recommended_option(
             design_options,
             prepared,
             diagnosis.grounded_business_rules,
             diagnosis.retained_contracts,
-            decisions.applied_templates,
+            decisions,
         )
-        verification_checkpoints = legacy_service.build_verification_checkpoints(
+        verification_checkpoints = planning_synthesizer.build_verification_checkpoints(
             prepared,
             diagnosis.grounded_business_rules,
             diagnosis.retained_contracts,
-            applied_templates=decisions.applied_templates,
+            decisions=decisions,
         )
-        execution_plan = legacy_service.build_execution_plan(
+        execution_plan = planning_synthesizer.build_execution_plan(
             prepared,
             diagnosis.grounded_business_rules,
             diagnosis.retained_contracts,
             recommended_option,
-            decisions.applied_templates,
+            decisions,
         )
-        rebuild_strategy = legacy_service.infer_target_architecture(prepared)
-        layer_reconstruction = legacy_service.build_layer_reconstruction(prepared)
-        recomposition_draft = legacy_service.build_recomposition_draft(prepared, decisions.applied_templates)
-        risks = legacy_service.build_risks(
+        rebuild_strategy = planning_synthesizer.infer_target_architecture(prepared)
+        layer_reconstruction = planning_synthesizer.build_layer_reconstruction(prepared)
+        recomposition_draft = planning_synthesizer.build_recomposition_draft(prepared, decisions)
+        risks = planning_synthesizer.build_risks(
             prepared,
             diagnosis.grounded_business_rules,
             diagnosis.retained_contracts,
-            decisions.applied_templates,
+            decisions,
         )
-        recommended_directions = legacy_service.build_recommended_directions(prepared)
+        recommended_directions = planning_synthesizer.build_recommended_directions(prepared)
 
         execution_stages = self._execution_stages(execution_plan, decisions)
         risk_checkpoints = self._risk_checkpoints(risks, verification_checkpoints, decisions)

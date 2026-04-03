@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 from typing import Callable
 
+from mellow_link import app_state
 from mellow_link.infra.run_events import (
     EVENT_TYPE_LOG,
     EVENT_TYPE_PLAN_CREATED,
@@ -13,6 +14,9 @@ from mellow_link.infra.run_events import (
     emit_event,
 )
 from mellow_link.services.anonymization.schemas import SafeAnalysisBundle
+from mellow_link.services.refactoring_support_engine.narrative_augmentation import (
+    NarrativeAugmentationService,
+)
 
 from .service import RebuildAssistantService
 
@@ -36,6 +40,7 @@ def _spawn_rebuild_run(
     run_meta: dict,
 ) -> None:
     todos = _rebuild_todos()
+    narrative_augmentation = NarrativeAugmentationService()
 
     def _run() -> None:
         service = RebuildAssistantService()
@@ -91,6 +96,12 @@ def _spawn_rebuild_run(
 
             emit_event(run_id, EVENT_TYPE_TODO_STARTED, todos[4])
             result = service.build_result(prepared)
+            result = narrative_augmentation.augment_sync(
+                prepared=prepared,
+                result=result,
+                llm_service=getattr(app_state, "llm_service", None),
+            )
+            result = service._sanitize_structured_result(result)
             polish_bundle = service.build_polish_bundle(
                 result,
                 audience="manager",
@@ -107,6 +118,7 @@ def _spawn_rebuild_run(
                     "primary_judgment": primary_template_id,
                     "primary_judgment_reason": result.primary_judgment_reason,
                     "pattern_candidates": [item.model_dump() for item in result.pattern_candidates],
+                    "narrative": result.extensions.get("narrative", {}) if isinstance(result.extensions, dict) else {},
                 },
             )
             needs_more_input = bool(result.missing_context or result.confidence < 0.45)

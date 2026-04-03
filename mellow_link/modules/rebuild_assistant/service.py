@@ -872,6 +872,28 @@ class RebuildAssistantService:
 
         return RefactoringSupportEngineFacade(self).build_result(prepared)
 
+    def _compat_decision_artifacts(
+        self,
+        prepared: PreparedRebuildInput,
+        applied_templates: list[AppliedJudgmentTemplate] | None = None,
+    ):
+        from mellow_link.services.refactoring_support_engine.schemas import DecisionArtifacts, DecisionSummary
+
+        templates = list(applied_templates or [])
+        primary_judgment = (prepared.selected_primary_judgment or "").strip()
+        if not primary_judgment and templates:
+            primary_judgment = templates[0].template_id
+        selected_narrative = (prepared.selected_narrative_judgment or "").strip() or primary_judgment
+        return DecisionArtifacts(
+            decision_summary=DecisionSummary(decisions=[]),
+            applied_templates=templates,
+            pattern_candidates=list(prepared.pattern_candidates or []),
+            primary_judgment=primary_judgment,
+            primary_judgment_reason=(prepared.selected_primary_judgment_reason or "").strip(),
+            selected_narrative_judgment=selected_narrative,
+            decision_items=[],
+        )
+
     def build_polish_bundle(
         self,
         result: StructuredRebuildResult,
@@ -1966,178 +1988,27 @@ class RebuildAssistantService:
         )
 
     def _primary_template(self, prepared: PreparedRebuildInput, applied_templates: list[AppliedJudgmentTemplate]) -> AppliedJudgmentTemplate | None:
-        if not applied_templates:
-            return None
-        primary_name = self._active_narrative_judgment(prepared)
-        if not primary_name:
-            candidates = self.collect_pattern_candidates(prepared, applied_templates)
-            primary_name, _, candidates = self.select_primary_judgment(prepared, candidates)
-            prepared.selected_primary_judgment = primary_name
-            prepared.pattern_candidates = list(candidates)
-        selected = next((item for item in applied_templates if item.template_id == primary_name), None)
-        return selected or applied_templates[0]
+        from mellow_link.services.refactoring_support_engine.judgment_synthesizer import JudgmentSynthesizer
+
+        return JudgmentSynthesizer(self).primary_template(prepared, applied_templates)
 
     def collect_pattern_candidates(
         self,
         prepared: PreparedRebuildInput,
         applied_templates: list[AppliedJudgmentTemplate],
     ) -> list[PatternCandidate]:
-        template_map = {item.template_id: item for item in applied_templates}
-        candidates: list[PatternCandidate] = []
+        from mellow_link.services.refactoring_support_engine.judgment_synthesizer import JudgmentSynthesizer
 
-        def add(name: str, matched: bool, reasons: list[str]) -> None:
-            item = template_map.get(name)
-            score = float(item.score) if item else 0.0
-            enriched_reasons = [reason for reason in reasons if reason]
-            if item and item.matched_signal_types:
-                enriched_reasons.extend(f"matched_signal={signal}" for signal in item.matched_signal_types[:3])
-            candidates.append(
-                PatternCandidate(
-                    name=name,
-                    matched=matched,
-                    score=score,
-                    reasons=enriched_reasons,
-                )
-            )
-
-        workflow_actor = self._workflow_actor_signal_count(prepared)
-        workflow_stage = self._workflow_stage_signal_count(prepared)
-        workflow_gate = self._workflow_gate_signal_count(prepared)
-        workflow_progression = self._workflow_progression_signal_count(prepared)
-        add(
-            "workflow",
-            self._has_workflow_pattern(prepared),
-            [
-                f"actor_signals={workflow_actor}",
-                f"stage_signals={workflow_stage}",
-                f"gate_signals={workflow_gate}",
-                f"progression_signals={workflow_progression}",
-            ],
-        )
-        add(
-            "state_transition",
-            self._has_explicit_state_transition_signal(prepared),
-            [
-                f"explicit_state_transition={self._has_explicit_state_transition_signal(prepared)}",
-                f"primary_feature_mode={prepared.signals.primary_feature_mode}",
-            ],
-        )
-        query_filter_matched = prepared.signals.primary_feature_mode == "search_filters" or (
-            prepared.signals.secondary_feature_mode == "search_filters"
-            and len(prepared.signals.search_filters) >= 2
-            and not self._is_validation_primary(prepared)
-            and not self._has_explicit_state_transition_signal(prepared)
-            and not self._has_workflow_pattern(prepared)
-        )
-        add(
-            "query_filter",
-            query_filter_matched,
-            [
-                f"primary_feature_mode={prepared.signals.primary_feature_mode}",
-                f"secondary_feature_mode={prepared.signals.secondary_feature_mode}",
-                f"search_filter_signals={len(prepared.signals.search_filters)}",
-            ],
-        )
-        add(
-            "amount_threshold",
-            self._has_amount_threshold_focus(prepared),
-            [
-                f"amount_threshold_focus={self._has_amount_threshold_focus(prepared)}",
-                f"validation_signals={len(prepared.signals.save_validation)}",
-            ],
-        )
-        add(
-            "access_control",
-            bool(template_map.get("access_control")) and self._should_enrich_access_control(prepared, []),
-            [
-                f"access_control_score={float(template_map.get('access_control').score) if template_map.get('access_control') else 0.0}",
-                f"status_permission_signals={len(prepared.signals.status_permissions)}",
-            ],
-        )
-        add(
-            "validation",
-            self._is_validation_primary(prepared) or len(prepared.signals.save_validation) >= 2,
-            [
-                f"validation_primary={self._is_validation_primary(prepared)}",
-                f"save_validation_signals={len(prepared.signals.save_validation)}",
-                f"primary_feature_mode={prepared.signals.primary_feature_mode}",
-            ],
-        )
-        return candidates
+        return JudgmentSynthesizer(self).collect_pattern_candidates(prepared, applied_templates)
 
     def select_primary_judgment(
         self,
         prepared: PreparedRebuildInput,
         pattern_candidates: list[PatternCandidate],
     ) -> tuple[str, str, list[PatternCandidate]]:
-        candidate_map = {item.name: item for item in pattern_candidates}
+        from mellow_link.services.refactoring_support_engine.judgment_synthesizer import JudgmentSynthesizer
 
-        def choose(name: str, reason: str) -> tuple[str, str]:
-            return name, reason
-
-        workflow = candidate_map.get("workflow")
-        state_transition = candidate_map.get("state_transition")
-        query_filter = candidate_map.get("query_filter")
-        amount_threshold = candidate_map.get("amount_threshold")
-        access_control = candidate_map.get("access_control")
-        validation = candidate_map.get("validation")
-
-        if workflow and workflow.matched:
-            selected_name, selected_reason = choose(
-                "workflow",
-                "승인 주체, 단계 구조, 의사결정 게이트가 성립해 workflow를 우선 선택했습니다.",
-            )
-        elif state_transition and state_transition.matched:
-            selected_name, selected_reason = choose(
-                "state_transition",
-                "명시적 상태 변경 신호가 확인되어 state_transition을 우선 선택했습니다.",
-            )
-        elif validation and validation.matched and prepared.signals.primary_feature_mode == "save_validation":
-            selected_name, selected_reason = choose(
-                "validation",
-                "저장 검증 신호가 주축이라 validation을 우선 선택했습니다.",
-            )
-        elif query_filter and query_filter.matched and not (amount_threshold and amount_threshold.matched):
-            selected_name, selected_reason = choose(
-                "query_filter",
-                "조회 조건, 필터, 정렬, 페이징 축이 금액 정책보다 강해 query_filter를 선택했습니다.",
-            )
-        elif amount_threshold and amount_threshold.matched:
-            selected_name, selected_reason = choose(
-                "amount_threshold",
-                "금액 구간과 한도 경계가 조회형/검증형보다 강해 amount_threshold를 선택했습니다.",
-            )
-        elif access_control and access_control.matched:
-            selected_name, selected_reason = choose(
-                "access_control",
-                "처리 권한과 승인 주체 축이 핵심이라 access_control을 선택했습니다.",
-            )
-        elif validation and validation.matched:
-            selected_name, selected_reason = choose(
-                "validation",
-                "다른 패턴 최소 조건이 부족해 validation을 fallback으로 선택했습니다.",
-            )
-        else:
-            selected_name, selected_reason = choose(
-                "validation",
-                "강한 패턴 후보가 없어 validation을 기본 fallback으로 선택했습니다.",
-            )
-
-        annotated: list[PatternCandidate] = []
-        for item in pattern_candidates:
-            rejected_reason = item.rejected_reason
-            if item.name == selected_name:
-                rejected_reason = ""
-            elif item.name == "query_filter" and item.matched and prepared.signals.primary_feature_mode == "save_validation":
-                rejected_reason = "저장 검증이 주축이라 query_filter 후보를 후순위로 내렸습니다."
-            elif item.name == "access_control" and item.matched and selected_name == "workflow":
-                rejected_reason = "승인 흐름의 단계성과 게이트가 더 강해 workflow를 우선 선택했습니다."
-            elif item.matched:
-                rejected_reason = f"{selected_name} 우선 규칙이 적용되어 탈락했습니다."
-            else:
-                rejected_reason = "최소 성립 조건 부족으로 탈락했습니다."
-            annotated.append(item.model_copy(update={"rejected_reason": rejected_reason}))
-        return selected_name, selected_reason, annotated
+        return JudgmentSynthesizer(self).select_primary_judgment(prepared, pattern_candidates)
 
     def _has_amount_threshold_focus(self, prepared: PreparedRebuildInput) -> bool:
         lowered = self._combined_evidence_text(prepared).lower()
@@ -2285,22 +2156,9 @@ class RebuildAssistantService:
         applied_templates: list[AppliedJudgmentTemplate],
         grounded_rules: list[GroundedBusinessRule] | None = None,
     ) -> list[AppliedJudgmentTemplate]:
-        if not applied_templates:
-            return []
-        if grounded_rules and self._should_force_access_control_narrative(grounded_rules):
-            forced = next((item for item in applied_templates if item.template_id == "access_control"), None)
-            if forced:
-                return [forced]
-        if grounded_rules and self._should_force_amount_threshold_narrative(prepared, grounded_rules):
-            forced = next((item for item in applied_templates if item.template_id == "amount_threshold"), None)
-            if forced:
-                return [forced]
-        primary = self._primary_template(prepared, applied_templates)
-        if not primary:
-            return applied_templates
-        if primary.template_id in {"workflow", "validation", "access_control", "state_transition", "query_filter", "amount_threshold"}:
-            return [primary]
-        return [primary] + [item for item in applied_templates if item.template_id != primary.template_id]
+        from mellow_link.services.refactoring_support_engine.judgment_synthesizer import JudgmentSynthesizer
+
+        return JudgmentSynthesizer(self).ordered_templates_for_generation(prepared, applied_templates, grounded_rules)
 
     def _should_force_access_control_narrative(self, grounded_rules: list[GroundedBusinessRule]) -> bool:
         text = " ".join(f"{item.title} {item.description}" for item in grounded_rules)
@@ -3979,55 +3837,9 @@ class RebuildAssistantService:
         grounded_rules: list[GroundedBusinessRule],
         retained_contracts: list[RetainedContract],
     ) -> list[AppliedJudgmentTemplate]:
-        scores: dict[str, float] = {spec.template_id: 0.0 for spec in get_judgment_template_specs()}
-        signal_hits: dict[str, set[str]] = {spec.template_id: set() for spec in get_judgment_template_specs()}
-        rule_hits: dict[str, list[str]] = {spec.template_id: [] for spec in get_judgment_template_specs()}
-        contract_hits: dict[str, list[str]] = {spec.template_id: [] for spec in get_judgment_template_specs()}
+        from mellow_link.services.refactoring_support_engine.judgment_synthesizer import JudgmentSynthesizer
 
-        self._accumulate_signal_template_scores(prepared, scores, signal_hits)
-        self._accumulate_rule_template_scores(grounded_rules, scores, signal_hits, rule_hits)
-        self._accumulate_contract_template_scores(retained_contracts, scores, signal_hits, contract_hits)
-
-        applied: list[AppliedJudgmentTemplate] = []
-        for spec in get_judgment_template_specs():
-            score = round(scores.get(spec.template_id, 0.0), 2)
-            matched_rules = self._dedupe_list(rule_hits[spec.template_id])
-            matched_contracts = self._dedupe_list(contract_hits[spec.template_id])
-            matched_signal_types = sorted(signal_hits[spec.template_id])
-            if score < 1.0 and not matched_rules and not matched_contracts:
-                continue
-            applied.append(
-                AppliedJudgmentTemplate(
-                    template_id=spec.template_id,
-                    score=score,
-                    matched_signal_types=matched_signal_types,
-                    matched_rule_titles=matched_rules[:4],
-                    matched_contract_items=matched_contracts[:3],
-                    core_questions=list(spec.core_questions),
-                )
-            )
-        ordered = sorted(applied, key=lambda item: item.score, reverse=True)
-        if self._has_workflow_pattern(prepared):
-            workflow = next((item for item in ordered if item.template_id == "workflow"), None)
-            if workflow:
-                ordered = [workflow] + [item for item in ordered if item.template_id != "workflow"]
-        elif self._has_explicit_state_transition_signal(prepared):
-            state_transition = next((item for item in ordered if item.template_id == "state_transition"), None)
-            if state_transition:
-                ordered = [state_transition] + [item for item in ordered if item.template_id != "state_transition"]
-        elif prepared.signals.primary_feature_mode == "search_filters":
-            query_filter = next((item for item in ordered if item.template_id == "query_filter"), None)
-            if query_filter:
-                ordered = [query_filter] + [item for item in ordered if item.template_id != "query_filter"]
-        elif self._has_amount_threshold_focus(prepared):
-            amount_threshold = next((item for item in ordered if item.template_id == "amount_threshold"), None)
-            if amount_threshold:
-                ordered = [amount_threshold] + [item for item in ordered if item.template_id != "amount_threshold"]
-        elif len(prepared.signals.save_validation) >= 2:
-            validation = next((item for item in ordered if item.template_id == "validation"), None)
-            if validation:
-                ordered = [validation] + [item for item in ordered if item.template_id != "validation"]
-        return ordered
+        return JudgmentSynthesizer(self).build_applied_templates(prepared, grounded_rules, retained_contracts)
 
     def _accumulate_signal_template_scores(
         self,
@@ -4185,130 +3997,15 @@ class RebuildAssistantService:
         retained_contracts: list[RetainedContract],
         applied_templates: list[AppliedJudgmentTemplate] | None = None,
     ) -> list[VerificationItem]:
-        retained_keys = {self._normalize_key(item.item) for item in retained_contracts}
-        items: list[VerificationItem] = []
-        primary_template = self._primary_template(prepared, applied_templates or [])
-        workflow_primary = bool(primary_template and primary_template.template_id == "workflow")
-        access_control_primary = self._should_enrich_access_control(
+        from mellow_link.services.refactoring_support_engine.planning_synthesizer import PlanningSynthesizer
+
+        decisions = self._compat_decision_artifacts(prepared, applied_templates or [])
+        return PlanningSynthesizer(self).build_verification_checkpoints(
             prepared,
             grounded_rules,
-            applied_templates=applied_templates,
+            retained_contracts,
+            decisions,
         )
-        for rule in grounded_rules:
-            if not rule.needs_verification:
-                continue
-            items.append(
-                VerificationItem(
-                    item=f"{rule.title} 운영 기준을 확인하는 것이 필요합니다.",
-                    reason=rule.confidence_reason or "직접 확인 가능한 운영 자산이 부족합니다.",
-                    evidence=rule.evidence,
-                )
-            )
-        output: list[VerificationItem] = []
-        for item in items:
-            if workflow_primary and any(
-                token in item.item for token in ("권한 위임 가능 여부", "승인 요청 및 처리 흐름", "상태 전이와 액션 노출 조건")
-            ):
-                continue
-            if access_control_primary and any(
-                token in item.item for token in ("권한 위임 가능 여부", "승인 요청 및 처리 흐름")
-            ):
-                continue
-            if self._normalize_key(item.item) in retained_keys:
-                continue
-            output.append(item)
-        for spec in self._template_retained_contract_specs(prepared, grounded_rules):
-            contract_key = self._normalize_key(spec["item"])
-            if contract_key in retained_keys:
-                continue
-            evidence = self._collect_evidence_refs(prepared, tuple(spec["keywords"]), ("source", "ui", "sql", "schema", "constraint"))
-            if evidence:
-                continue
-            output.append(
-                VerificationItem(
-                    item=f"{spec['item']} 운영 기준을 추가 자산으로 확인하는 것이 필요합니다.",
-                    reason="직접 확인 가능한 상태값, 컬럼명 또는 규칙 조건 근거가 부족해 유지 계약으로 확정할 수 없습니다.",
-                    evidence=[],
-                )
-            )
-        if workflow_primary:
-            workflow_defaults = [
-                (
-                    "대리 승인 범위와 병렬 승인 가능 조건을 확인하는 것이 필요합니다.",
-                    "승인 트리거와 승인 주체는 직접 확인되었지만 대리 승인 범위와 병렬 승인 조건은 추가 확인이 필요합니다.",
-                ),
-                (
-                    "승인 단계별 통지와 후속 처리 절차를 확인하는 것이 필요합니다.",
-                    "승인 단계 구조는 보이지만 단계별 통지와 후속 처리 절차는 현재 자산만으로 모두 확정할 수 없습니다.",
-                ),
-            ]
-            for item_text, reason in workflow_defaults:
-                if any(self._normalize_key(existing.item) == self._normalize_key(item_text) for existing in output):
-                    continue
-                output.append(VerificationItem(item=item_text, reason=reason, evidence=[]))
-        elif access_control_primary:
-            access_defaults = [
-                (
-                    "권한 위임 세부 범위를 확인하는 것이 필요합니다.",
-                    "권한 위임 가능 여부는 보이지만 위임 범위와 승인 한계는 현재 자산만으로 확정할 수 없습니다.",
-                ),
-                (
-                    "예외 승인 조건 상세를 확인하는 것이 필요합니다.",
-                    "예외 승인 경로 후보는 보이지만 어떤 조건에서 우회 승인되는지는 현재 자산만으로 확정할 수 없습니다.",
-                ),
-                (
-                    "처리 후 통지와 후속 처리 절차를 확인하는 것이 필요합니다.",
-                    "승인 요청 이후 통지 대상과 후속 처리 책임은 현재 자산만으로 모두 확인되지 않았습니다.",
-                ),
-            ]
-            for item_text, reason in access_defaults:
-                if any(self._normalize_key(existing.item) == self._normalize_key(item_text) for existing in output):
-                    continue
-                output.append(VerificationItem(item=item_text, reason=reason, evidence=[]))
-        if not output:
-            fallback_template = self._fallback_verification_template(prepared, grounded_rules)
-            for template_id in ([fallback_template] if fallback_template else []):
-                if template_id == "workflow":
-                    output.append(
-                        VerificationItem(
-                            item="대리 승인 범위와 병렬 승인 가능 조건을 확인하는 것이 필요합니다.",
-                            reason="승인 트리거와 승인 주체는 직접 확인되었지만 대리 승인 범위와 병렬 승인 조건은 추가 확인이 필요합니다.",
-                            evidence=[],
-                        )
-                    )
-                elif template_id == "state_transition":
-                    output.append(
-                        VerificationItem(
-                            item="상태 전이 이후 후속 승인 또는 운영 처리 절차를 확인하는 것이 필요합니다.",
-                            reason="상태 전이 규칙은 직접 확인되었지만 후속 운영 절차는 현재 자산에서 모두 확인되지 않았습니다.",
-                            evidence=[],
-                        )
-                    )
-                elif template_id == "access_control":
-                    output.append(
-                        VerificationItem(
-                            item="권한 규칙 적용 이후 외부 승인 또는 통지 절차를 확인하는 것이 필요합니다.",
-                            reason="승인 주체는 직접 확인되었지만 후속 운영 절차는 추가 확인이 필요합니다.",
-                            evidence=[],
-                        )
-                    )
-                elif template_id == "validation":
-                    output.append(
-                        VerificationItem(
-                            item="검증 실패 이후 예외 처리와 운영 메시지 기준을 확인하는 것이 필요합니다.",
-                            reason="차단 조건은 직접 확인되었지만 운영 메시지와 예외 처리 기준은 추가 확인이 필요합니다.",
-                            evidence=[],
-                        )
-                    )
-                elif template_id == "amount_threshold":
-                    output.append(
-                        VerificationItem(
-                            item="한도 초과 이후 후속 처리 기준과 사용자 안내 기준을 확인하는 것이 필요합니다.",
-                            reason="금액 구간과 한도 경계는 직접 확인되었지만 한도 초과 이후 후속 처리 기준은 추가 확인이 필요합니다.",
-                            evidence=[],
-                        )
-                    )
-        return self._dedupe_by_normalized_text(output, attr="item")
 
     def _fallback_verification_template(
         self,
@@ -4336,11 +4033,9 @@ class RebuildAssistantService:
         grounded_rules: list[GroundedBusinessRule],
         applied_templates: list[AppliedJudgmentTemplate],
     ) -> list[DecisionItem]:
-        return self._build_template_decision_items(
-            prepared,
-            grounded_rules,
-            self._ordered_templates_for_generation(prepared, applied_templates, grounded_rules),
-        )
+        from mellow_link.services.refactoring_support_engine.judgment_synthesizer import JudgmentSynthesizer
+
+        return JudgmentSynthesizer(self).build_decision_items(prepared, grounded_rules, applied_templates)
 
     def build_priority_split_items(
         self,
@@ -4349,12 +4044,10 @@ class RebuildAssistantService:
         retained_contracts: list[RetainedContract],
         applied_templates: list[AppliedJudgmentTemplate],
     ) -> list[PrioritySplitItem]:
-        return self._build_template_priority_split_items(
-            prepared,
-            grounded_rules,
-            retained_contracts,
-            self._ordered_templates_for_generation(prepared, applied_templates, grounded_rules),
-        )
+        from mellow_link.services.refactoring_support_engine.planning_synthesizer import PlanningSynthesizer
+
+        decisions = self._compat_decision_artifacts(prepared, applied_templates)
+        return PlanningSynthesizer(self).build_priority_split_items(prepared, grounded_rules, retained_contracts, decisions)
 
     def build_design_options(
         self,
@@ -4363,12 +4056,10 @@ class RebuildAssistantService:
         retained_contracts: list[RetainedContract],
         applied_templates: list[AppliedJudgmentTemplate],
     ) -> list[DesignOption]:
-        return self._build_template_design_options(
-            prepared,
-            grounded_rules,
-            retained_contracts,
-            self._ordered_templates_for_generation(prepared, applied_templates, grounded_rules),
-        )
+        from mellow_link.services.refactoring_support_engine.planning_synthesizer import PlanningSynthesizer
+
+        decisions = self._compat_decision_artifacts(prepared, applied_templates)
+        return PlanningSynthesizer(self).build_design_options(prepared, grounded_rules, retained_contracts, decisions)
 
     def _apply_recommended_selection_reason(
         self,
@@ -4378,24 +4069,16 @@ class RebuildAssistantService:
         retained_contracts: list[RetainedContract],
         applied_templates: list[AppliedJudgmentTemplate],
     ) -> list[DesignOption]:
-        recommended = next((item for item in options if item.recommended), None)
-        if not recommended:
-            return options
-        reason = self._build_recommended_selection_reason(prepared, grounded_rules, retained_contracts, recommended, applied_templates)
-        updated: list[DesignOption] = []
-        for item in options:
-            if item.recommended:
-                updated.append(item.model_copy(update={"selection_reason": reason}))
-            else:
-                updated.append(
-                    item.model_copy(
-                        update={
-                            "selection_reason": item.selection_reason
-                            or self._build_non_recommended_selection_reason(item.name, applied_templates)
-                        }
-                    )
-                )
-        return updated
+        from mellow_link.services.refactoring_support_engine.planning_synthesizer import PlanningSynthesizer
+
+        decisions = self._compat_decision_artifacts(prepared, applied_templates)
+        return PlanningSynthesizer(self).apply_recommended_selection_reason(
+            prepared,
+            options,
+            grounded_rules,
+            retained_contracts,
+            decisions,
+        )
 
     def pick_recommended_option(
         self,
@@ -4405,15 +4088,15 @@ class RebuildAssistantService:
         retained_contracts: list[RetainedContract],
         applied_templates: list[AppliedJudgmentTemplate],
     ) -> RecommendedOption | None:
-        recommended = next((item for item in options if item.recommended), None)
-        if not recommended:
-            return None
-        selection_reason = self._build_recommended_selection_reason(prepared, grounded_rules, retained_contracts, recommended, applied_templates)
-        return RecommendedOption(
-            name=recommended.name,
-            structure_summary=recommended.structure_summary,
-            selection_reason=selection_reason,
-            expected_outcomes=["핵심 규칙과 정책 분리를 우선 완료해야 합니다.", "기존 데이터 계약을 유지한 상태에서 단계적 전환 순서를 고정해야 합니다."],
+        from mellow_link.services.refactoring_support_engine.planning_synthesizer import PlanningSynthesizer
+
+        decisions = self._compat_decision_artifacts(prepared, applied_templates)
+        return PlanningSynthesizer(self).pick_recommended_option(
+            options,
+            prepared,
+            grounded_rules,
+            retained_contracts,
+            decisions,
         )
 
     def _build_recommended_selection_reason(
@@ -4674,12 +4357,15 @@ class RebuildAssistantService:
         recommended_option: RecommendedOption | None,
         applied_templates: list[AppliedJudgmentTemplate],
     ) -> list[ExecutionPlanWeek]:
-        return self._build_template_execution_plan(
+        from mellow_link.services.refactoring_support_engine.planning_synthesizer import PlanningSynthesizer
+
+        decisions = self._compat_decision_artifacts(prepared, applied_templates)
+        return PlanningSynthesizer(self).build_execution_plan(
             prepared,
             grounded_rules,
             retained_contracts,
             recommended_option,
-            self._ordered_templates_for_generation(prepared, applied_templates, grounded_rules),
+            decisions,
         )
 
     def _build_template_decision_items(
