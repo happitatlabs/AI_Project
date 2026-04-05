@@ -1,0 +1,21 @@
+sample_id: 07_order_closure_false_positive_minimal
+source_documents:
+  source_type: heuristic_followup_reference
+assertions:
+  intended_observation:
+    expected_domain: review_queue
+    false_positive_risk: domain_anchor_spillover
+    suspicious_tokens:
+      - review_required
+      - display_order
+      - closeDialog
+    disallowed_domain_anchors:
+      - order_closure
+      - 주문 마감
+  draft_notes:
+    status: heuristic_followup_reference
+    sample_role: followup_only
+    regression_status: not_included
+    notes:
+      - 현재 목적은 heuristic 재현 표본 확보이며, regression 승격이 아니다.
+      - business asset에는 주문/마감 도메인 용어를 직접 넣지 않는다.

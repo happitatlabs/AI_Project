@@ -1,0 +1,54 @@
+{
+  "sample_id": "03_state_transition_complex",
+  "title": "상태 전이 복잡형",
+  "category": "state_transition_complex",
+  "description": "상태값 분기와 전이 누수 탐지, redesign 또는 workflow 중심 권고의 안정성 검증",
+  "assets": [
+    {
+      "name": "order_transition_service.java",
+      "type": "code",
+      "path": "assets/order_transition_service.java",
+      "purpose": "여러 상태 전이 분기가 섞인 backend service 예시"
+    },
+    {
+      "name": "order_transition_policy.java",
+      "type": "code",
+      "path": "assets/order_transition_policy.java",
+      "purpose": "동일 상태 전이 규칙이 반복되는 정책 컴포넌트 예시"
+    },
+    {
+      "name": "order_transition.sql",
+      "type": "sql",
+      "path": "assets/order_transition.sql",
+      "purpose": "상태 변경이 SQL에도 중복되는 예시"
+    },
+    {
+      "name": "order_transition_page.html",
+      "type": "ui",
+      "path": "assets/order_transition_page.html",
+      "purpose": "상태 전이 액션이 노출되는 화면 예시"
+    },
+    {
+      "name": "schema.sql",
+      "type": "schema",
+      "path": "assets/schema.sql",
+      "purpose": "orders 테이블 구조"
+    },
+    {
+      "name": "workflow_notes.md",
+      "type": "doc",
+      "path": "assets/workflow_notes.md",
+      "purpose": "상태 전이 규칙 요약"
+    }
+  ],
+  "expected_focus": {
+    "feature_slices": 1,
+    "primary_judgment": "state_transition",
+    "top_decision_type": "refactor",
+    "notes": [
+      "동일 상태값 변경이 여러 위치에 분산되는지와 state_transition_leak 탐지가 핵심이다.",
+      "현재 measured output은 state_transition narrative와 refactor top decision으로 수렴한다.",
+      "strict golden anchor는 현재 measured 값을 바탕으로 유지하되 자산 변경 시 재측정한다."
+    ]
+  }
+}

@@ -7,10 +7,19 @@
 - 결과는 `structure_snapshot -> diagnosis_report -> decision_summary -> improvement_plan_bundle -> appendix`의 authoritative block을 기준으로 만들고, 기존 UI는 이 block에서 flat field를 파생한다.
 - 현재 제품 상태는 `deterministic engine core + optional AI narrative layer`다.
 - AI narrative layer는 runner에서만 동작하고, `build_result()` 직접 호출 경로는 항상 deterministic fallback 결과를 유지한다.
+- Phase 3 첫 구현은 `audience-first explanation + read-only result Q&A`까지 포함한다.
+- Phase 3 첫 구현에서도 `delivery_mode`는 설명 API에 적용하지 않고 2차 범위로 미룬다.
+- audience가 `developer | manager | client`로 바뀌어도 canonical fact, score, citation, decision linkage는 바뀌지 않는다.
 - 현재 엔진 소유권은 `DecisionEngine + JudgmentSynthesizer`, `ImprovementPlanner + PlanningSynthesizer` 기준으로 정리한다.
 - `service.py`는 공개 입력/실행 진입점, polish, extension/accounting bridge, sanitize 중심의 compatibility adapter로 유지한다.
 - `detector policy`와 `scoring policy`는 Phase 3 시작 전까지 freeze 상태로 유지한다.
 - Phase 3 전에는 `DEFAULT_DETECTOR_POLICIES`, `DEFAULT_SCORING_POLICY`, detector weight, score formula, bonus 규칙을 변경하지 않는다.
+- taxonomy는 additive split 상태로 유지한다.
+  - `primary_judgment`: compatibility용 template axis
+  - `template_judgment`: legacy consulting/template axis의 명시 필드
+  - `structural_judgment`: engine-owned structural decision
+  - `narrative_axis`: user-facing explanation axis
+  - `feature_signal_mode`: legacy feature signal family
 - 자동화, 코드 생성, 마이그레이션 스크립트는 MVP 제외다. `migration_consideration`은 판단만 제공한다.
 
 **Current vs Target 구조 비교**
@@ -69,7 +78,7 @@
 - `severity`: detector base 3, cross-layer면 `+1`, write path 또는 승인/상태 변경이면 `+1`, 최대 5
 - `blast_radius`: 영향받는 `components + layers + slices`를 bucket 1~5로 환산
 - `effort`: helper 추출 1, service split 3, boundary redesign 5
-- `priority_score = severity*2 + blast_radius - effort + confidence_bonus`
+- `priority_score = severity*2 + blast_radius - effort + confidence_bonus + detector_weight + hotspot_bonus + multi_slice_bonus + redesign_bonus`
 - 위 detector/scoring 정책값은 Phase 3 전까지 변경 금지다.
 
 **Data Schema**
@@ -132,6 +141,13 @@ DecisionRecord:
   confidence: float
   evidence_ids: list[str]
 
+Decision taxonomy:
+  primary_judgment: str        # compatibility/template axis
+  template_judgment: str       # explicit legacy template axis
+  structural_judgment: str     # engine-owned structural decision
+  narrative_axis: str          # user-facing explanation axis
+  feature_signal_mode: str     # extracted legacy feature signal family
+
 ExecutionStage:
   stage_id: str
   title: str
@@ -161,6 +177,12 @@ EvidenceLink:
 - 엔진 내부 분기는 항상 `detector_id` 기준으로 수행한다.
 - `score_breakdown`은 정책 계산 결과를 그대로 노출한다.
 - `explainability`는 새 판단을 추가하지 않고 `detector_id`, 정책식, 계산 결과를 설명하는 파생 레이어다.
+- `primary_judgment`는 backward compatibility를 위해 유지되는 template axis다.
+- `template_judgment`는 `primary_judgment`와 같은 legacy/template taxonomy를 명시적으로 드러낸다.
+- `structural_judgment`는 `decision_summary`에서 파생된 engine-owned structural judgment다.
+- `narrative_axis`는 설명/표현용 축이며 `priority_score`, `decision_type`, `recommended_strategy`를 바꾸지 않는다.
+- `feature_signal_mode`는 legacy feature extraction 결과를 보존하는 필드이며, structural decision의 canonical source가 아니다.
+- `query_filter`, `workflow`, `validation`, `access_control`, `state_transition`, `amount_threshold` 같은 값은 현재 `template_judgment`/`narrative_axis` 계층으로 해석한다.
 - `extensions["narrative"]`는 설명 레이어 provenance만 저장한다.
   - `source`: `ai` 또는 `deterministic_fallback`
   - `fields_rewritten`
@@ -174,6 +196,34 @@ EvidenceLink:
 - 모든 `execution_stage`는 최소 1개의 `decision_id`를 가진다.
 - summary text는 authoritative block에서만 파생하고 직접 수기 작성하지 않는다.
 - 기존 `StructuredRebuildResult` flat field는 authoritative block에서 계산한 파생값만 저장한다.
+
+**Migration Consideration Governance Rules**
+- 기준 문서: [`REFACTORING_SUPPORT_ENGINE_DECISION_GOVERNANCE.md`](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/REFACTORING_SUPPORT_ENGINE_DECISION_GOVERNANCE.md)
+- 판단 위계는 아래로 고정한다.
+  - `asset-derived > detector-derived > decision linkage > goal wording`
+- `goal/constraint wording`은 보조 입력일 뿐이며, 단독으로 core judgment를 만들면 안 된다.
+- `migration_consideration`은 아래 조건이 모두 어긋나면 contamination으로 본다.
+  - business asset에 migration 근거 없음
+  - `issue_ids == []`
+  - `evidence_ids == []`
+- Hard Guard Rule은 아래로 고정한다.
+  - `decision_type == "migration_consideration"` 이고 `issue_ids == []` 이며 `evidence_ids == []` 이면 synthetic migration으로 간주한다.
+  - 이 경우 `synthetic_signal_detected = true`로 기록하고 downgrade 규칙을 적용해야 한다.
+  - `diagnosis_report.issues == 0`이면 `observation_only`
+  - 그 외에는 `refactor`
+- 강제 지점은 아래로 고정한다.
+  - `DecisionEngine`: `migration_consideration` 생성 직후 1차 적용
+  - `ResultPackager`: 최종 decision 확정 직전 2차 검증
+  - `Validation Layer`: `synthetic_signal_detected` 필수 기록
+- contamination 용어는 아래를 사용한다.
+  - `wrapper wording contamination`
+  - `synthetic migration trigger`
+  - `asset-absent decision`
+  - `domain-anchor spillover`
+- real-project validation 문서는 아래 3구역으로 기록한다.
+  - `confirmed observation`
+  - `root cause candidate`
+  - `follow-up check`
 
 **Narrative Layer**
 - canonical source는 항상 아래 5개 block이다.
@@ -189,6 +239,82 @@ EvidenceLink:
   - `executive_summary_v2`
 - AI는 `판단`, `점수`, `evidence`, `priority`, `execution stage linkage`를 수정하지 않는다.
 - AI validator는 허용 필드 외 key, 빈 값, 새 숫자/고유 토큰, 점수 불일치를 막고 실패 시 deterministic fallback으로 내려간다.
+
+**Phase 3 Presentation Layer**
+- Phase 3는 `deterministic engine core`를 유지한 채 설명/표현/상호작용 레이어만 확장한다.
+- 첫 구현 범위는 아래로 고정한다.
+  - `ExplanationPresenter`
+  - audience preset: `developer | manager | client`
+  - `ResultQuestionAnsweringService`
+  - stateless, read-only Q&A
+- 첫 구현에서는 `delivery_mode`를 endpoint에 적용하지 않는다.
+- explanation view는 아래 우선순위를 따른다.
+  - fact source: `authoritative_payload`
+  - wording base: `polish_bundle.polished_sections[*].audience_variants`
+  - top narrative override: 이미 materialized 된 top 4 fields만 허용
+- audience가 바뀌어도 아래 값은 바뀌면 안 된다.
+  - `recommended_strategy`
+  - `decision_type`
+  - `priority_score`
+  - `score_breakdown`
+  - `execution stage linkage`
+  - citations
+- taxonomy surface 정책은 아래로 고정한다.
+  - Core Judgment Layer: `structural_judgment`, `decision_summary`
+  - Explanation Layer: `narrative_axis`
+  - Hidden / Compatibility Layer: `primary_judgment`, `template_judgment`, `feature_signal_mode`
+- `/projects/{id}/result/explanation`은 additive `taxonomy_view`를 제공한다.
+  - `core_judgment`
+    - `structural_judgment`
+    - `recommended_strategy`
+    - `top_decision_type`
+  - `evidence_view`
+    - `top_priority_score`
+    - `score_breakdown`
+    - `explainability`
+    - `citations`
+  - `explanation_context`
+    - `narrative_axis`
+- 기본 UI/설명 surface에서는 `primary_judgment`, `template_judgment`, `feature_signal_mode`를 직접 노출하지 않는다.
+- Human Review용 Diff Layer는 canonical payload가 아니라 additive `extensions["review_diff"]`로 생성한다.
+  - 구성은 `Structural Diff`, `Evidence Diff`, `Decision Diff`로 고정한다.
+  - validation run 문서는 `extensions["review_diff"]["markdown"]`를 소비하는 generated surface로 둔다.
+- `/projects/{id}/result`는 full `review_diff`를 유지한다.
+- `/projects/{id}/result/explanation`는 full diff 대신 compact `review_diff_preview`만 노출한다.
+- Review Diff는 기본적으로 internal artifact다.
+  - internal: full `review_diff`와 compact preview 허용
+  - external: canonical judgment/evidence만 허용하고 Review Diff는 직접 노출하지 않는다
+- explanation API는 `surface_mode=internal|external` additive rule을 따른다.
+  - `surface_mode`는 current public selector다.
+  - 내부 구현은 `surface_mode -> access_profile -> capability` policy로 분리한다.
+  - 현재 mapping은 `internal -> internal_full`, `external -> external_basic`으로 고정한다.
+  - capability 이름은 `can_view_*` / `can_export_*` 기준으로 고정한다.
+    - 예: `can_view_review_diff`, `can_view_code_diff`, `can_view_block_reasons`, `can_view_governance_trace`, `can_view_detector_locator`, `can_export_review_artifacts`
+  - `internal`: `review_diff_preview` 허용
+  - `external`: `review_diff_preview` 숨김, canonical explanation만 노출
+- export도 같은 `surface_mode` 규칙을 따른다.
+  - `internal` export: 검토용 결과와 `review_diff` 포함
+  - `external` export: explanation 중심, `review_diff`/blocked decision/governance trace 비포함
+- `review_diff`는 internal-only `code_diff` evidence layer를 가질 수 있다.
+  - 이 레이어는 실제 패치가 아니라 현재 구조와 권장 패턴의 차이를 검토하기 위한 현재 구조 vs 권장 구조 비교다
+  - 최소 `observed / expected_pattern` snippet만 포함
+  - external surface에서는 `code_diff`를 전달하지 않는다
+  - execution patch와는 별도 레이어로 유지한다
+- 결과 UI는 internal mode에서 `Primary / Blocked / Confidence` sticky summary를 먼저 보여주고, `Decision Result / Why this decision? / Structural Difference` 순서로 Review Diff를 렌더링한다.
+- 기본 open 상태는 `Decision Result` 항상 열림, `Why this decision?` 기본 열림, `Evidence Detail`과 `현재 구조 vs 권장 구조 비교` 기본 접힘으로 고정한다.
+- filtered artifact는 `absent`와 `hidden_by_policy`를 구분한다.
+  - `absent`: 원래 데이터가 없음
+  - `hidden_by_policy`: 데이터는 있었지만 surface policy로 숨김
+  - 실제 external payload는 계속 제거 가능하지만, provenance/debug trace는 이 구분을 남겨야 한다.
+- Q&A는 아래 intent만 지원한다.
+  - `strategy`
+  - `priority`
+  - `evidence`
+  - `execution`
+  - `risk`
+  - `scope`
+- Q&A는 새 판단을 만들지 않는다. 기존 판단, 근거, 실행 단계를 설명만 한다.
+- grounding이 부족하면 `insufficient_grounding=true`로 응답하고 억지로 답을 만들지 않는다.
 
 **Execution Flow**
 1. `[routers/projects.py](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/routers/projects.py)`와 anonymization 흐름은 그대로 유지한다.
@@ -225,6 +351,7 @@ EvidenceLink:
 - 구조/정책 변경은 아래를 동시에 통과해야 한다.
   - authoritative payload shape 검증
   - detector_id 기준 decision 분기 검증
+  - `template_judgment / structural_judgment / narrative_axis / feature_signal_mode` taxonomy 정합성 검증
   - score_breakdown / explainability 검증
   - feature_slice 규칙 검증
   - golden sample 회귀 검증

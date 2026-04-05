@@ -1,0 +1,30 @@
+# Golden Sample Expansion QA Checklist
+
+- measured expansion candidate
+  - `03_state_transition_complex`
+- promoted expansion regression 대상
+  - `01_crud_simple`
+  - `02_access_control_workflow`
+  - `04_db_heavy_query_filter`
+  - `05_legacy_tangled_mixed`
+- non-regression reference set
+  - `03. judgment_template_samples`
+  - `05. query_filter`
+- 별도 regression suite
+  - [test_refactoring_support_promoted_expansion_samples.py](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/tests/test_refactoring_support_promoted_expansion_samples.py)
+- reference-only set은 아래가 준비되기 전까지 regression 대상으로 올리지 않는다.
+  - `input_manifest.json`
+  - `expected_assertions.yaml`
+  - measured anchor
+- [ ] feature slice 수가 기대와 일치하는가
+- [ ] top detector / top decision_type이 기대와 일치하는가
+- [ ] priority_score drift가 없는가
+- [ ] score_breakdown이 explainability와 모순되지 않는가
+- [ ] report_purpose와 first entry point가 measured anchor와 일치하는가
+- [ ] execution_plan / design_options / recommended_option stable hash가 drift 없이 유지되는가
+- [ ] execution_stages가 decision_ids와 연결되는가
+- [ ] AI on/off에서 deterministic core가 동일한가
+- [ ] extensions["narrative"] provenance가 정상 기록되는가
+- [ ] narrative 실패 시 fallback이 유지되는가
+- [ ] low-signal sample에서 `structural_judgment=observation_only`가 유지되는가
+- [ ] query/filter medium-signal sample에서 `query_filter_leak -> refactor` 연결이 유지되는가

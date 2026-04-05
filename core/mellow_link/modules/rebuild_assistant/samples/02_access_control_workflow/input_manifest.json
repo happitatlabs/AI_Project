@@ -1,0 +1,56 @@
+{
+  "sample_id": "02_access_control_workflow",
+  "title": "권한 + 승인 흐름형",
+  "category": "access_control_workflow",
+  "description": "권한/승인 흐름에서 access_control, workflow/state_transition 축 판단과 plan linkage를 검증",
+  "assets": [
+    {
+      "name": "claim_approval_service.py",
+      "type": "code",
+      "path": "assets/claim_approval_service.py",
+      "purpose": "권한 조건과 승인 단계 전이를 함께 포함한 서비스 예시"
+    },
+    {
+      "name": "approval_policy.py",
+      "type": "code",
+      "path": "assets/approval_policy.py",
+      "purpose": "동일 승인 단계 규칙이 반복되는 정책 컴포넌트 예시"
+    },
+    {
+      "name": "claim_approval_query.sql",
+      "type": "sql",
+      "path": "assets/claim_approval_query.sql",
+      "purpose": "권한 조건과 상태 업데이트 query 예시"
+    },
+    {
+      "name": "claim_approval_page.html",
+      "type": "ui",
+      "path": "assets/claim_approval_page.html",
+      "purpose": "승인 액션이 노출되는 화면 예시"
+    },
+    {
+      "name": "schema.sql",
+      "type": "schema",
+      "path": "assets/schema.sql",
+      "purpose": "claims / claim_approvals 테이블 구조"
+    },
+    {
+      "name": "approval_rules.md",
+      "type": "doc",
+      "path": "assets/approval_rules.md",
+      "purpose": "권한/승인 규칙 요약"
+    }
+  ],
+  "expected_focus": {
+    "feature_slices": 1,
+    "primary_judgment": "workflow",
+    "top_decision_type": "refactor",
+    "notes": [
+      "권한 경계와 승인 흐름이 함께 있는 샘플이므로 access_control, workflow, state_transition 축을 우선 확인한다.",
+      "서비스와 정책 컴포넌트에 승인 단계 조건이 반복되도록 구성해 workflow/state_transition 근거를 강화한다.",
+      "현재 measured output은 workflow narrative, refactor top decision, 승인 흐름 중심 plan으로 수렴한다.",
+      "feature slice는 사용자 액션 또는 승인 endpoint 기준으로 안정적으로 분리돼야 한다.",
+      "현재 anchor는 별도 promoted expansion regression에 잠긴 measured 값으로 유지한다."
+    ]
+  }
+}

@@ -1,0 +1,49 @@
+sample_id: 05_legacy_tangled_mixed
+source_documents:
+  human_review_sample: notes/human_review_result_sample.md
+  source_type: human_review_output_reference
+assertions:
+  deterministic_core:
+    primary_judgment: state_transition
+    structural_judgment: redesign
+    selected_narrative_judgment: state_transition
+    report_purpose: 상태 전이 규칙과 처리 흐름을 분석하기 위한 보고서입니다.
+    recommended_strategy: 재설계 우선
+    first_entry_point: ui:LegacyReportPage#submit
+    top_decision_type: redesign
+    top_priority_score: 15
+    decision_count: 37
+    feature_slice_count: 1
+  stable_hashes:
+    execution_plan: cd7d0e21f56fd621419d1f21d727258dccc28043
+    design_options: 1b2969232591284ed4caa77e79b05a77f8ad9cfc
+    recommended_option: 8dfc4585b23800a3506090d7de62da7e07fd5593
+  issue_expectations:
+    must_include_detectors:
+      - boundary_mismatch
+      - duplicate_logic_candidate
+      - mixed_responsibility
+      - query_filter_leak
+      - rule_scatter
+      - state_transition_leak
+      - ui_data_access_coupling
+    must_not_include_detectors: []
+  planning_expectations:
+    recommended_option_title: "옵션 A. 상태 전이 중심 모듈형 구조"
+    execution_stage_count: 4
+    first_execution_stage_title: "1주차"
+    last_execution_stage_title: "4주차"
+    must_link_decision_ids: true
+  ai_narrative_expectations:
+    allowed_to_change_fields:
+      - report_purpose
+      - primary_judgment_reason
+      - one_line_conclusion
+      - executive_summary_v2
+    deterministic_fields_must_match: true
+  draft_notes:
+    status: promoted_expansion_regression
+    current_report_purpose: 상태 전이 규칙과 처리 흐름을 분석하기 위한 보고서입니다.
+    measured_behavior:
+      - boundary_mismatch, rule_scatter, ui_data_access_coupling가 함께 발생하며 top decision이 redesign으로 올라간다.
+      - regression source는 markdown가 아니라 현재 measured anchor를 우선 사용한다.

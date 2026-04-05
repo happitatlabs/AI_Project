@@ -1,0 +1,1531 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>결과 패키지</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: "Pretendard", "Segoe UI", sans-serif; }
+        @media print {
+            .no-print { display: none !important; }
+            body { background: #fff !important; color: #111827 !important; }
+            .print-card { border-color: #d1d5db !important; background: #fff !important; color: #111827 !important; box-shadow: none !important; }
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-[radial-gradient(circle_at_top,_#0f172a,_#020617_60%)] text-slate-100">
+    <div class="max-w-7xl mx-auto px-6 py-8">
+        <header class="no-print flex flex-wrap items-center justify-between gap-4">
+            <div>
+                <p id="surfaceBadge" class="text-xs uppercase tracking-[0.28em] text-cyan-300/80">Internal Review</p>
+                <h1 id="pageTitle" class="mt-2 text-3xl font-semibold">결과 패키지</h1>
+                <p id="pageDescription" class="mt-2 text-sm text-slate-400">분석 목표, 판단 근거, 추천안, 우선순위, 실행 준비 계획을 한 화면에 제공해 컨설턴트가 읽고 방향을 결정할 수 있도록 돕습니다.</p>
+            </div>
+            <nav class="flex flex-wrap gap-2 text-sm">
+                <div class="flex overflow-hidden rounded-full border border-white/10 bg-slate-950/60">
+                    <button id="surfaceModeInternalBtn" class="px-4 py-2 text-sm text-slate-200">Internal</button>
+                    <button id="surfaceModeExternalBtn" class="px-4 py-2 text-sm text-slate-400">External</button>
+                </div>
+                <a id="workspaceLink" href="#" class="rounded-full border border-white/10 px-4 py-2 hover:bg-white/5">워크스페이스</a>
+                <div id="exportPolicyBox" class="rounded-[1.5rem] border border-white/10 bg-slate-950/60 px-4 py-3">
+                    <div id="exportPolicyTitle" class="text-xs uppercase tracking-[0.2em] text-slate-400">검토용 내보내기</div>
+                    <p id="exportPolicyHint" class="mt-2 max-w-xl text-xs leading-6 text-slate-500">Review Diff와 governance trace를 포함한 내부 검토용 산출물을 내보냅니다.</p>
+                    <div class="mt-3 flex flex-wrap gap-2">
+                        <button id="downloadMdBtn" class="rounded-full border border-white/10 px-4 py-2 hover:bg-white/5">검토용 Markdown</button>
+                        <button id="downloadDocxBtn" class="rounded-full border border-white/10 px-4 py-2 hover:bg-white/5">검토용 DOCX</button>
+                        <button id="downloadPptxBtn" class="rounded-full border border-white/10 px-4 py-2 hover:bg-white/5">검토용 PPTX</button>
+                        <button id="printBtn" class="rounded-full border border-white/10 px-4 py-2 hover:bg-white/5">검토 PDF 저장</button>
+                    </div>
+                </div>
+            </nav>
+        </header>
+
+        <div id="loadingState" class="mt-8 rounded-[2rem] border border-white/10 bg-slate-900/60 px-6 py-10 text-center text-sm text-slate-400">
+            결과 패키지를 준비하는 중입니다.
+        </div>
+        <div id="errorState" class="mt-8 hidden rounded-[2rem] border border-rose-400/20 bg-rose-500/10 px-6 py-5 text-sm text-rose-200"></div>
+
+        <main id="resultView" class="mt-8 hidden space-y-6">
+            <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                <p class="text-xs uppercase tracking-[0.24em] text-slate-500">프로젝트</p>
+                <h2 id="projectTitle" class="mt-3 text-3xl font-semibold">-</h2>
+                <p id="projectMeta" class="mt-3 text-sm text-slate-400">-</p>
+            </section>
+
+            <div id="internalSurface" class="space-y-6">
+            <section id="reviewDiffStickyBar" class="no-print sticky top-4 z-30 hidden rounded-[1.5rem] border border-cyan-300/20 bg-slate-950/95 px-4 py-3 backdrop-blur">
+            </section>
+            <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                <p class="text-xs uppercase tracking-[0.24em] text-slate-500">읽는 방법</p>
+                <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                        <div class="text-xs uppercase tracking-[0.2em] text-slate-500">분석 목표</div>
+                        <div class="mt-3 text-sm leading-7 text-slate-200">레거시 기능 또는 화면 1개에 대해 무엇을 유지하고 무엇을 바꿔야 하는지 판단합니다.</div>
+                    </div>
+                    <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                        <div class="text-xs uppercase tracking-[0.2em] text-slate-500">읽는 순서</div>
+                        <div class="mt-3 text-sm leading-7 text-slate-200">핵심 결론 -> 추천안 -> 분리 우선순위 -> 설계 선택지 비교 -> 실행 계획 순서로 확인하면 됩니다.</div>
+                    </div>
+                    <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                        <div class="text-xs uppercase tracking-[0.2em] text-slate-500">회의에서 결정할 것</div>
+                        <div class="mt-3 text-sm leading-7 text-slate-200">어떤 방향을 채택할지, 무엇부터 바꿀지, 추가 자료가 필요한지, 다음 단계 검토를 진행할지를 결정합니다.</div>
+                    </div>
+                    <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                        <div class="text-xs uppercase tracking-[0.2em] text-slate-500">근거 및 추적</div>
+                        <div class="mt-3 text-sm leading-7 text-slate-200">핵심 업무 규칙 카드의 근거 자산, 부록의 provenance, 입력 자산 목록으로 판단 근거를 추적할 수 있습니다.</div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="print-card rounded-[2rem] border border-cyan-300/20 bg-cyan-500/5 p-6">
+                <p class="text-xs uppercase tracking-[0.24em] text-cyan-200">Executive Summary</p>
+                <div id="executiveSummaryBox" class="mt-4"></div>
+            </section>
+
+            <section class="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+                <div class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">핵심 결론</p>
+                    <div id="conclusionBox" class="mt-4 text-base leading-8 text-slate-100"></div>
+                </div>
+                <div class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">추천안</p>
+                    <div id="recommendedOptionBox" class="mt-4 space-y-3 text-sm text-slate-300"></div>
+                </div>
+            </section>
+
+            <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                <p class="text-xs uppercase tracking-[0.24em] text-slate-500">핵심 업무 규칙</p>
+                <div id="coreRulesBox" class="mt-4 space-y-3 text-sm text-slate-300"></div>
+            </section>
+
+            <section class="grid gap-6 xl:grid-cols-2">
+                <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">즉시 결정 필요</p>
+                    <div id="decisionBox" class="mt-4 space-y-3 text-sm text-slate-300"></div>
+                </section>
+                <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">유지해야 할 계약</p>
+                    <div id="retainedBox" class="mt-4 space-y-3 text-sm text-slate-300"></div>
+                </section>
+            </section>
+
+            <section class="grid gap-6 xl:grid-cols-2">
+                <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">분리 우선순위</p>
+                    <div id="priorityBox" class="mt-4 space-y-3 text-sm text-slate-300"></div>
+                </section>
+                <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">확인 필요 항목</p>
+                    <div id="verificationBox" class="mt-4 space-y-3 text-sm text-slate-300"></div>
+                </section>
+            </section>
+
+            <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                <p class="text-xs uppercase tracking-[0.24em] text-slate-500">설계 선택지 비교</p>
+                <div id="optionsBox" class="mt-4 space-y-4 text-sm text-slate-300"></div>
+            </section>
+
+            <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                <p class="text-xs uppercase tracking-[0.24em] text-slate-500">실행 계획</p>
+                <p class="mt-2 text-sm leading-7 text-slate-400">코드 자동 변경이나 배포가 아니라 적용 전 검토를 위한 실행 준비 계획입니다.</p>
+                <div id="planBox" class="mt-4 space-y-4 text-sm text-slate-300"></div>
+            </section>
+
+            <section id="accountingSection" class="print-card hidden rounded-[2rem] border border-emerald-300/20 bg-emerald-500/5 p-6">
+                <div class="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                        <p class="text-xs uppercase tracking-[0.24em] text-emerald-200">회계 확장</p>
+                        <h3 class="mt-3 text-2xl font-semibold text-slate-100">회계 결과와 표현 변형본</h3>
+                        <p class="mt-2 text-sm text-slate-300">원문 계산 결과는 유지하고, 열람 대상과 납품 톤에 따른 회계 표현 변형본을 병렬로 제공합니다.</p>
+                    </div>
+                    <div class="no-print flex flex-wrap gap-3">
+                        <label class="block text-xs text-slate-400">
+                            <span class="mb-2 block uppercase tracking-[0.18em] text-slate-500">열람 대상</span>
+                            <select id="polishAudienceSelect" class="rounded-2xl border border-white/10 bg-slate-950/80 px-3 py-2 text-sm text-slate-100">
+                                <option value="developer">개발자</option>
+                                <option value="manager">관리자</option>
+                                <option value="client">고객</option>
+                            </select>
+                        </label>
+                        <label class="block text-xs text-slate-400">
+                            <span class="mb-2 block uppercase tracking-[0.18em] text-slate-500">납품 톤</span>
+                            <select id="polishDeliverySelect" class="rounded-2xl border border-white/10 bg-slate-950/80 px-3 py-2 text-sm text-slate-100">
+                                <option value="internal_review">내부 검토용</option>
+                                <option value="client_report">고객 보고용</option>
+                                <option value="proposal_appendix">제안 부록용</option>
+                            </select>
+                        </label>
+                    </div>
+                </div>
+                <div class="mt-6 grid gap-6 xl:grid-cols-2">
+                    <div>
+                        <p class="text-xs uppercase tracking-[0.24em] text-slate-500">원문 회계 결과</p>
+                        <div id="accountingRawBox" class="mt-4 space-y-4 text-sm text-slate-300"></div>
+                    </div>
+                    <div>
+                        <p class="text-xs uppercase tracking-[0.24em] text-slate-500">선택된 표현 변형본</p>
+                        <div id="accountingPolishBox" class="mt-4 space-y-4 text-sm text-slate-300"></div>
+                    </div>
+                </div>
+                <div id="accountingWarningsBox" class="mt-4 hidden rounded-2xl border border-amber-300/20 bg-amber-500/10 px-4 py-4 text-sm text-amber-100"></div>
+            </section>
+
+            <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                <p class="text-xs uppercase tracking-[0.24em] text-slate-500">리스크</p>
+                <div id="diagnosisBox" class="mt-4 space-y-4 text-sm text-slate-300"></div>
+            </section>
+
+            <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                <p class="text-xs uppercase tracking-[0.24em] text-slate-500">설계안</p>
+                <div id="designBox" class="mt-4 space-y-5 text-sm text-slate-300"></div>
+            </section>
+
+            <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                <p class="text-xs uppercase tracking-[0.24em] text-slate-500">전환 초안</p>
+                <div id="draftBox" class="mt-4 space-y-4 text-sm text-slate-300"></div>
+            </section>
+
+            <section id="reviewDiffSection" class="print-card hidden rounded-[2rem] border border-indigo-300/20 bg-indigo-500/5 p-6">
+                <p class="text-xs uppercase tracking-[0.24em] text-indigo-200">Review Diff</p>
+                <p class="mt-2 text-sm leading-7 text-slate-300">내부 검토용 증거 레이어입니다. 기본 화면은 짧게 유지하고, 필요할 때만 Evidence와 구조 비교를 펼쳐 확인합니다.</p>
+                <div class="mt-4 space-y-4">
+                    <section id="reviewDiffDecisionSection" class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                        <div class="text-xs font-medium uppercase tracking-[0.2em] text-emerald-300">Decision Result</div>
+                        <div id="reviewDiffDecisionBox" class="mt-4 space-y-2 text-sm text-slate-300"></div>
+                    </section>
+                    <details id="reviewDiffWhySection" open class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                        <summary class="cursor-pointer text-xs font-medium uppercase tracking-[0.2em] text-cyan-300">Why this decision?</summary>
+                        <div id="reviewDiffEvidenceBox" class="mt-4 space-y-2 text-sm text-slate-300"></div>
+                    </details>
+                    <details id="reviewDiffEvidenceSection" class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                        <summary class="cursor-pointer text-xs font-medium uppercase tracking-[0.2em] text-amber-300">Evidence Detail</summary>
+                        <div id="reviewDiffEvidenceDetailBox" class="mt-4 space-y-4 text-sm text-slate-300"></div>
+                    </details>
+                    <details id="reviewDiffPatternSection" class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                        <summary class="cursor-pointer text-xs font-medium uppercase tracking-[0.2em] text-emerald-300">현재 구조 vs 권장 구조 비교</summary>
+                        <div class="mt-4 space-y-6">
+                            <section id="codeDiffSection" class="hidden rounded-2xl border border-emerald-300/20 bg-emerald-500/5 p-4">
+                                <div class="flex flex-wrap items-center justify-between gap-3">
+                                    <div>
+                                        <div class="text-xs uppercase tracking-[0.2em] text-emerald-200">현재 구조 vs 권장 구조 비교</div>
+                                        <p class="mt-2 text-sm text-slate-300">이 비교는 실제 패치가 아니라, 현재 구조와 권장 패턴의 차이를 검토하기 위한 근거 예시입니다.</p>
+                                    </div>
+                                    <button id="showCodeDiffBtn" class="rounded-full border border-emerald-300/30 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-100 hover:bg-emerald-500/20">현재 구조 vs 권장 구조 보기</button>
+                                </div>
+                                <div id="codeDiffPanel" class="mt-4 hidden space-y-4"></div>
+                            </section>
+                            <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                                <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Structural Difference</div>
+                                <div id="reviewDiffStructuralBox" class="mt-3 space-y-2 text-sm text-slate-300"></div>
+                            </div>
+                            <details class="rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-4">
+                                <summary class="cursor-pointer text-sm font-medium text-slate-100">원문 Markdown 보기</summary>
+                                <pre id="reviewDiffMarkdownBox" class="mt-4 whitespace-pre-wrap text-xs leading-6 text-slate-300"></pre>
+                            </details>
+                        </div>
+                    </details>
+                </div>
+            </section>
+
+            <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                <p class="text-xs uppercase tracking-[0.24em] text-slate-500">부록</p>
+                <div id="appendixBox" class="mt-4 space-y-4 text-sm text-slate-300"></div>
+            </section>
+            </div>
+
+            <div id="externalSurface" class="hidden space-y-6">
+                <section class="print-card rounded-[2rem] border border-cyan-300/20 bg-cyan-500/5 p-6">
+                    <p class="text-xs uppercase tracking-[0.24em] text-cyan-200">External Presentation</p>
+                    <h3 class="mt-3 text-2xl font-semibold text-slate-100">구조 판단과 권장 전략</h3>
+                    <p class="mt-2 text-sm leading-7 text-slate-300">외부 공유용 surface입니다. canonical judgment와 근거 설명만 노출하며, Review Diff와 governance 세부 정보는 포함하지 않습니다.</p>
+                    <div id="externalSummaryCardsBox" class="mt-5 grid gap-4 xl:grid-cols-2"></div>
+                </section>
+
+                <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">핵심 설명</p>
+                    <div id="externalSectionsBox" class="mt-4 space-y-4"></div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const projectId = window.location.pathname.split('/')[2] || '';
+        const searchParams = new URLSearchParams(window.location.search);
+        const accountingSectionKeys = ['accounting_summary', 'accounting_status', 'accounting_analysis', 'fx_calculation', 'voucher_review'];
+        const accountingSectionTitles = {
+            accounting_summary: '회계 계산 요약',
+            accounting_status: '계산 가능 여부',
+            accounting_analysis: '회계 방식 분석',
+            fx_calculation: '외화 계산 결과',
+            voucher_review: '전표 검토 결과'
+        };
+        const audienceLabels = { developer: '개발자 요약', manager: '관리자 요약', client: '고객 요약' };
+        const deliveryLabels = { internal_review: '내부 검토 톤', client_report: '고객 보고 톤', proposal_appendix: '제안 부록 톤' };
+        const accessPolicyMap = {
+            internal_full: {
+                surfaceVariant: 'internal_review',
+                capabilities: {
+                    can_view_review_diff: true,
+                    can_view_review_diff_preview: true,
+                    can_view_code_diff: true,
+                    can_view_blocked_decisions: true,
+                    can_view_block_reasons: true,
+                    can_view_governance_trace: true,
+                    can_view_detector_locator: true,
+                    can_view_fingerprint_alias: true,
+                    can_export_review_artifacts: true
+                }
+            },
+            internal_limited: {
+                surfaceVariant: 'internal_review',
+                capabilities: {
+                    can_view_review_diff: true,
+                    can_view_review_diff_preview: true,
+                    can_view_code_diff: false,
+                    can_view_blocked_decisions: true,
+                    can_view_block_reasons: true,
+                    can_view_governance_trace: true,
+                    can_view_detector_locator: false,
+                    can_view_fingerprint_alias: false,
+                    can_export_review_artifacts: false
+                }
+            },
+            external_basic: {
+                surfaceVariant: 'external_presentation',
+                capabilities: {
+                    can_view_review_diff: false,
+                    can_view_review_diff_preview: false,
+                    can_view_code_diff: false,
+                    can_view_blocked_decisions: false,
+                    can_view_block_reasons: false,
+                    can_view_governance_trace: false,
+                    can_view_detector_locator: false,
+                    can_view_fingerprint_alias: false,
+                    can_export_review_artifacts: false
+                }
+            },
+            external_advanced: {
+                surfaceVariant: 'external_presentation',
+                capabilities: {
+                    can_view_review_diff: false,
+                    can_view_review_diff_preview: false,
+                    can_view_code_diff: false,
+                    can_view_blocked_decisions: false,
+                    can_view_block_reasons: false,
+                    can_view_governance_trace: false,
+                    can_view_detector_locator: false,
+                    can_view_fingerprint_alias: false,
+                    can_export_review_artifacts: false
+                }
+            }
+        };
+        let currentPackage = null;
+        let currentSurfaceMode = normalizeSurfaceMode(searchParams.get('surface_mode'));
+        let currentAccessPolicy = resolveSurfaceAccessPolicy(currentSurfaceMode);
+        let currentAccessProfile = currentAccessPolicy.accessProfile;
+        let currentCapabilities = currentAccessPolicy.capabilities;
+
+        function normalizeSurfaceMode(value) {
+            return value === 'external' ? 'external' : 'internal';
+        }
+
+        function resolveAccessProfile(mode) {
+            return normalizeSurfaceMode(mode) === 'external' ? 'external_basic' : 'internal_full';
+        }
+
+        function resolveSurfaceAccessPolicy(mode) {
+            const accessProfile = resolveAccessProfile(mode);
+            const base = accessPolicyMap[accessProfile] || accessPolicyMap.external_basic;
+            return {
+                accessProfile: accessProfile,
+                surfaceVariant: base.surfaceVariant,
+                capabilities: Object.assign({}, base.capabilities)
+            };
+        }
+
+        function applySurfaceAccessPolicy(mode) {
+            currentAccessPolicy = resolveSurfaceAccessPolicy(mode);
+            currentAccessProfile = currentAccessPolicy.accessProfile;
+            currentCapabilities = currentAccessPolicy.capabilities;
+        }
+
+        function surfaceModeConfig(mode) {
+            if (mode === 'external') {
+                return {
+                    badge: 'External Surface',
+                    pageTitle: '구조 판단',
+                    pageDescription: '외부 공유용 surface입니다. 구조 판단, 권장 전략, 판단 근거, 다음 단계를 설명 중심으로 제공합니다.',
+                    exportTitle: '설명용 내보내기',
+                    exportHint: 'Review Diff와 governance trace를 제외한 설명 중심 산출물을 내보냅니다.',
+                    exportBoxClass: 'rounded-[1.5rem] border border-cyan-300/20 bg-cyan-500/5 px-4 py-3',
+                    buttons: {
+                        md: '설명용 Markdown',
+                        docx: '설명용 DOCX',
+                        pptx: '발표용 PPTX',
+                        print: '설명 PDF 저장'
+                    },
+                    titles: {
+                        md: '설명 중심 Markdown을 다운로드합니다.',
+                        docx: '설명 중심 DOCX를 다운로드합니다.',
+                        pptx: '발표용 PPTX를 다운로드합니다.',
+                        print: '현재 external surface를 PDF로 저장합니다.'
+                    },
+                    fallbackNames: {
+                        md: 'project_explanation.md',
+                        docx: 'project_explanation.docx',
+                        pptx: 'project_presentation.pptx'
+                    }
+                };
+            }
+            return {
+                badge: 'Internal Review',
+                pageTitle: '결과 패키지',
+                pageDescription: '분석 목표, 판단 근거, 추천안, 우선순위, 실행 준비 계획을 한 화면에 제공해 컨설턴트가 읽고 방향을 결정할 수 있도록 돕습니다.',
+                exportTitle: '검토용 내보내기',
+                exportHint: 'Review Diff와 governance trace를 포함한 내부 검토용 산출물을 내보냅니다.',
+                exportBoxClass: 'rounded-[1.5rem] border border-white/10 bg-slate-950/60 px-4 py-3',
+                buttons: {
+                    md: '검토용 Markdown',
+                    docx: '검토용 DOCX',
+                    pptx: '검토용 PPTX',
+                    print: '검토 PDF 저장'
+                },
+                titles: {
+                    md: 'Review Diff를 포함한 검토용 Markdown을 다운로드합니다.',
+                    docx: 'Review Diff를 포함한 검토용 DOCX를 다운로드합니다.',
+                    pptx: 'Review Diff를 포함한 검토용 PPTX를 다운로드합니다.',
+                    print: '현재 internal review surface를 PDF로 저장합니다.'
+                },
+                fallbackNames: {
+                    md: 'project_review.md',
+                    docx: 'project_review.docx',
+                    pptx: 'project_review.pptx'
+                }
+            };
+        }
+
+        function setSurfaceModeButtons() {
+            const internalBtn = document.getElementById('surfaceModeInternalBtn');
+            const externalBtn = document.getElementById('surfaceModeExternalBtn');
+            if (currentAccessPolicy.surfaceVariant === 'external_presentation') {
+                internalBtn.className = 'px-4 py-2 text-sm text-slate-400';
+                externalBtn.className = 'bg-cyan-500/20 px-4 py-2 text-sm font-medium text-cyan-100';
+            } else {
+                internalBtn.className = 'bg-cyan-500/20 px-4 py-2 text-sm font-medium text-cyan-100';
+                externalBtn.className = 'px-4 py-2 text-sm text-slate-400';
+            }
+            applySurfaceCopy();
+            setExportButtons();
+        }
+
+        function toggleSurfaceContainers() {
+            const internalSurface = document.getElementById('internalSurface');
+            const externalSurface = document.getElementById('externalSurface');
+            if (currentAccessPolicy.surfaceVariant === 'external_presentation') {
+                internalSurface.classList.add('hidden');
+                externalSurface.classList.remove('hidden');
+            } else {
+                internalSurface.classList.remove('hidden');
+                externalSurface.classList.add('hidden');
+            }
+        }
+
+        function setSurfaceMode(mode) {
+            currentSurfaceMode = normalizeSurfaceMode(mode);
+            applySurfaceAccessPolicy(currentSurfaceMode);
+            const nextUrl = new URL(window.location.href);
+            nextUrl.searchParams.set('surface_mode', currentSurfaceMode);
+            window.history.replaceState({}, '', nextUrl.toString());
+            setSurfaceModeButtons();
+            toggleSurfaceContainers();
+            bootstrap();
+        }
+
+        function setExportButtons() {
+            const config = surfaceModeConfig(currentSurfaceMode);
+            const mdBtn = document.getElementById('downloadMdBtn');
+            const docxBtn = document.getElementById('downloadDocxBtn');
+            const pptxBtn = document.getElementById('downloadPptxBtn');
+            const printBtn = document.getElementById('printBtn');
+            const exportBox = document.getElementById('exportPolicyBox');
+            const exportTitle = document.getElementById('exportPolicyTitle');
+            const exportHint = document.getElementById('exportPolicyHint');
+            exportBox.className = config.exportBoxClass;
+            exportTitle.textContent = config.exportTitle;
+            exportHint.textContent = config.exportHint;
+            mdBtn.textContent = config.buttons.md;
+            docxBtn.textContent = config.buttons.docx;
+            pptxBtn.textContent = config.buttons.pptx;
+            printBtn.textContent = config.buttons.print;
+            mdBtn.title = config.titles.md;
+            docxBtn.title = config.titles.docx;
+            pptxBtn.title = config.titles.pptx;
+            printBtn.title = config.titles.print;
+        }
+
+        function applySurfaceCopy() {
+            const config = surfaceModeConfig(currentSurfaceMode);
+            document.getElementById('surfaceBadge').textContent = config.badge;
+            document.getElementById('pageTitle').textContent = config.pageTitle;
+            document.getElementById('pageDescription').textContent = config.pageDescription;
+        }
+
+        function resultDownloadUrl(format) {
+            return '/projects/' + encodeURIComponent(projectId) + '/result?format=' + encodeURIComponent(format) + '&surface_mode=' + encodeURIComponent(currentSurfaceMode);
+        }
+
+        function resultDownloadFallbackName(format) {
+            const config = surfaceModeConfig(currentSurfaceMode);
+            return (config.fallbackNames && config.fallbackNames[format]) || ('project_result.' + format);
+        }
+
+        function authHeaders() {
+            const token = localStorage.getItem('authToken') || localStorage.getItem('auth_token') || '';
+            const headers = { 'Accept': 'application/json' };
+            if (token) headers.Authorization = 'Bearer ' + token;
+            return headers;
+        }
+
+        function parseFilenameFromDisposition(disposition, fallbackName) {
+            if (!disposition) return fallbackName;
+            const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+            if (utf8Match && utf8Match[1]) {
+                try {
+                    return decodeURIComponent(utf8Match[1]);
+                } catch (error) {
+                    return fallbackName;
+                }
+            }
+            const asciiMatch = disposition.match(/filename=\"?([^\";]+)\"?/i);
+            return asciiMatch && asciiMatch[1] ? asciiMatch[1] : fallbackName;
+        }
+
+        async function downloadWithAuth(url, fallbackName) {
+            const headers = authHeaders();
+            headers.Accept = '*/*';
+            const res = await fetch(url, { headers: headers });
+            if (!res.ok) {
+                if (res.status === 401) throw new Error('로그인이 필요합니다.');
+                if (res.status === 403) throw new Error('다운로드 권한이 없습니다.');
+                throw new Error('다운로드에 실패했습니다.');
+            }
+            const blob = await res.blob();
+            const disposition = res.headers.get('content-disposition') || '';
+            const filename = parseFilenameFromDisposition(disposition, fallbackName);
+            const blobUrl = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = blobUrl;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            setTimeout(function () { URL.revokeObjectURL(blobUrl); }, 1000);
+        }
+
+        function listOrState(items, stateMessage) {
+            if (items && items.length) {
+                return items.map(function (item) {
+                    return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' + item + '</div>';
+                }).join('');
+            }
+            return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + stateMessage + '</div>';
+        }
+
+        function renderMissing(items, fallback) {
+            if (!items || !items.length) {
+                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + fallback + '</div>';
+            }
+            return items.map(function (item) {
+                return '<div class="rounded-3xl border border-white/10 bg-black/20 px-4 py-4">' +
+                    '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">[필요 자료]</div>' +
+                    '<div class="mt-2">- ' + (item.required_material || '-') + '</div>' +
+                    '<div class="mt-4 text-xs uppercase tracking-[0.2em] text-slate-500">[이유]</div>' +
+                    '<div class="mt-2">- ' + (item.reason || '-') + '</div>' +
+                    '</div>';
+            }).join('');
+        }
+
+        function renderLayerSection(title, section) {
+            const values = section || [];
+            if (!values.length) {
+                return '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">' + title + '</div><div class="mt-2 text-slate-500">데이터 없음</div></div>';
+            }
+            return '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">' + title + '</div><div class="mt-3 space-y-2">' +
+                values.map(function (item) { return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">' + item + '</div>'; }).join('') +
+                '</div></div>';
+        }
+
+        function renderRules(rules, stateMessage) {
+            const blocks = [];
+            if (rules.status_permissions && rules.status_permissions.entities && rules.status_permissions.entities.length) {
+                blocks.push('<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4"><div class="text-xs uppercase tracking-[0.2em] text-slate-500">권한 및 상태 규칙</div><div class="mt-2">' + rules.status_permissions.entities.join(', ') + '</div></div>');
+            }
+            if (rules.search_filters && rules.search_filters.entities && rules.search_filters.entities.length) {
+                blocks.push('<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4"><div class="text-xs uppercase tracking-[0.2em] text-slate-500">조회 조건 규칙</div><div class="mt-2">' + rules.search_filters.entities.join(', ') + '</div></div>');
+            }
+            if (rules.save_validation && rules.save_validation.entities && rules.save_validation.entities.length) {
+                blocks.push('<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4"><div class="text-xs uppercase tracking-[0.2em] text-slate-500">저장 검증 규칙</div><div class="mt-2">' + rules.save_validation.entities.join(', ') + '</div></div>');
+            }
+            return blocks.length ? blocks.join('') : '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + stateMessage + '</div>';
+        }
+
+        function renderGroundedRules(items, stateMessage) {
+            if (!items || !items.length) {
+                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + stateMessage + '</div>';
+            }
+            return items.map(function (item) {
+                const evidence = (item.evidence_cards || []).map(function (row) {
+                    return '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-xs text-slate-300">' +
+                        '<div class="font-medium text-slate-100">' + escapeHtml(row.asset_name || '-') + '</div>' +
+                        '<div class="mt-2 text-slate-400">' + escapeHtml(row.condition_summary || '-') + '</div>' +
+                        '<div class="mt-2 text-slate-500">설계 반영 위치: ' + escapeHtml((row.design_targets || []).join(', ') || '-') + '</div>' +
+                        '<div class="mt-1 text-slate-500">신뢰도: ' + escapeHtml(row.confidence || '-') + '</div>' +
+                        '</div>';
+                }).join('');
+                return '<div class="rounded-3xl border border-white/10 bg-black/20 px-4 py-4">' +
+                    '<div class="flex flex-wrap items-center justify-between gap-3">' +
+                        '<div class="text-base font-medium text-slate-100">' + escapeHtml(item.title || '-') + '</div>' +
+                        '<div class="rounded-full border border-cyan-300/20 bg-cyan-500/10 px-3 py-1 text-xs text-cyan-200">' + escapeHtml(item.confidence || '-') + '</div>' +
+                    '</div>' +
+                    '<div class="mt-3 text-sm leading-7 text-slate-200">' + escapeHtml(item.description || '-') + '</div>' +
+                    '<div class="mt-4 grid gap-3 md:grid-cols-2">' +
+                        '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-3"><div class="text-xs uppercase tracking-[0.2em] text-slate-500">설계 반영 위치</div><div class="mt-2 text-sm">' + escapeHtml((item.design_targets || []).join(', ') || '-') + '</div></div>' +
+                        '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-3"><div class="text-xs uppercase tracking-[0.2em] text-slate-500">신뢰도 근거</div><div class="mt-2 text-sm">' + escapeHtml(item.confidence_reason || '-') + '</div></div>' +
+                    '</div>' +
+                    '<div class="mt-4 text-xs uppercase tracking-[0.2em] text-slate-500">근거 자산</div>' +
+                    '<div class="mt-3 space-y-2">' + (evidence || '<div class="text-slate-500">근거 없음</div>') + '</div>' +
+                    '<div class="mt-4 text-xs text-slate-400">추가 검증 필요: ' + escapeHtml(item.needs_verification ? '예' : '아니오') + '</div>' +
+                    '</div>';
+            }).join('');
+        }
+
+        function renderCardList(items, stateMessage, titleKey, bodyKey, metaKey) {
+            if (!items || !items.length) {
+                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + stateMessage + '</div>';
+            }
+            return items.map(function (item) {
+                return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
+                    '<div class="font-medium text-slate-100">' + escapeHtml(item[titleKey] || '-') + '</div>' +
+                    '<div class="mt-2 text-sm leading-7 text-slate-300">' + escapeHtml(item[bodyKey] || '-') + '</div>' +
+                    (metaKey ? '<div class="mt-3 text-xs text-slate-500">' + escapeHtml(item[metaKey] || '-') + '</div>' : '') +
+                    '</div>';
+            }).join('');
+        }
+
+        function renderPriority(items, stateMessage) {
+            if (!items || !items.length) return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + stateMessage + '</div>';
+            return items.map(function (item) {
+                return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
+                    '<div class="font-medium text-slate-100">' + escapeHtml(String(item.priority || '-')) + '순위 · ' + escapeHtml(item.item || item.title || '-') + '</div>' +
+                    '<div class="mt-2 text-sm">' + escapeHtml(item.reason || '-') + '</div>' +
+                    '<div class="mt-3 grid gap-3 md:grid-cols-2 text-xs text-slate-400">' +
+                        '<div>영향 범위: ' + escapeHtml(item.impact_scope || '-') + '</div>' +
+                        '<div>선행 조건: ' + escapeHtml(item.prerequisite || '-') + '</div>' +
+                    '</div>' +
+                    '<div class="mt-3 text-xs text-slate-500">관련 규칙: ' + escapeHtml((item.linked_rules || []).join(', ') || '-') + '</div>' +
+                    '<div class="mt-1 text-xs text-slate-500">관련 계약: ' + escapeHtml((item.linked_contracts || []).join(', ') || '-') + '</div>' +
+                    '</div>';
+            }).join('');
+        }
+
+        function renderOptions(items, stateMessage) {
+            if (!items || !items.length) return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + stateMessage + '</div>';
+            return items.map(function (item) {
+                return '<div class="rounded-3xl border border-white/10 bg-black/20 px-4 py-4">' +
+                    '<div class="flex flex-wrap items-center justify-between gap-3">' +
+                        '<div class="text-base font-medium text-slate-100">' + escapeHtml(item.name || '-') + '</div>' +
+                        '<div class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300">' + escapeHtml(item.difficulty || '-') + ' · ' + escapeHtml(String(item.duration_weeks || 0)) + '주</div>' +
+                    '</div>' +
+                    '<div class="mt-3 text-sm leading-7 text-slate-200">' + escapeHtml(item.structure_summary || '-') + '</div>' +
+                    '<div class="mt-4 grid gap-4 md:grid-cols-2">' +
+                        '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">장점</div><div class="mt-2 space-y-2">' + (item.advantages || []).map(function (entry) { return '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm">' + escapeHtml(entry) + '</div>'; }).join('') + '</div></div>' +
+                        '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">리스크</div><div class="mt-2 space-y-2">' + (item.risks || []).map(function (entry) { return '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm">' + escapeHtml(entry) + '</div>'; }).join('') + '</div></div>' +
+                    '</div>' +
+                    '<div class="mt-4 text-xs text-slate-400">선택 근거: ' + escapeHtml(item.selection_reason || '-') + '</div>' +
+                    '<div class="mt-2 text-xs text-cyan-200">추천 여부: ' + escapeHtml(item.recommended ? '예' : '아니오') + '</div>' +
+                    '</div>';
+            }).join('');
+        }
+
+        function renderPlan(items, stateMessage) {
+            if (!items || !items.length) return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + stateMessage + '</div>';
+            return items.map(function (item) {
+                return '<div class="rounded-3xl border border-white/10 bg-black/20 px-4 py-4">' +
+                    '<div class="flex flex-wrap items-center justify-between gap-3">' +
+                        '<div class="text-base font-medium text-slate-100">' + escapeHtml(item.week_label || '-') + '</div>' +
+                        '<div class="text-xs text-slate-400">' + escapeHtml(String(item.duration_weeks || 0)) + '주</div>' +
+                    '</div>' +
+                    '<div class="mt-3 text-sm leading-7 text-slate-200">' + escapeHtml(item.goal || '-') + '</div>' +
+                    '<div class="mt-3 text-xs text-slate-500">관련 규칙: ' + escapeHtml((item.related_rules || []).join(', ') || '-') + '</div>' +
+                    '<div class="mt-1 text-xs text-slate-500">관련 계약: ' + escapeHtml((item.related_contracts || []).join(', ') || '-') + '</div>' +
+                    '<div class="mt-4 grid gap-4 md:grid-cols-3">' +
+                        '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">작업</div><div class="mt-2 space-y-2">' + (item.tasks || []).map(function (entry) { return '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm">' + escapeHtml(entry) + '</div>'; }).join('') + '</div></div>' +
+                        '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">인력</div><div class="mt-2 space-y-2">' + (item.roles || []).map(function (entry) { return '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm">' + escapeHtml(entry) + '</div>'; }).join('') + '</div></div>' +
+                        '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">산출물</div><div class="mt-2 space-y-2">' + (item.deliverables || []).map(function (entry) { return '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm">' + escapeHtml(entry) + '</div>'; }).join('') + '</div></div>' +
+                    '</div>' +
+                    '</div>';
+            }).join('');
+        }
+
+        function renderTextBlock(text, emptyMessage) {
+            const normalized = String(text == null ? '' : text).trim();
+            if (!normalized) {
+                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + escapeHtml(emptyMessage || '데이터 없음') + '</div>';
+            }
+            const lines = normalized.split(/\r?\n+/).filter(function (line) { return line.trim(); });
+            return '<div class="space-y-2">' + lines.map(function (line) {
+                return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm leading-7 text-slate-200">' + escapeHtml(line) + '</div>';
+            }).join('') + '</div>';
+        }
+
+        function sectionByKey(bundle, key) {
+            const sections = ((bundle || {}).polished_sections || []);
+            return sections.find(function (section) { return section.section_key === key; }) || null;
+        }
+
+        function accountingPolishSections(bundle) {
+            const sections = ((bundle || {}).polished_sections || []);
+            return sections.filter(function (section) {
+                return accountingSectionKeys.includes(section.section_key);
+            });
+        }
+
+        function humanizeAccountingSectionTitle(section) {
+            if (!section) return '-';
+            return accountingSectionTitles[section.section_key] || section.title || section.section_key || '-';
+        }
+
+        function humanizeAccountingMissingInput(key) {
+            const mapping = {
+                transactions: '거래 데이터',
+                exchange_rates: '환율 데이터',
+                policies: '회계 정책 데이터',
+                vouchers: '전표 데이터',
+                account_mappings: '계정 매핑'
+            };
+            return mapping[key] || key || '-';
+        }
+
+        function renderAccountingRaw(accounting) {
+            if (!accounting || !Object.keys(accounting).length) {
+                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">회계 확장 결과가 없습니다.</div>';
+            }
+            const blocks = [];
+            if (accounting.summary_sentence) {
+                blocks.push('<div class="rounded-3xl border border-emerald-300/20 bg-emerald-500/10 px-4 py-4"><div class="text-xs uppercase tracking-[0.2em] text-emerald-200">요약</div><div class="mt-3 text-base leading-8 text-slate-100">' + escapeHtml(accounting.summary_sentence) + '</div></div>');
+            }
+            if (accounting.calculation_status || accounting.input_validation) {
+                const statusLines = [];
+                const calcStatus = accounting.calculation_status || {};
+                const validation = accounting.input_validation || {};
+                if (Object.prototype.hasOwnProperty.call(calcStatus, 'can_calculate')) {
+                    statusLines.push('- 계산 가능 여부: ' + (calcStatus.can_calculate ? '가능' : '불가'));
+                }
+                if (calcStatus.reason) statusLines.push('- 판단 근거: ' + calcStatus.reason);
+                if (calcStatus.blocking_issue) statusLines.push('- 차단 사유: ' + calcStatus.blocking_issue);
+                if ((validation.missing_required_inputs || []).length) {
+                    statusLines.push('- 누락 입력: ' + validation.missing_required_inputs.map(humanizeAccountingMissingInput).join(', '));
+                }
+                blocks.push('<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">계산 가능 여부</div><div class="mt-3">' + renderTextBlock(statusLines.join('\n'), '계산 상태 정보가 없습니다.') + '</div></div>');
+            }
+            if (accounting.accounting_analysis) {
+                const analysisLines = [];
+                const analysis = accounting.accounting_analysis;
+                if ((analysis.candidate_methods || []).length) analysisLines.push('- 후보 방식: ' + analysis.candidate_methods.join(', '));
+                if (analysis.recommended_method) analysisLines.push('- 추천 방식: ' + analysis.recommended_method);
+                (analysis.reasons || []).forEach(function (reason) {
+                    analysisLines.push('- ' + (reason.message || '-'));
+                });
+                blocks.push('<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">회계 방식 분석</div><div class="mt-3">' + renderTextBlock(analysisLines.join('\n'), '회계 방식 분석 데이터가 없습니다.') + '</div></div>');
+            }
+            if (accounting.fx_calculation) {
+                const calcLines = [];
+                const fx = accounting.fx_calculation;
+                if (fx.method) calcLines.push('- 방식: ' + fx.method);
+                if (fx.realized_gain_loss_krw != null) calcLines.push('- 환차손익: ' + Number(fx.realized_gain_loss_krw).toLocaleString('ko-KR') + '원');
+                if (fx.failure_reason) calcLines.push('- 실패 사유: ' + fx.failure_reason);
+                (fx.detail_steps || []).forEach(function (step) {
+                    calcLines.push('- ' + (step.message || '-'));
+                });
+                blocks.push('<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">외화 계산 결과</div><div class="mt-3">' + renderTextBlock(calcLines.join('\n'), '외화 계산 결과가 없습니다.') + '</div></div>');
+            }
+            if (accounting.voucher_review) {
+                const reviewLines = [];
+                const review = accounting.voucher_review;
+                if (review.status) reviewLines.push('- 상태: ' + review.status);
+                if (review.balance_ok == null) reviewLines.push('- 차변/대변 균형: 검토 불가');
+                else if (Object.prototype.hasOwnProperty.call(review, 'balance_ok')) reviewLines.push('- 차변/대변 균형: ' + (review.balance_ok ? '예' : '아니오'));
+                if (review.policy_consistent == null) reviewLines.push('- 정책 일치: 검토 불가');
+                else if (Object.prototype.hasOwnProperty.call(review, 'policy_consistent')) reviewLines.push('- 정책 일치: ' + (review.policy_consistent ? '예' : '아니오'));
+                if (review.failure_reason) reviewLines.push('- 실패 사유: ' + review.failure_reason);
+                (review.review_points || []).forEach(function (item) { reviewLines.push('- ' + (item.message || '-')); });
+                (review.mismatches || []).forEach(function (item) { reviewLines.push('- 불일치: ' + (item.message || '-')); });
+                blocks.push('<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">전표 검토 결과</div><div class="mt-3">' + renderTextBlock(reviewLines.join('\n'), '전표 검토 결과가 없습니다.') + '</div></div>');
+            }
+            return blocks.join('');
+        }
+
+        function renderAccountingPolish(bundle) {
+            const sections = accountingPolishSections(bundle);
+            if (!sections.length) {
+                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">회계 표현 변형본이 없습니다.</div>';
+            }
+            const audienceMode = document.getElementById('polishAudienceSelect').value || (bundle && bundle.audience) || 'manager';
+            const deliveryMode = document.getElementById('polishDeliverySelect').value || (bundle && bundle.delivery_mode) || 'client_report';
+            return sections.map(function (section) {
+                const audienceText = (section.audience_variants || {})[audienceMode] || section.polished_text || section.original_text || '';
+                const deliveryText = (section.delivery_variants || {})[deliveryMode] || section.polished_text || section.original_text || '';
+                return '<div class="rounded-3xl border border-white/10 bg-black/20 px-4 py-4">' +
+                    '<div class="text-base font-medium text-slate-100">' + escapeHtml(humanizeAccountingSectionTitle(section)) + '</div>' +
+                    '<div class="mt-4 grid gap-4 xl:grid-cols-3">' +
+                        '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">문장 정제본</div><div class="mt-3">' + renderTextBlock(section.polished_text || section.original_text || '', '정제된 문장이 없습니다.') + '</div></div>' +
+                        '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">' + escapeHtml(audienceLabels[audienceMode] || audienceMode) + '</div><div class="mt-3">' + renderTextBlock(audienceText, '열람 대상 변형본이 없습니다.') + '</div></div>' +
+                        '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">' + escapeHtml(deliveryLabels[deliveryMode] || deliveryMode) + '</div><div class="mt-3">' + renderTextBlock(deliveryText, '납품 톤 변형본이 없습니다.') + '</div></div>' +
+                    '</div>' +
+                    '</div>';
+            }).join('');
+        }
+
+        function renderAccountingWarnings(bundle) {
+            const warningBox = document.getElementById('accountingWarningsBox');
+            const warnings = ((bundle || {}).warnings || []).filter(function (item) { return String(item || '').trim(); });
+            if (!warnings.length) {
+                warningBox.classList.add('hidden');
+                warningBox.innerHTML = '';
+                return;
+            }
+            warningBox.classList.remove('hidden');
+            warningBox.innerHTML = '<div class="text-xs uppercase tracking-[0.2em] text-amber-200">표현 보정 경고</div><div class="mt-3 space-y-2">' +
+                warnings.map(function (warning) {
+                    return '<div class="rounded-2xl border border-amber-300/20 bg-black/20 px-3 py-2">' + escapeHtml(warning) + '</div>';
+                }).join('') +
+                '</div>';
+        }
+
+        function renderAccountingSection(pkg) {
+            const accounting = pkg.accounting || {};
+            const bundle = pkg.polish_bundle || {};
+            const section = document.getElementById('accountingSection');
+            const rawBox = document.getElementById('accountingRawBox');
+            const polishBox = document.getElementById('accountingPolishBox');
+            const hasAccounting = Object.keys(accounting).length > 0;
+            const hasPolish = accountingPolishSections(bundle).length > 0;
+            if (!hasAccounting && !hasPolish) {
+                section.classList.add('hidden');
+                rawBox.innerHTML = '';
+                polishBox.innerHTML = '';
+                renderAccountingWarnings(null);
+                return;
+            }
+            section.classList.remove('hidden');
+            rawBox.innerHTML = renderAccountingRaw(accounting);
+            polishBox.innerHTML = renderAccountingPolish(bundle);
+            renderAccountingWarnings(bundle);
+        }
+
+        function escapeHtml(value) {
+            return String(value == null ? '' : value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function formatLocalDate(value) {
+            if (!value) return '-';
+            const date = new Date(value);
+            if (Number.isNaN(date.getTime())) return '-';
+            return date.toLocaleString();
+        }
+
+        function inferAssetType(asset) {
+            const contentType = (asset.content_type || '').trim();
+            if (contentType) return contentType;
+            const name = (asset.name || '').toLowerCase();
+            const ext = name.includes('.') ? name.split('.').pop() : '';
+            if (ext) return ext.toUpperCase();
+            return 'Unknown';
+        }
+
+        function renderAppendixAssets(assets) {
+            if (!assets || !assets.length) {
+                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">데이터 없음</div>';
+            }
+            return '<div class="grid gap-3 md:grid-cols-2">' + assets.map(function (item) {
+                const actionNode = item.is_downloadable
+                    ? '<button data-download-url="' + escapeHtml(item.download_url || '#') + '" data-download-name="' + escapeHtml(item.name || 'asset.bin') + '" class="asset-download-btn inline-flex rounded-full border border-cyan-400/20 bg-cyan-500/10 px-3 py-1 text-xs text-cyan-200 hover:bg-cyan-500/20">다운로드</button>'
+                    : '<span class="text-xs text-slate-500">재열람 불가</span>';
+                return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
+                    '<div class="flex items-start justify-between gap-3">' +
+                    '<div class="text-sm font-medium text-slate-100">' + escapeHtml(item.name || '-') + '</div>' +
+                    '<span class="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-slate-300">' + escapeHtml(inferAssetType(item)) + '</span>' +
+                    '</div>' +
+                    '<div class="mt-3 space-y-1 text-xs text-slate-500">' +
+                    '<div>크기: ' + escapeHtml(item.size || 0) + ' bytes</div>' +
+                    '<div>업로드 시각: ' + escapeHtml(formatLocalDate(item.uploaded_at)) + '</div>' +
+                    '<div>다운로드 가능: ' + escapeHtml(item.is_downloadable ? '예' : '아니오') + '</div>' +
+                    '</div>' +
+                    '<div class="mt-4 flex items-center justify-between gap-3">' +
+                    '<span class="text-[11px] text-slate-500">temp_file_id: ' + escapeHtml(item.temp_file_id || '-') + '</span>' +
+                    actionNode +
+                    '</div>' +
+                    '</div>';
+            }).join('') + '</div>';
+        }
+
+        function renderReviewDiffSummaryList(items, fallback) {
+            if (!items || !items.length) {
+                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + escapeHtml(fallback) + '</div>';
+            }
+            return items.map(function (item) {
+                return '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-3">' + escapeHtml(item) + '</div>';
+            }).join('');
+        }
+
+        function renderReviewDiffBadge(text, toneClass) {
+            return '<span class="rounded-full border px-3 py-1 text-xs font-medium ' + toneClass + '">' + escapeHtml(text) + '</span>';
+        }
+
+        function renderReviewDiffLineList(items, fallback, toneClass) {
+            if (!items || !items.length) {
+                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-4 text-slate-500">' + escapeHtml(fallback) + '</div>';
+            }
+            return '<div class="space-y-2">' + items.map(function (item) {
+                return '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-sm ' + toneClass + '">' + escapeHtml(item) + '</div>';
+            }).join('') + '</div>';
+        }
+
+        function renderReviewDiffTaggedList(title, items, accentClass, fallback) {
+            const values = items || [];
+            const body = values.length ? values.map(function (item) {
+                return '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-200">' + escapeHtml(item) + '</div>';
+            }).join('') : '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + escapeHtml(fallback) + '</div>';
+            return '<div>' +
+                '<div class="text-[11px] uppercase tracking-[0.2em] ' + accentClass + '">' + escapeHtml(title) + '</div>' +
+                '<div class="mt-2 space-y-2">' + body + '</div>' +
+                '</div>';
+        }
+
+        function reviewDiffStructuralItems(reviewDiff) {
+            const structural = (reviewDiff || {}).structural_diff || {};
+            const items = [];
+            (structural.component_structure || []).slice(0, 4).forEach(function (item) {
+                items.push((item.component || '-') + ' [' + (item.layer || '-') + '] responsibilities=' + ((item.responsibility_families || []).join(', ') || '-'));
+            });
+            (structural.layer_boundary_notes || []).slice(0, 2).forEach(function (item) {
+                items.push(item.note || '-');
+            });
+            (structural.dependency_flows || []).slice(0, 3).forEach(function (item) {
+                items.push(item);
+            });
+            (structural.data_flow_notes || []).slice(0, 2).forEach(function (item) {
+                items.push((item.slice || '-') + ' -> components=' + ((item.components || []).join(', ') || '-') + ' -> data_stores=' + ((item.data_stores || []).join(', ') || '-'));
+            });
+            return items;
+        }
+
+        function reviewDiffEvidenceItems(reviewDiff) {
+            const evidence = (reviewDiff || {}).evidence_diff || {};
+            const positive = [];
+            const negative = [];
+            (evidence.repeated_fingerprints || []).slice(0, 3).forEach(function (item) {
+                positive.push((item.fingerprint_alias || '-') + ' appears in ' + String(item.occurrence_count || 0) + ' locations');
+            });
+            (evidence.leak_traces || []).slice(0, 2).forEach(function (item) {
+                positive.push((item.detector_id || '-') + ' detected at ' + ((item.locations || []).slice(0, 2).join(', ') || '-'));
+            });
+            (evidence.scatter_traces || []).slice(0, 2).forEach(function (item) {
+                positive.push((item.detector_id || '-') + ' detected at ' + ((item.locations || []).slice(0, 2).join(', ') || '-'));
+            });
+            (evidence.coupling_traces || []).slice(0, 2).forEach(function (item) {
+                positive.push((item.detector_id || '-') + ' detected at ' + ((item.locations || []).slice(0, 2).join(', ') || '-'));
+            });
+            if (!positive.length) {
+                (evidence.detector_evidence_map || []).slice(0, 3).forEach(function (item) {
+                    positive.push((item.detector_id || '-') + ' linked to ' + ((item.locations || []).slice(0, 2).join(', ') || '-'));
+                });
+            }
+            (((reviewDiff || {}).decision_diff || {}).block_reasons || []).slice(0, 4).forEach(function (item) {
+                negative.push(item);
+            });
+            return { positive: positive, negative: negative };
+        }
+
+        function reviewDiffDecisionItems(reviewDiff) {
+            const decision = (reviewDiff || {}).decision_diff || {};
+            return {
+                allowed: decision.allowed_decisions || [],
+                blocked: decision.blocked_decisions || [],
+                reasons: decision.block_reasons || [],
+                governance: {
+                    synthetic: Boolean(decision.synthetic_signal_detected),
+                    decisionEngine: Boolean(decision.decision_engine_guard_applied),
+                    resultPackager: Boolean(decision.result_packager_guard_applied)
+                }
+            };
+        }
+
+        function humanizeDecisionType(value) {
+            const mapping = {
+                refactor: 'Refactor',
+                redesign: 'Redesign',
+                migration_consideration: 'Migration',
+                observation_only: 'Observation Only'
+            };
+            const normalized = String(value || '').trim();
+            return mapping[normalized] || (normalized ? normalized.replace(/_/g, ' ') : 'None');
+        }
+
+        function reviewDiffConfidenceLabel(pkg) {
+            const numeric = Number((pkg || {}).confidence);
+            if (!Number.isFinite(numeric)) return 'Unknown';
+            if (numeric >= 0.75) return 'High';
+            if (numeric >= 0.45) return 'Medium';
+            return 'Low';
+        }
+
+        function resetReviewDiffSections() {
+            const whySection = document.getElementById('reviewDiffWhySection');
+            const evidenceSection = document.getElementById('reviewDiffEvidenceSection');
+            const patternSection = document.getElementById('reviewDiffPatternSection');
+            if (whySection) whySection.open = true;
+            if (evidenceSection) evidenceSection.open = false;
+            if (patternSection) patternSection.open = false;
+        }
+
+        function renderReviewDiffStickyBar(pkg, reviewDiff) {
+            const sections = reviewDiffDecisionItems(reviewDiff);
+            const topAllowed = sections.allowed[0] || null;
+            const topBlocked = sections.blocked[0] || null;
+            const badges = [];
+            if (sections.governance.synthetic) {
+                badges.push(renderReviewDiffBadge('Contamination detected', 'border-rose-300/30 bg-rose-500/10 text-rose-100'));
+            }
+            if (sections.governance.decisionEngine || sections.governance.resultPackager) {
+                badges.push(renderReviewDiffBadge('Governance guarded', 'border-amber-300/30 bg-amber-500/10 text-amber-100'));
+            }
+            return '<div class="flex flex-wrap items-center gap-3 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,180px)_auto] lg:items-center">' +
+                '<div class="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 px-4 py-3">' +
+                    '<div class="text-[11px] uppercase tracking-[0.2em] text-emerald-200">Primary</div>' +
+                    '<div class="mt-2 text-base font-semibold text-emerald-50">✔ ' + escapeHtml(humanizeDecisionType((topAllowed || {}).decision_type || (pkg || {}).structural_judgment || '')) + '</div>' +
+                '</div>' +
+                '<div class="rounded-2xl border border-rose-300/20 bg-rose-500/10 px-4 py-3">' +
+                    '<div class="text-[11px] uppercase tracking-[0.2em] text-rose-200">Blocked</div>' +
+                    '<div class="mt-2 text-base font-semibold text-rose-50">✖ ' + escapeHtml(humanizeDecisionType((topBlocked || {}).decision_type || '')) + '</div>' +
+                '</div>' +
+                '<div class="rounded-2xl border border-cyan-300/20 bg-cyan-500/10 px-4 py-3">' +
+                    '<div class="text-[11px] uppercase tracking-[0.2em] text-cyan-200">Confidence</div>' +
+                    '<div class="mt-2 text-base font-semibold text-cyan-50">' + escapeHtml(reviewDiffConfidenceLabel(pkg)) + '</div>' +
+                '</div>' +
+                '<div class="flex flex-wrap gap-2">' + badges.join('') + '</div>' +
+            '</div>';
+        }
+
+        function renderReviewDiffDecisionBox(reviewDiff) {
+            const sections = reviewDiffDecisionItems(reviewDiff);
+            const topAllowed = sections.allowed[0] || null;
+            const topBlocked = sections.blocked[0] || null;
+            const allowedNode = topAllowed
+                ? '<div class="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 px-4 py-4">' +
+                    '<div class="text-xs uppercase tracking-[0.2em] text-emerald-200">최종 판단</div>' +
+                    '<div class="mt-3 text-lg font-semibold text-emerald-50">✔ ' + escapeHtml(humanizeDecisionType(topAllowed.decision_type || '-')) + '</div>' +
+                    '<div class="mt-3 grid gap-2 md:grid-cols-3 text-xs text-emerald-100/80">' +
+                        '<div>priority=' + escapeHtml(String(topAllowed.priority_score || 0)) + '</div>' +
+                        '<div>issue_count=' + escapeHtml(String(topAllowed.issue_count || 0)) + '</div>' +
+                        '<div>evidence_count=' + escapeHtml(String(topAllowed.evidence_count || 0)) + '</div>' +
+                    '</div>' +
+                '</div>'
+                : '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-4 text-slate-500">최종 판단이 없습니다.</div>';
+            const blockedNode = topBlocked
+                ? '<div class="rounded-2xl border border-rose-300/20 bg-rose-500/10 px-4 py-4">' +
+                    '<div class="text-xs uppercase tracking-[0.2em] text-rose-200">차단된 판단</div>' +
+                    '<div class="mt-3 text-base font-semibold text-rose-50">✖ ' + escapeHtml(humanizeDecisionType(topBlocked.decision_type || '-')) + '</div>' +
+                    '<div class="mt-2 text-sm text-rose-100/80">downgrade -> ' + escapeHtml(humanizeDecisionType(topBlocked.downgraded_to || '-')) + '</div>' +
+                '</div>'
+                : '<div class="rounded-2xl border border-white/10 bg-white/5 px-4 py-4">' +
+                    '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">차단된 판단</div>' +
+                    '<div class="mt-3 text-base font-semibold text-slate-100">✖ none</div>' +
+                '</div>';
+            const governanceBadges = [
+                renderReviewDiffBadge('synthetic_signal_detected: ' + String(sections.governance.synthetic), sections.governance.synthetic ? 'border-rose-300/30 bg-rose-500/10 text-rose-100' : 'border-emerald-300/30 bg-emerald-500/10 text-emerald-100'),
+                renderReviewDiffBadge('decision_engine_guard_applied: ' + String(sections.governance.decisionEngine), sections.governance.decisionEngine ? 'border-amber-300/30 bg-amber-500/10 text-amber-100' : 'border-white/10 bg-white/5 text-slate-300'),
+                renderReviewDiffBadge('result_packager_guard_applied: ' + String(sections.governance.resultPackager), sections.governance.resultPackager ? 'border-amber-300/30 bg-amber-500/10 text-amber-100' : 'border-white/10 bg-white/5 text-slate-300')
+            ].join('');
+            return '<div class="space-y-4">' +
+                '<div class="grid gap-4 md:grid-cols-2">' + allowedNode + blockedNode + '</div>' +
+                '<div>' +
+                    '<div class="text-[11px] uppercase tracking-[0.2em] text-slate-500">Block Reason</div>' +
+                    '<div class="mt-2">' + renderReviewDiffLineList(sections.reasons, '차단 이유가 없습니다.', 'text-slate-200') + '</div>' +
+                '</div>' +
+                '<div>' +
+                    '<div class="text-[11px] uppercase tracking-[0.2em] text-slate-500">Governance</div>' +
+                    '<div class="mt-3 flex flex-wrap gap-2">' + governanceBadges + '</div>' +
+                '</div>' +
+            '</div>';
+        }
+
+        function renderReviewDiffEvidenceBox(reviewDiff) {
+            const sections = reviewDiffEvidenceItems(reviewDiff);
+            return '<div class="space-y-4">' +
+                '<div>' +
+                    '<div class="text-[11px] uppercase tracking-[0.2em] text-cyan-300">판단 근거</div>' +
+                    '<div class="mt-2">' + renderReviewDiffLineList(sections.positive.slice(0, 4), 'positive evidence가 없습니다.', 'text-slate-200') + '</div>' +
+                '</div>' +
+                '<div>' +
+                    '<div class="text-[11px] uppercase tracking-[0.2em] text-amber-300">왜 migration이 아닌가</div>' +
+                    '<div class="mt-2">' + renderReviewDiffLineList(sections.negative.slice(0, 4), '차단된 migration signal이 없습니다.', 'text-slate-200') + '</div>' +
+                '</div>' +
+            '</div>';
+        }
+
+        function renderReviewDiffEvidenceDetailBox(reviewDiff) {
+            const evidence = (reviewDiff || {}).evidence_diff || {};
+            const repeated = (evidence.repeated_fingerprints || []).slice(0, 4).map(function (item) {
+                return (item.fingerprint_alias || '-') + ' -> ' + ((item.locations || []).slice(0, 3).join(', ') || '-');
+            });
+            const leaks = (evidence.leak_traces || []).slice(0, 4).map(function (item) {
+                return (item.detector_id || '-') + ' -> ' + ((item.locations || []).slice(0, 3).join(', ') || '-');
+            });
+            const scatter = (evidence.scatter_traces || []).slice(0, 4).map(function (item) {
+                return (item.detector_id || '-') + ' -> ' + ((item.locations || []).slice(0, 3).join(', ') || '-');
+            });
+            const coupling = (evidence.coupling_traces || []).slice(0, 4).map(function (item) {
+                return (item.detector_id || '-') + ' -> ' + ((item.locations || []).slice(0, 3).join(', ') || '-');
+            });
+            const fallback = (evidence.detector_evidence_map || []).slice(0, 4).map(function (item) {
+                return (item.detector_id || '-') + ' -> ' + ((item.locations || []).slice(0, 3).join(', ') || '-');
+            });
+            return '<div class="space-y-4">' +
+                renderReviewDiffTaggedList('Fingerprint repetition', repeated, 'text-cyan-300', '반복 fingerprint 정보가 없습니다.') +
+                renderReviewDiffTaggedList('Leak trace', leaks, 'text-amber-300', 'leak trace가 없습니다.') +
+                renderReviewDiffTaggedList('Scatter trace', scatter, 'text-rose-300', 'scatter trace가 없습니다.') +
+                renderReviewDiffTaggedList('Coupling trace', coupling.length ? coupling : fallback, 'text-emerald-300', 'coupling trace가 없습니다.') +
+            '</div>';
+        }
+
+        function renderReviewDiffStructuralBox(reviewDiff) {
+            const items = reviewDiffStructuralItems(reviewDiff);
+            const observed = items.slice(0, 4);
+            const expected = [];
+            const structural = (reviewDiff || {}).structural_diff || {};
+            (structural.layer_boundary_notes || []).slice(0, 3).forEach(function (item) {
+                expected.push(item.note || '-');
+            });
+            if (!expected.length && items.length) {
+                expected.push('stable service boundary');
+                expected.push('normalized query and validation flow');
+            }
+            return '<div class="grid gap-4 md:grid-cols-2">' +
+                '<div>' +
+                    '<div class="text-[11px] uppercase tracking-[0.2em] text-slate-500">Observed</div>' +
+                    '<div class="mt-2">' + renderReviewDiffLineList(observed, '구조 diff 정보가 없습니다.', 'text-slate-200') + '</div>' +
+                '</div>' +
+                '<div>' +
+                    '<div class="text-[11px] uppercase tracking-[0.2em] text-slate-500">Expected Pattern</div>' +
+                    '<div class="mt-2">' + renderReviewDiffLineList(expected, '기대 패턴 정보가 없습니다.', 'text-slate-200') + '</div>' +
+                '</div>' +
+            '</div>';
+        }
+
+        function renderCodeDiffLines(text, tone) {
+            const lines = String(text || '').split(/\r?\n/).filter(function (line) { return line.trim(); });
+            if (!lines.length) {
+                return '<div class="text-slate-500">empty</div>';
+            }
+            const lineTone = tone === 'expected_pattern'
+                ? 'border-emerald-300/20 bg-emerald-500/10 text-emerald-50'
+                : 'border-rose-300/20 bg-rose-500/10 text-rose-50';
+            return lines.map(function (line, index) {
+                return '<div class="grid grid-cols-[40px_1fr] gap-3 border px-3 py-2 font-mono text-xs leading-6 ' + lineTone + '">' +
+                    '<div class="text-slate-400">' + escapeHtml(String(index + 1)) + '</div>' +
+                    '<div class="whitespace-pre-wrap break-all">' + escapeHtml(line) + '</div>' +
+                '</div>';
+            }).join('');
+        }
+
+        function renderCodeDiffPanel(reviewDiff) {
+            const codeDiff = (((reviewDiff || {}).code_diff) || {});
+            const snippets = codeDiff.snippets || [];
+            if (!codeDiff.available || !snippets.length) {
+                return '';
+            }
+            return snippets.map(function (item) {
+                return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
+                    '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">' + escapeHtml(item.file || '-') + '</div>' +
+                    '<div class="mt-4 grid gap-4 xl:grid-cols-2">' +
+                        '<div>' +
+                            '<div class="text-xs leading-6 text-slate-400">현재 시스템에서 실제로 사용되고 있는 코드 일부입니다.<br>(판단의 근거가 되는 실제 구조입니다)</div>' +
+                            '<div class="text-[11px] uppercase tracking-[0.2em] text-rose-300">observed</div>' +
+                            '<div class="mt-2 space-y-2">' + renderCodeDiffLines(item.observed || item.before || '', 'observed') + '</div>' +
+                        '</div>' +
+                        '<div>' +
+                            '<div class="text-xs leading-6 text-slate-400">권장되는 구조 패턴 예시입니다.<br>(실제 코드가 아니라, 개선 방향을 설명하기 위한 일반화된 형태입니다)</div>' +
+                            '<div class="text-[11px] uppercase tracking-[0.2em] text-emerald-300">expected_pattern</div>' +
+                            '<div class="mt-2 space-y-2">' + renderCodeDiffLines(item.expected_pattern || item.after || '', 'expected_pattern') + '</div>' +
+                        '</div>' +
+                    '</div>' +
+                '</div>';
+            }).join('');
+        }
+
+        function renderReviewDiff(pkg) {
+            const section = document.getElementById('reviewDiffSection');
+            const stickyBar = document.getElementById('reviewDiffStickyBar');
+            const structuralBox = document.getElementById('reviewDiffStructuralBox');
+            const evidenceBox = document.getElementById('reviewDiffEvidenceBox');
+            const evidenceDetailBox = document.getElementById('reviewDiffEvidenceDetailBox');
+            const decisionBox = document.getElementById('reviewDiffDecisionBox');
+            const markdownBox = document.getElementById('reviewDiffMarkdownBox');
+            const codeDiffSection = document.getElementById('codeDiffSection');
+            const codeDiffPanel = document.getElementById('codeDiffPanel');
+            const codeDiffButton = document.getElementById('showCodeDiffBtn');
+            const reviewDiff = (((pkg || {}).extensions || {}).review_diff) || null;
+            const whySection = document.getElementById('reviewDiffWhySection');
+            const evidenceSection = document.getElementById('reviewDiffEvidenceSection');
+            const patternSection = document.getElementById('reviewDiffPatternSection');
+            if (!currentCapabilities.can_view_review_diff || !reviewDiff) {
+                section.classList.add('hidden');
+                stickyBar.classList.add('hidden');
+                stickyBar.innerHTML = '';
+                structuralBox.innerHTML = '';
+                evidenceBox.innerHTML = '';
+                evidenceDetailBox.innerHTML = '';
+                decisionBox.innerHTML = '';
+                markdownBox.textContent = '';
+                codeDiffSection.classList.add('hidden');
+                codeDiffPanel.classList.add('hidden');
+                codeDiffPanel.innerHTML = '';
+                codeDiffButton.textContent = '현재 구조 vs 권장 구조 보기';
+                if (whySection) whySection.open = true;
+                if (evidenceSection) evidenceSection.open = false;
+                if (patternSection) patternSection.open = false;
+                return;
+            }
+            section.classList.remove('hidden');
+            stickyBar.classList.remove('hidden');
+            stickyBar.innerHTML = renderReviewDiffStickyBar(pkg, reviewDiff);
+            resetReviewDiffSections();
+            decisionBox.innerHTML = renderReviewDiffDecisionBox(reviewDiff);
+            evidenceBox.innerHTML = renderReviewDiffEvidenceBox(reviewDiff);
+            evidenceDetailBox.innerHTML = renderReviewDiffEvidenceDetailBox(reviewDiff);
+            structuralBox.innerHTML = renderReviewDiffStructuralBox(reviewDiff);
+            markdownBox.textContent = String(reviewDiff.markdown || '').trim();
+            const codeDiff = reviewDiff.code_diff || {};
+            if (currentCapabilities.can_view_code_diff && codeDiff.available && (codeDiff.snippets || []).length) {
+                codeDiffSection.classList.remove('hidden');
+                codeDiffPanel.classList.add('hidden');
+                codeDiffPanel.innerHTML = renderCodeDiffPanel(reviewDiff);
+                codeDiffButton.textContent = '현재 구조 vs 권장 구조 보기';
+            } else {
+                codeDiffSection.classList.add('hidden');
+                codeDiffPanel.classList.add('hidden');
+                codeDiffPanel.innerHTML = '';
+                codeDiffButton.textContent = '현재 구조 vs 권장 구조 보기';
+            }
+        }
+
+        function renderProjectHeader(pkg) {
+            document.getElementById('resultView').classList.remove('hidden');
+            document.getElementById('workspaceLink').href = '/projects/' + encodeURIComponent(projectId);
+            document.getElementById('projectTitle').textContent = pkg.project.project_name || '프로젝트';
+            document.getElementById('projectMeta').textContent = (pkg.project.client_name || '-') + ' · 상태 ' + (pkg.project.status || '-') + ' · 템플릿 ' + (pkg.project.template_key || '-');
+            setSurfaceModeButtons();
+            toggleSurfaceContainers();
+        }
+
+        function renderExplanationCitationList(citations) {
+            const items = citations || [];
+            if (!items.length) return '';
+            return '<div class="mt-3 flex flex-wrap gap-2">' + items.slice(0, 3).map(function (item) {
+                const parts = [];
+                if (item.decision_id) parts.push('decision ' + item.decision_id);
+                if (item.issue_id) parts.push('issue ' + item.issue_id);
+                if (item.evidence_id) parts.push('evidence ' + item.evidence_id);
+                if (item.locator) parts.push(item.locator);
+                return '<span class="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[11px] text-slate-400">' + escapeHtml(parts.join(' · ') || 'citation') + '</span>';
+            }).join('') + '</div>';
+        }
+
+        function renderExternalSummaryCards(explanation) {
+            const cards = (explanation || {}).summary_cards || [];
+            const context = ((((explanation || {}).taxonomy_view || {}).explanation_context || {}).narrative_axis) || '-';
+            const cardNodes = cards.slice(0, 4).map(function (card) {
+                return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
+                    '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">' + escapeHtml(card.title || '-') + '</div>' +
+                    '<div class="mt-3 text-sm leading-7 text-slate-100">' + escapeHtml(card.body || '-') + '</div>' +
+                    renderExplanationCitationList(card.citations || []) +
+                    '</div>';
+            });
+            cardNodes.push(
+                '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
+                    '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">설명 관점</div>' +
+                    '<div class="mt-3 text-sm leading-7 text-slate-100">' + escapeHtml(context || '-') + '</div>' +
+                    '<div class="mt-2 text-xs text-slate-500">Review Diff와 governance detail은 external surface에 포함하지 않습니다.</div>' +
+                '</div>'
+            );
+            return cardNodes.join('');
+        }
+
+        function renderExternalSections(explanation) {
+            const sections = (explanation || {}).section_views || [];
+            if (!sections.length) {
+                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">설명 섹션이 없습니다.</div>';
+            }
+            return sections.map(function (section) {
+                return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
+                    '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">' + escapeHtml(section.title || '-') + '</div>' +
+                    '<div class="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-100">' + escapeHtml(section.text || '-') + '</div>' +
+                    renderExplanationCitationList(section.citations || []) +
+                    '</div>';
+            }).join('');
+        }
+
+        function renderExternalSurface(pkg, explanation) {
+            currentPackage = pkg;
+            document.getElementById('loadingState').classList.add('hidden');
+            renderProjectHeader(pkg);
+            document.getElementById('externalSummaryCardsBox').innerHTML = renderExternalSummaryCards(explanation || {});
+            document.getElementById('externalSectionsBox').innerHTML = renderExternalSections(explanation || {});
+        }
+
+        function renderProvenance(provenance) {
+            const prov = provenance || {};
+            return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
+                '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">Provenance</div>' +
+                '<div class="mt-3 grid gap-3 md:grid-cols-2">' +
+                    '<div><div class="text-[11px] text-slate-500">Run ID</div><div class="mt-1 text-sm text-slate-200">' + escapeHtml(prov.run_id || '-') + '</div></div>' +
+                    '<div><div class="text-[11px] text-slate-500">생성 기준 시각</div><div class="mt-1 text-sm text-slate-200">' + escapeHtml(formatLocalDate(prov.generated_at)) + '</div></div>' +
+                    '<div><div class="text-[11px] text-slate-500">Run 상태</div><div class="mt-1 text-sm text-slate-200">' + escapeHtml(prov.run_status || '-') + '</div></div>' +
+                    '<div><div class="text-[11px] text-slate-500">앱 버전</div><div class="mt-1 text-sm text-slate-200">' + escapeHtml(prov.app_version || '-') + '</div></div>' +
+                    '<div><div class="text-[11px] text-slate-500">모듈 버전</div><div class="mt-1 text-sm text-slate-200">' + escapeHtml(prov.module_version || '-') + '</div></div>' +
+                    '<div><div class="text-[11px] text-slate-500">템플릿 키</div><div class="mt-1 text-sm text-slate-200">' + escapeHtml(prov.template_key || '-') + '</div></div>' +
+                '</div>' +
+                '<div class="mt-4 text-xs text-slate-500">입력 자산 수: ' + escapeHtml((prov.input_assets || []).length) + '</div>' +
+                '</div>';
+        }
+
+        function renderScopeNotice(scopeNotice) {
+            const notice = scopeNotice || {};
+            if (!notice.version_label) {
+                return '<div class="rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-4">' +
+                    '<div class="text-xs uppercase tracking-[0.2em] text-rose-200">범위 및 한계</div>' +
+                    '<div class="mt-3 text-sm font-medium text-rose-100">scope_notice missing</div>' +
+                    '<div class="mt-2 text-sm text-rose-200">결과 패키지 정본에서 scope_notice가 누락되었습니다.</div>' +
+                    '</div>';
+            }
+            const supported = notice.supported || [];
+            const notSupported = notice.not_supported || [];
+            return '<div class="rounded-2xl border border-amber-300/20 bg-amber-500/5 px-4 py-4">' +
+                '<div class="text-xs uppercase tracking-[0.2em] text-amber-200">범위 및 한계</div>' +
+                '<div class="mt-3 text-sm font-medium text-slate-100">' + escapeHtml(notice.version_label || '-') + '</div>' +
+                '<div class="mt-2 text-sm text-slate-300">' + escapeHtml(notice.summary || '-') + '</div>' +
+                '<div class="mt-4 grid gap-4 md:grid-cols-2">' +
+                    '<div><div class="text-[11px] text-slate-500">지원 범위</div><div class="mt-2 space-y-2">' +
+                        supported.map(function (item) { return '<div class="rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-300">' + escapeHtml(item) + '</div>'; }).join('') +
+                    '</div></div>' +
+                    '<div><div class="text-[11px] text-slate-500">비지원 범위</div><div class="mt-2 space-y-2">' +
+                        notSupported.map(function (item) { return '<div class="rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-300">' + escapeHtml(item) + '</div>'; }).join('') +
+                    '</div></div>' +
+                '</div>' +
+                '</div>';
+        }
+
+        function renderExecutiveSummary(pkg) {
+            const executive = (pkg || {}).executive_summary || {};
+            const reportPurpose = String((pkg || {}).report_purpose || '').trim();
+            const reportScope = (pkg || {}).report_scope || [];
+            const reportQuestions = (pkg || {}).report_questions || [];
+            if (!executive.title) {
+                return '<div class="rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-4 text-sm text-rose-200">executive_summary missing</div>';
+            }
+            const renderBulletGroup = function (title, items) {
+                const values = (items && items.length) ? items : ['해당 없음'];
+                return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
+                    '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">' + title + '</div>' +
+                    '<div class="mt-3 space-y-2">' +
+                    values.map(function (item) {
+                        return '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200">' + escapeHtml(item) + '</div>';
+                    }).join('') +
+                    '</div>' +
+                    '</div>';
+            };
+            return '<div>' +
+                '<div class="flex flex-wrap items-center justify-between gap-3">' +
+                    '<div class="text-lg font-semibold text-slate-100">' + escapeHtml(executive.title || '-') + '</div>' +
+                    '<div class="rounded-full border border-cyan-300/20 bg-cyan-500/10 px-3 py-1 text-xs text-cyan-200">' + escapeHtml(executive.state || '-') + '</div>' +
+                '</div>' +
+                '<div class="mt-4 rounded-2xl border border-cyan-300/20 bg-cyan-500/5 px-4 py-4">' +
+                    '<div class="text-xs uppercase tracking-[0.2em] text-cyan-200">보고서 목적</div>' +
+                    '<div class="mt-3 text-sm leading-7 text-slate-100">' + escapeHtml(reportPurpose || '이 실행의 목적이 아직 정리되지 않았습니다.') + '</div>' +
+                '</div>' +
+                '<div class="mt-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
+                    '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">핵심 결론</div>' +
+                    '<div class="mt-3 text-sm leading-7 text-slate-100">' + escapeHtml(executive.core_message || '-') + '</div>' +
+                '</div>' +
+                '<div class="mt-4 grid gap-4 md:grid-cols-3">' +
+                    renderBulletGroup('분석 범위', reportScope || []) +
+                    renderBulletGroup('검증 질문', reportQuestions || []) +
+                    renderBulletGroup('핵심 판단', executive.summary_lines || []) +
+                    renderBulletGroup('이번 회의 결정 항목', executive.decision_focus || []) +
+                    renderBulletGroup('주요 리스크', executive.key_risks || []) +
+                    renderBulletGroup('다음 실행', executive.next_steps || []) +
+                '</div>' +
+                '<div class="mt-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-4"><div class="text-xs uppercase tracking-[0.2em] text-slate-500">추천안</div><div class="mt-2 text-sm text-slate-200">' + escapeHtml(executive.recommended_option || '-') + '</div></div>' +
+                '</div>';
+        }
+
+        function renderPackage(pkg) {
+            currentPackage = pkg;
+            document.getElementById('loadingState').classList.add('hidden');
+            renderProjectHeader(pkg);
+            document.getElementById('executiveSummaryBox').innerHTML = renderExecutiveSummary(pkg || {});
+            document.getElementById('conclusionBox').textContent = pkg.core_conclusion || '결과 생성 중';
+            document.getElementById('coreRulesBox').innerHTML = renderGroundedRules(pkg.grounded_business_rules || [], pkg.diagnosis.state || '결과 생성 중');
+            document.getElementById('recommendedOptionBox').innerHTML = renderCardList(pkg.recommended_option ? [pkg.recommended_option] : [], pkg.design.state || '결과 생성 중', 'name', 'structure_summary', 'selection_reason');
+            document.getElementById('decisionBox').innerHTML = renderCardList(pkg.decision_items || [], pkg.diagnosis.state || '결과 생성 중', 'statement', 'rationale', '');
+            document.getElementById('retainedBox').innerHTML = renderCardList(pkg.retained_contracts || [], pkg.diagnosis.state || '결과 생성 중', 'item', 'basis', '');
+            document.getElementById('priorityBox').innerHTML = renderPriority(pkg.priority_split_items || [], pkg.design.state || '결과 생성 중');
+            document.getElementById('verificationBox').innerHTML = renderCardList(pkg.verification_checkpoints || [], pkg.diagnosis.state || '결과 생성 중', 'item', 'reason', '');
+            document.getElementById('optionsBox').innerHTML = renderOptions(pkg.design_options || [], pkg.design.state || '결과 생성 중');
+            document.getElementById('planBox').innerHTML = renderPlan(pkg.execution_plan || [], pkg.design.state || '결과 생성 중');
+
+            const diagnosisHtml = [];
+            diagnosisHtml.push('<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">리스크</div><div class="mt-3">' + listOrState(pkg.diagnosis.risks || [], pkg.diagnosis.state) + '</div></div>');
+            diagnosisHtml.push('<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">확인 필요 자료</div><div class="mt-3">' + renderMissing(pkg.diagnosis.missing_context_details || [], pkg.diagnosis.state) + '</div></div>');
+            document.getElementById('diagnosisBox').innerHTML = diagnosisHtml.join('');
+
+            const design = pkg.design || {};
+            const layer = design.layer_reconstruction || {};
+            document.getElementById('designBox').innerHTML =
+                '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">설계 방향</div><div class="mt-3">' + listOrState(design.rebuild_strategy || [], design.state) + '</div></div>' +
+                '<div class="grid gap-4 md:grid-cols-3">' +
+                    renderLayerSection('데이터 계약', layer.database) +
+                    renderLayerSection('API 및 정책', layer.backend) +
+                    renderLayerSection('화면 구조', layer.frontend) +
+                '</div>';
+
+            const draft = pkg.transition_draft || {};
+            const recomposition = draft.recomposition_draft || {};
+            document.getElementById('draftBox').innerHTML =
+                '<div class="grid gap-4 md:grid-cols-3">' +
+                    renderLayerSection('database', recomposition.database) +
+                    renderLayerSection('backend', recomposition.backend) +
+                    renderLayerSection('frontend', recomposition.frontend) +
+                '</div>';
+
+            const bundle = pkg.polish_bundle || {};
+            document.getElementById('polishAudienceSelect').value = (bundle.audience || 'manager');
+            document.getElementById('polishDeliverySelect').value = (bundle.delivery_mode || 'client_report');
+            renderAccountingSection(pkg);
+
+            const appendix = pkg.appendix || {};
+            const assets = pkg.assets || appendix.asset_manifest || [];
+            const provenance = pkg.provenance || {};
+            const scopeNotice = pkg.scope_notice;
+            renderReviewDiff(pkg);
+            document.getElementById('appendixBox').innerHTML =
+                renderProvenance(provenance) +
+                renderScopeNotice(scopeNotice) +
+                '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
+                    '<div>생성 시각: ' + (appendix.created_at ? new Date(appendix.created_at).toLocaleString() : '-') + '</div>' +
+                    '<div class="mt-2">run 상태: ' + (appendix.run_status || '-') + '</div>' +
+                '</div>' +
+                renderAppendixAssets(assets);
+        }
+
+        async function bootstrap() {
+            try {
+                const res = await fetch('/projects/' + encodeURIComponent(projectId) + '/result?format=json&surface_mode=' + encodeURIComponent(currentSurfaceMode), { headers: authHeaders() });
+                if (!res.ok) throw new Error(res.status === 403 ? '프로젝트 접근 권한이 없습니다.' : '결과 패키지를 불러오지 못했습니다.');
+                const pkg = await res.json();
+                if (currentAccessPolicy.surfaceVariant === 'external_presentation') {
+                    const explanationRes = await fetch(
+                        '/projects/' + encodeURIComponent(projectId) + '/result/explanation?audience=manager&surface_mode=external',
+                        { headers: authHeaders() }
+                    );
+                    if (!explanationRes.ok) {
+                        throw new Error(explanationRes.status === 403 ? '프로젝트 접근 권한이 없습니다.' : '설명 surface를 불러오지 못했습니다.');
+                    }
+                    const explanation = await explanationRes.json();
+                    renderExternalSurface(pkg, explanation);
+                    return;
+                }
+                renderPackage(pkg);
+            } catch (error) {
+                document.getElementById('loadingState').classList.add('hidden');
+                document.getElementById('errorState').classList.remove('hidden');
+                document.getElementById('errorState').textContent = error.message || String(error);
+            }
+        }
+
+        document.getElementById('printBtn').addEventListener('click', function () {
+            window.print();
+        });
+        document.getElementById('downloadMdBtn').addEventListener('click', async function () {
+            try {
+                await downloadWithAuth(resultDownloadUrl('md'), resultDownloadFallbackName('md'));
+            } catch (error) {
+                document.getElementById('errorState').classList.remove('hidden');
+                document.getElementById('errorState').textContent = error.message || String(error);
+            }
+        });
+        document.getElementById('downloadDocxBtn').addEventListener('click', async function () {
+            try {
+                await downloadWithAuth(resultDownloadUrl('docx'), resultDownloadFallbackName('docx'));
+            } catch (error) {
+                document.getElementById('errorState').classList.remove('hidden');
+                document.getElementById('errorState').textContent = error.message || String(error);
+            }
+        });
+        document.getElementById('downloadPptxBtn').addEventListener('click', async function () {
+            try {
+                await downloadWithAuth(resultDownloadUrl('pptx'), resultDownloadFallbackName('pptx'));
+            } catch (error) {
+                document.getElementById('errorState').classList.remove('hidden');
+                document.getElementById('errorState').textContent = error.message || String(error);
+            }
+        });
+        document.getElementById('polishAudienceSelect').addEventListener('change', function () {
+            if (currentPackage) renderAccountingSection(currentPackage);
+        });
+        document.getElementById('polishDeliverySelect').addEventListener('change', function () {
+            if (currentPackage) renderAccountingSection(currentPackage);
+        });
+        document.getElementById('surfaceModeInternalBtn').addEventListener('click', function () {
+            setSurfaceMode('internal');
+        });
+        document.getElementById('surfaceModeExternalBtn').addEventListener('click', function () {
+            setSurfaceMode('external');
+        });
+        document.getElementById('showCodeDiffBtn').addEventListener('click', function () {
+            const panel = document.getElementById('codeDiffPanel');
+            const nextHidden = !panel.classList.contains('hidden');
+            if (nextHidden) {
+                panel.classList.add('hidden');
+                this.textContent = '현재 구조 vs 권장 구조 보기';
+            } else {
+                panel.classList.remove('hidden');
+                this.textContent = '현재 구조 vs 권장 구조 숨기기';
+            }
+        });
+        document.addEventListener('click', async function (event) {
+            const button = event.target.closest('.asset-download-btn');
+            if (!button) return;
+            event.preventDefault();
+            try {
+                await downloadWithAuth(button.getAttribute('data-download-url') || '#', button.getAttribute('data-download-name') || 'asset.bin');
+            } catch (error) {
+                document.getElementById('errorState').classList.remove('hidden');
+                document.getElementById('errorState').textContent = error.message || String(error);
+            }
+        });
+        applySurfaceAccessPolicy(currentSurfaceMode);
+        setSurfaceModeButtons();
+        toggleSurfaceContainers();
+        bootstrap();
+    </script>
+</body>
+</html>
