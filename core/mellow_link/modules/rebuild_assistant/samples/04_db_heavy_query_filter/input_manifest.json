@@ -1,0 +1,49 @@
+{
+  "sample_id": "04_db_heavy_query_filter",
+  "title": "DB-heavy / Query Filter형",
+  "category": "db_heavy_query_filter",
+  "description": "query_filter_leak, duplicate predicate, DB-heavy 구조에서 판단/계획 안정성 검증",
+  "assets": [
+    {
+      "name": "request_filter_builder.ts",
+      "type": "code",
+      "path": "assets/request_filter_builder.ts",
+      "purpose": "UI/서비스 측 query filter 조립 로직 예시"
+    },
+    {
+      "name": "request_search.sql",
+      "type": "sql",
+      "path": "assets/request_search.sql",
+      "purpose": "반복 filter predicate가 있는 검색 query 예시"
+    },
+    {
+      "name": "request_search_page.html",
+      "type": "ui",
+      "path": "assets/request_search_page.html",
+      "purpose": "검색 필터 화면 예시"
+    },
+    {
+      "name": "schema.sql",
+      "type": "schema",
+      "path": "assets/schema.sql",
+      "purpose": "requests / archived_requests 테이블 구조"
+    },
+    {
+      "name": "filter_notes.md",
+      "type": "doc",
+      "path": "assets/filter_notes.md",
+      "purpose": "query filter 분산 포인트 설명"
+    }
+  ],
+  "expected_focus": {
+    "feature_slices": 1,
+    "primary_judgment": "query_filter",
+    "top_decision_type": "refactor",
+    "notes": [
+      "query_filter_leak와 반복 조회 조건이 주요 detector 후보다.",
+      "현재 measured output은 query_filter narrative와 refactor top decision으로 수렴한다.",
+      "DB-heavy 샘플이어도 slice는 파일 기준이 아니라 endpoint 또는 use case 기준으로 유지한다.",
+      "strict golden anchor는 실제 엔진 실행 결과로 재측정 후 확정한다."
+    ]
+  }
+}

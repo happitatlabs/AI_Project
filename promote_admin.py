@@ -10,8 +10,10 @@ current_dir = Path(os.getcwd())
 # 예상되는 DB 파일 경로들 (루트 혹은 data 폴더)
 candidates = [
     current_dir / "aventurine_v3.db",
+    current_dir / "data" / "runtime" / "aventurine_v3.db",
     current_dir / "data" / "aventurine_v3.db",
-    current_dir / "mellow_link" / "data" / "aventurine_v3.db"
+    current_dir / "core" / "mellow_link" / "data" / "aventurine_v3.db",
+    current_dir / "mellow_link" / "data" / "aventurine_v3.db",
 ]
 
 db_path = None

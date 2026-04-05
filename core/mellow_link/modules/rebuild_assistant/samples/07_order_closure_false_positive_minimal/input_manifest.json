@@ -1,0 +1,56 @@
+{
+  "sample_id": "07_order_closure_false_positive_minimal",
+  "title": "Order Closure False Positive Minimal",
+  "category": "heuristic_followup",
+  "description": "review_required, display_order, closeDialog 토큰만으로 order_closure anchor가 오염되는지 추적하기 위한 최소 표본",
+  "assets": [
+    {
+      "name": "review_queue_controller.py",
+      "type": "code",
+      "path": "assets/review_queue_controller.py",
+      "purpose": "review queue 목록/상태 변경 controller"
+    },
+    {
+      "name": "review_queue_page.html",
+      "type": "ui",
+      "path": "assets/review_queue_page.html",
+      "purpose": "closeDialog와 display_order를 포함한 화면"
+    },
+    {
+      "name": "review_queue.sql",
+      "type": "sql",
+      "path": "assets/review_queue.sql",
+      "purpose": "review_required 상태와 display_order를 포함한 조회 쿼리"
+    },
+    {
+      "name": "schema.sql",
+      "type": "schema",
+      "path": "assets/schema.sql",
+      "purpose": "review queue 스키마"
+    },
+    {
+      "name": "usecase.md",
+      "type": "doc",
+      "path": "assets/usecase.md",
+      "purpose": "검토 대기열 업무 설명"
+    }
+  ],
+  "expected_focus": {
+    "sample_role": "heuristic_followup_reference",
+    "false_positive_risk": "domain_anchor_spillover",
+    "suspicious_tokens": [
+      "review_required",
+      "display_order",
+      "closeDialog"
+    ],
+    "disallowed_domain_anchors": [
+      "order_closure",
+      "주문 마감"
+    ],
+    "notes": [
+      "실제 business domain은 review queue다.",
+      "golden regression 대상이 아니다.",
+      "false positive가 발생하면 heuristic follow-up 문서에 기록한다."
+    ]
+  }
+}

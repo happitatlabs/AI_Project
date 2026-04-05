@@ -28,6 +28,14 @@ launcher_status_every_seconds: int = 30
 launcher_last_mellow_line: Dict[str, float | str] = {"text": "", "ts": 0.0}
 
 
+def _pick_existing_path(*candidates: Path) -> Path:
+    """Return the first existing path, or the first candidate if none exist yet."""
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
 def launch_system():
     """전체 시스템 시작"""
     global vtuber_proc, mellow_proc
@@ -224,7 +232,10 @@ def launch_system():
     
     # 2. Mellow-Link 서버 실행
     print("\n🚀 지휘관(Mellow-Link) 기동 중...")
-    mellow_dir = base_dir / "mellow_link"
+    mellow_dir = _pick_existing_path(
+        base_dir / "core" / "mellow_link",
+        base_dir / "mellow_link",
+    )
     if not mellow_dir.exists():
         print(f"❌ mellow_link 디렉토리를 찾을 수 없습니다: {mellow_dir}")
         if vtuber_proc:
@@ -269,9 +280,13 @@ def launch_system():
         separator = ";" if sys.platform == "win32" else ":"
         pythonpath_parts = []
         
-        # project_root 추가
+        # project_root 및 core 레이어 추가
         if project_root not in current_pythonpath:
             pythonpath_parts.append(project_root)
+
+        core_path = str((base_dir / "core").absolute())
+        if (base_dir / "core").exists() and core_path not in current_pythonpath:
+            pythonpath_parts.append(core_path)
         
         # site_packages 추가
         if site_packages_path and site_packages_path not in current_pythonpath:
@@ -286,14 +301,17 @@ def launch_system():
             new_pythonpath = separator.join(pythonpath_parts)
             env["PYTHONPATH"] = new_pythonpath
             print(f"   ✅ PYTHONPATH 설정: {project_root}")
+            if (base_dir / "core").exists():
+                print(f"   ✅ core 경로 추가: {core_path}")
             if site_packages_path:
                 print(f"   ✅ site-packages 경로 추가: {site_packages_path}")
         
         # 프로젝트 루트를 환경 변수로 명시적으로 전달
         # Mellow-Link가 모든 경로를 프로젝트 루트 기준으로 찾을 수 있도록
-        env["MELLOW_LINK_PROJECT_ROOT"] = project_root
+        env["MELLOW_LINK_PROJECT_ROOT"] = mellow_cwd
         env["PROJECT_ROOT"] = project_root  # 범용 환경 변수도 설정
         print(f"   ✅ 프로젝트 루트 설정: {project_root}")
+        print(f"   ✅ Mellow-Link 루트 설정: {mellow_cwd}")
         
         # [핵심 수정] 파일 직접 실행이 아니라 모듈(-m)로 실행
         # 이렇게 하면 D:\AI_Project\mellow_link\main.py를 알아서 찾아감
@@ -359,7 +377,10 @@ def launch_system():
     )
 
     # 모든 stdout을 파일에도 저장(추후 디버깅용). logs/는 .gitignore 대상.
-    logs_dir = (base_dir / "logs")
+    logs_dir = _pick_existing_path(
+        base_dir / "data" / "logs",
+        base_dir / "logs",
+    )
     try:
         logs_dir.mkdir(parents=True, exist_ok=True)
     except Exception:

@@ -1,0 +1,39 @@
+sample_id: 03_state_transition_complex
+assertions:
+  deterministic_core:
+    primary_judgment: state_transition
+    selected_narrative_judgment: state_transition
+    recommended_strategy: 리팩터링 우선
+    top_decision_type: refactor
+    top_priority_score: 9
+    decision_count: 3
+    feature_slice_count: 1
+  issue_expectations:
+    must_include_detectors:
+      - state_transition_leak
+      - mixed_responsibility
+      - duplicate_logic_candidate
+    must_not_include_detectors: []
+  planning_expectations:
+    recommended_option_title: "옵션 A. 상태 전이 중심 모듈형 구조"
+    execution_stage_count: 4
+    first_execution_stage_title: "1주차"
+    last_execution_stage_title: "4주차"
+    must_link_decision_ids: true
+  ai_narrative_expectations:
+    allowed_to_change_fields:
+      - report_purpose
+      - primary_judgment_reason
+      - one_line_conclusion
+      - executive_summary_v2
+    deterministic_fields_must_match: true
+  draft_notes:
+    status: provisional_measured
+    sample_role: expansion_candidate
+    current_report_purpose: 상태 전이 규칙과 처리 흐름을 분석하기 위한 보고서입니다.
+    hold_reason:
+      - 상태 전이 refactor 축은 현재 canonical/promotion 세트에서도 이미 상당 부분 커버된다.
+      - 품질 문제가 아니라 증분 검증 가치가 상대적으로 낮아 다음 promotion 후보로 보류한다.
+    measured_behavior:
+      - state_transition_leak가 top issue로 잡히고 refactor top decision으로 연결된다.
+      - 동일 전이 규칙이 service, policy, SQL에 반복되도록 구성돼 있다.

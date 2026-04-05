@@ -175,3 +175,18 @@ lab.py
 # Mellow-Link generated artifacts
 mellow_link/outputs/
 mellow_link/logs/
+
+# =========================
+# Role-based workspace layout
+# =========================
+data/logs/
+data/outputs/
+data/runtime/
+infra/models/
+infra/node_modules/
+core/mellow_link/outputs/
+core/mellow_link/logs/
+core/mellow_link/keys/
+core/mellow_link/moltbook_api_key*.txt
+core/mellow_link/**/moltbook_api_key*.json
+core/mellow_link/**/MOLTBOOK_API_KEY*.json

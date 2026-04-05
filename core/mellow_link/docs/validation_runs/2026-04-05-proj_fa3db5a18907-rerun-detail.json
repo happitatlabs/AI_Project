@@ -1,0 +1,1820 @@
+{
+  "project": {
+    "id": "proj_fa3db5a18907",
+    "run_id": "run_20260405_133631_100fd4d5",
+    "project_name": "access_control_workflow",
+    "client_name": "si company",
+    "template_key": "default_modernization_v1",
+    "constraints": [],
+    "asset_manifest": [
+      {
+        "name": "approval_policy.py",
+        "temp_file_id": "tempf_01ff089e46bc44a9bf1fb5d134dec474",
+        "size": 511,
+        "category_hint": ""
+      },
+      {
+        "name": "approval_rules.md",
+        "temp_file_id": "tempf_295127f4d7b94e09a3a9e5d830ffd682",
+        "size": 374,
+        "category_hint": ""
+      },
+      {
+        "name": "claim_approval_page.html",
+        "temp_file_id": "tempf_fc8d56bcca8b4da38ce4cd266a4b3bed",
+        "size": 470,
+        "category_hint": ""
+      },
+      {
+        "name": "claim_approval_query.sql",
+        "temp_file_id": "tempf_10677f9533bd4687958efa62ada29bd1",
+        "size": 213,
+        "category_hint": ""
+      },
+      {
+        "name": "claim_approval_service.py",
+        "temp_file_id": "tempf_2cbeb12fc7ee46328bdde08615151292",
+        "size": 503,
+        "category_hint": ""
+      },
+      {
+        "name": "schema.sql",
+        "temp_file_id": "tempf_9a61d0bce8cd465ab6e8a04b8a03977e",
+        "size": 331,
+        "category_hint": ""
+      },
+      {
+        "name": "expected_assertions.yaml",
+        "temp_file_id": "tempf_e4dc5b716f20432f9ebbb06e93519cdf",
+        "size": 1802,
+        "category_hint": ""
+      },
+      {
+        "name": "input_manifest.json",
+        "temp_file_id": "tempf_729fbcf3306f4f2399788342acf4bace",
+        "size": 2179,
+        "category_hint": ""
+      },
+      {
+        "name": "scenario.md",
+        "temp_file_id": "tempf_706febb82fce424ca5c2408bf04e2c5a",
+        "size": 532,
+        "category_hint": ""
+      }
+    ],
+    "status": "completed",
+    "upload_session_id": "33ca3393-118b-4c9d-83c7-ae9262a80c6a",
+    "created_at": "2026-04-04T10:57:59.97539"
+  },
+  "assets": [
+    {
+      "project_asset_id": "asset_6235dd1ea87d",
+      "name": "approval_policy.py",
+      "temp_file_id": "tempf_01ff089e46bc44a9bf1fb5d134dec474",
+      "size": 511,
+      "category_hint": "",
+      "extracted_chars": 479,
+      "download_url": "/projects/proj_fa3db5a18907/assets/asset_6235dd1ea87d/download",
+      "content_type": "text/x-python",
+      "uploaded_at": "2026-04-04T10:57:38.470107",
+      "stage_status": "promoted",
+      "is_downloadable": true
+    },
+    {
+      "project_asset_id": "asset_d5968bd42d8e",
+      "name": "approval_rules.md",
+      "temp_file_id": "tempf_295127f4d7b94e09a3a9e5d830ffd682",
+      "size": 374,
+      "category_hint": "",
+      "extracted_chars": 210,
+      "download_url": "/projects/proj_fa3db5a18907/assets/asset_d5968bd42d8e/download",
+      "content_type": "application/octet-stream",
+      "uploaded_at": "2026-04-04T10:57:38.483467",
+      "stage_status": "promoted",
+      "is_downloadable": true
+    },
+    {
+      "project_asset_id": "asset_50663cda6e2b",
+      "name": "claim_approval_page.html",
+      "temp_file_id": "tempf_fc8d56bcca8b4da38ce4cd266a4b3bed",
+      "size": 470,
+      "category_hint": "",
+      "extracted_chars": 93,
+      "download_url": "/projects/proj_fa3db5a18907/assets/asset_50663cda6e2b/download",
+      "content_type": "text/html",
+      "uploaded_at": "2026-04-04T10:57:38.49374",
+      "stage_status": "promoted",
+      "is_downloadable": true
+    },
+    {
+      "project_asset_id": "asset_8420798832f4",
+      "name": "claim_approval_query.sql",
+      "temp_file_id": "tempf_10677f9533bd4687958efa62ada29bd1",
+      "size": 213,
+      "category_hint": "",
+      "extracted_chars": 213,
+      "download_url": "/projects/proj_fa3db5a18907/assets/asset_8420798832f4/download",
+      "content_type": "application/octet-stream",
+      "uploaded_at": "2026-04-04T10:57:38.500489",
+      "stage_status": "promoted",
+      "is_downloadable": true
+    },
+    {
+      "project_asset_id": "asset_93b7f99be3ce",
+      "name": "claim_approval_service.py",
+      "temp_file_id": "tempf_2cbeb12fc7ee46328bdde08615151292",
+      "size": 503,
+      "category_hint": "",
+      "extracted_chars": 471,
+      "download_url": "/projects/proj_fa3db5a18907/assets/asset_93b7f99be3ce/download",
+      "content_type": "text/x-python",
+      "uploaded_at": "2026-04-04T10:57:38.511056",
+      "stage_status": "promoted",
+      "is_downloadable": true
+    },
+    {
+      "project_asset_id": "asset_ce857bd715c6",
+      "name": "schema.sql",
+      "temp_file_id": "tempf_9a61d0bce8cd465ab6e8a04b8a03977e",
+      "size": 331,
+      "category_hint": "",
+      "extracted_chars": 331,
+      "download_url": "/projects/proj_fa3db5a18907/assets/asset_ce857bd715c6/download",
+      "content_type": "application/octet-stream",
+      "uploaded_at": "2026-04-04T10:57:38.519786",
+      "stage_status": "promoted",
+      "is_downloadable": true
+    },
+    {
+      "project_asset_id": "asset_f42751fff484",
+      "name": "expected_assertions.yaml",
+      "temp_file_id": "tempf_e4dc5b716f20432f9ebbb06e93519cdf",
+      "size": 1802,
+      "category_hint": "",
+      "extracted_chars": 1584,
+      "download_url": "/projects/proj_fa3db5a18907/assets/asset_f42751fff484/download",
+      "content_type": "application/octet-stream",
+      "uploaded_at": "2026-04-04T10:57:57.360048",
+      "stage_status": "promoted",
+      "is_downloadable": true
+    },
+    {
+      "project_asset_id": "asset_ea3ac3c62267",
+      "name": "input_manifest.json",
+      "temp_file_id": "tempf_729fbcf3306f4f2399788342acf4bace",
+      "size": 2179,
+      "category_hint": "",
+      "extracted_chars": 1741,
+      "download_url": "/projects/proj_fa3db5a18907/assets/asset_ea3ac3c62267/download",
+      "content_type": "application/json",
+      "uploaded_at": "2026-04-04T10:57:57.371051",
+      "stage_status": "promoted",
+      "is_downloadable": true
+    },
+    {
+      "project_asset_id": "asset_42541e8aa93a",
+      "name": "scenario.md",
+      "temp_file_id": "tempf_706febb82fce424ca5c2408bf04e2c5a",
+      "size": 532,
+      "category_hint": "",
+      "extracted_chars": 374,
+      "download_url": "/projects/proj_fa3db5a18907/assets/asset_42541e8aa93a/download",
+      "content_type": "application/octet-stream",
+      "uploaded_at": "2026-04-04T10:57:57.380165",
+      "stage_status": "promoted",
+      "is_downloadable": true
+    }
+  ],
+  "run_history": [
+    {
+      "run_id": "run_20260404_195759_7763d0f4",
+      "sequence_no": 1,
+      "trigger_kind": "initial",
+      "status": "completed",
+      "created_at": "2026-04-04T10:57:59.977429",
+      "asset_count": 9,
+      "is_latest": false
+    },
+    {
+      "run_id": "run_20260405_133631_100fd4d5",
+      "sequence_no": 2,
+      "trigger_kind": "manual_run",
+      "status": "completed",
+      "created_at": "2026-04-05T04:36:31.419735",
+      "asset_count": 9,
+      "is_latest": true
+    }
+  ],
+  "snapshot": {
+    "run_id": "run_20260405_133631_100fd4d5",
+    "session_id": "38",
+    "module_id": "rebuild_assistant",
+    "run_kind": "rebuild_plan",
+    "status": "completed",
+    "created_at": "2026-04-05T04:36:31.412736",
+    "updated_at": "2026-04-05T04:37:02.907931",
+    "summary": "Executive Summary - 결재 기능은 핵심 규칙을 유지한 상태에서 단계적으로 분리하는 것이 필요합니다. - 현재 자산 기준으로 우선 보존해야 할 판단 축은 승인 트리거와 승인 단계 구조입니다. - 이번 회[TRUNCATED]",
+    "todos": [
+      {
+        "todo_id": "B1",
+        "title": "입력 정규화",
+        "status": "pending"
+      },
+      {
+        "todo_id": "B2",
+        "title": "구조 분석",
+        "status": "pending"
+      },
+      {
+        "todo_id": "B3",
+        "title": "진단 및 판단",
+        "status": "pending"
+      },
+      {
+        "todo_id": "B4",
+        "title": "개선안 생성",
+        "status": "pending"
+      },
+      {
+        "todo_id": "B5",
+        "title": "결과 패키징",
+        "status": "pending"
+      }
+    ],
+    "todos_view": [
+      {
+        "id": "V1",
+        "title": "준비",
+        "status": "completed",
+        "raw_todo_ids": [
+          "B1",
+          "B2"
+        ]
+      },
+      {
+        "id": "V2",
+        "title": "처리",
+        "status": "completed",
+        "raw_todo_ids": [
+          "B3",
+          "B4"
+        ]
+      },
+      {
+        "id": "V3",
+        "title": "완료",
+        "status": "completed",
+        "raw_todo_ids": [
+          "B5"
+        ]
+      }
+    ],
+    "progress_percent": 100,
+    "current_todo_id": "B5",
+    "counters": {
+      "tool_calls": 0,
+      "files_explored": 0,
+      "searches": 0
+    },
+    "last_event_id": 11023,
+    "last_event_ts": 1775363822.9063826,
+    "block": {
+      "is_blocked": false,
+      "reason_code": "none",
+      "message": "",
+      "since_ts": null,
+      "related": {}
+    },
+    "needs_approval": false,
+    "approval_required": null,
+    "auto_closed_todos": []
+  },
+  "insights": {
+    "feature_mode": "저장 검증 규칙",
+    "findings": [
+      "대표 도메인 범위는 청구 조정 중심으로 정리하는 편이 적절합니다.",
+      "권한 및 상태 규칙 신호가 보여 역할\\/.../가능 액션 표시가 화면 분기와 섞여 있으며 정책 추출이 필요합니다: 역할별 액션 노출 규칙, 상태 전이 규칙",
+      "조회 조건 규칙 신호가 보여 조회 조건, 검색 파라미터, 동적 쿼리 조합이 한 흐름에 묶여 있습니다: SQL 조건 매핑"
+    ],
+    "rules": [
+      "청구 조정 기능을 단일 범위에서 화면, 업무 처리 API, 데이터 접근 책임으로 분리하는 구조로 재구성합니다.",
+      "화면은 업무 흐름 중심으로 나누고, 상태 판단은 공통 규칙에 따라 일관되게 처리하도록 구성합니다.",
+      "백엔드는 청구 조정 전용 API, 업무 서비스, 데이터 접근 계층으로 나눠 기존 SQL 의존도를 단계적으로 축소합니다."
+    ]
+  },
+  "warnings": [],
+  "missing_context_details": [],
+  "structured_result": {
+    "primary_judgment": "workflow",
+    "template_judgment": "workflow",
+    "structural_judgment": "refactor",
+    "narrative_axis": "workflow",
+    "feature_signal_mode": "save_validation",
+    "primary_judgment_reason": "State transition logic appears in multiple locations. 데이터 계약 변경 없이 책임 분리 후보로 다루는 편이 적절합니다. 우선순위 점수는 10이며, detector_id=state_transition_leak 기준으로 기본 refactor 규칙에 분기했습니다.",
+    "pattern_candidates": [
+      {
+        "name": "workflow",
+        "matched": true,
+        "score": 15.3,
+        "reasons": [
+          "actor_signals=3",
+          "stage_signals=2",
+          "gate_signals=2",
+          "progression_signals=2",
+          "matched_signal=approval",
+          "matched_signal=status_permissions",
+          "matched_signal=승인"
+        ],
+        "rejected_reason": ""
+      },
+      {
+        "name": "state_transition",
+        "matched": false,
+        "score": 5.0,
+        "reasons": [
+          "explicit_state_transition=False",
+          "primary_feature_mode=save_validation",
+          "matched_signal=status_permissions",
+          "matched_signal=상태",
+          "matched_signal=전이"
+        ],
+        "rejected_reason": "최소 성립 조건 부족으로 탈락했습니다."
+      },
+      {
+        "name": "query_filter",
+        "matched": false,
+        "score": 2.36,
+        "reasons": [
+          "primary_feature_mode=save_validation",
+          "secondary_feature_mode=status_permissions",
+          "search_filter_signals=1",
+          "matched_signal=search_filters"
+        ],
+        "rejected_reason": "최소 성립 조건 부족으로 탈락했습니다."
+      },
+      {
+        "name": "amount_threshold",
+        "matched": false,
+        "score": 1.1,
+        "reasons": [
+          "amount_threshold_focus=False",
+          "validation_signals=1",
+          "matched_signal=amount"
+        ],
+        "rejected_reason": "최소 성립 조건 부족으로 탈락했습니다."
+      },
+      {
+        "name": "access_control",
+        "matched": false,
+        "score": 16.0,
+        "reasons": [
+          "access_control_score=16.0",
+          "status_permission_signals=2",
+          "matched_signal=dept",
+          "matched_signal=role",
+          "matched_signal=status_permissions"
+        ],
+        "rejected_reason": "최소 성립 조건 부족으로 탈락했습니다."
+      },
+      {
+        "name": "validation",
+        "matched": true,
+        "score": 5.0,
+        "reasons": [
+          "validation_primary=True",
+          "save_validation_signals=1",
+          "primary_feature_mode=save_validation",
+          "matched_signal=amount",
+          "matched_signal=save_validation",
+          "matched_signal=선행"
+        ],
+        "rejected_reason": "workflow 우선 규칙이 적용되어 탈락했습니다."
+      }
+    ],
+    "report_purpose": "승인 트리거, 승인 단계, 예외 처리 흐름을 분석하기 위한 보고서입니다.",
+    "report_scope": [
+      "승인 트리거",
+      "승인 주체",
+      "승인 단계",
+      "예외 처리 흐름"
+    ],
+    "report_questions": [
+      "어떤 조건에서 승인 흐름이 시작되는가?",
+      "승인 단계와 의사결정 게이트는 어떻게 구성되는가?",
+      "예외 승인 또는 보류 흐름은 어떻게 처리되는가?"
+    ],
+    "one_line_conclusion": "결재 기능은 승인 트리거와 승인 단계 구조를 기준으로 승인 흐름, 의사결정 게이트, 예외 처리 경로를 분리하는 것이 필요합니다.",
+    "core_business_rules": [
+      "승인, 반려, 보류, 자동 승인 분기 조건은 의사결정 게이트 기준으로 유지해야 합니다.",
+      "승인 주체와 결재 권한은 별도 승인 정책으로 유지해야 합니다.",
+      "승인 흐름이 시작되는 트리거 조건은 별도 워크플로우 기준으로 분리해야 합니다.",
+      "단계별 승인 순서와 조건부 승인 구조는 같은 워크플로우 계층으로 정리해야 합니다."
+    ],
+    "executive_summary_v2": [
+      "결재 기능은 핵심 규칙을 유지한 상태에서 단계적으로 분리하는 것이 필요합니다.",
+      "현재 자산 기준으로 우선 보존해야 할 판단 축은 승인 트리거와 승인 단계 구조입니다.",
+      "이번 회의에서는 옵션 A. 승인 흐름 중심 모듈형 구조를 기준안으로 우선 기준안으로 두는 편이 적절합니다."
+    ],
+    "grounded_business_rules": [
+      {
+        "title": "의사결정 분기 조건",
+        "description": "승인, 반려, 보류, 자동 승인 분기 조건은 의사결정 게이트 기준으로 유지해야 합니다.",
+        "evidence": [
+          {
+            "asset_name": "approval_policy.py",
+            "asset_type": "source",
+            "locator": "본문 키워드",
+            "excerpt": "claim[\"status\"] = \"TEAM_LEAD_APPROVED\" return claim if claim[\"st",
+            "evidence_kind": "source"
+          },
+          {
+            "asset_name": "claim_approval_page.html",
+            "asset_type": "ui",
+            "locator": "본문 키워드",
+            "excerpt": "_approval_page.html] Claim Approval Approve as Team Lead Approve as Auditor Team Lea",
+            "evidence_kind": "ui"
+          }
+        ],
+        "design_targets": [
+          "워크플로우 서비스",
+          "API"
+        ],
+        "confidence": "확정",
+        "confidence_reason": "현재 자산의 코드, 화면, SQL 또는 스키마에서 직접 확인되었습니다.",
+        "needs_verification": false
+      },
+      {
+        "title": "승인 주체 정의",
+        "description": "승인 주체와 결재 권한은 별도 승인 정책으로 유지해야 합니다.",
+        "evidence": [
+          {
+            "asset_name": "approval_policy.py",
+            "asset_type": "source",
+            "locator": "본문 키워드",
+            "excerpt": "-> AUDIT_APPROVED` 순서로 상태가 전이된다. - 승인자는 자신의 현재 역할과 단계에 맞는 액션만 수행할 수 있다. - 같은 승인 단계",
+            "evidence_kind": "source"
+          }
+        ],
+        "design_targets": [
+          "워크플로우 서비스",
+          "정책 서비스"
+        ],
+        "confidence": "확정",
+        "confidence_reason": "현재 자산의 코드, 화면, SQL 또는 스키마에서 직접 확인되었습니다.",
+        "needs_verification": false
+      },
+      {
+        "title": "승인 트리거 조건",
+        "description": "승인 흐름이 시작되는 트리거 조건은 별도 워크플로우 기준으로 분리해야 합니다.",
+        "evidence": [
+          {
+            "asset_name": "approval_policy.py",
+            "asset_type": "source",
+            "locator": "본문 키워드",
+            "excerpt": "def (claim, user):",
+            "evidence_kind": "source"
+          },
+          {
+            "asset_name": "claim_approval_page.html",
+            "asset_type": "ui",
+            "locator": "본문 키워드",
+            "excerpt": "SOURCE: | claim_approval_page.html] Claim Approval Approve as Te",
+            "evidence_kind": "ui"
+          },
+          {
+            "asset_name": "claim_approval_query.sql",
+            "asset_type": "sql",
+            "locator": "본문 키워드",
+            "excerpt": "SOURCE: | claim_approval_query.sql] SELECT, amount, COL_",
+            "evidence_kind": "sql"
+          }
+        ],
+        "design_targets": [
+          "워크플로우 서비스",
+          "API"
+        ],
+        "confidence": "확정",
+        "confidence_reason": "현재 자산의 코드, 화면, SQL 또는 스키마에서 직접 확인되었습니다.",
+        "needs_verification": false
+      },
+      {
+        "title": "승인 단계 구조",
+        "description": "단계별 승인 순서와 조건부 승인 구조는 같은 워크플로우 계층으로 정리해야 합니다.",
+        "evidence": [
+          {
+            "asset_name": "approval_policy.py",
+            "asset_type": "source",
+            "locator": "본문 키워드",
+            "excerpt": "션 A. 승인 흐름 중심 모듈형 구조\" execution_stage_count: 5 first_execution_stage_title:",
+            "evidence_kind": "source"
+          }
+        ],
+        "design_targets": [
+          "워크플로우 서비스",
+          "API"
+        ],
+        "confidence": "확정",
+        "confidence_reason": "현재 자산의 코드, 화면, SQL 또는 스키마에서 직접 확인되었습니다.",
+        "needs_verification": false
+      }
+    ],
+    "decision_items": [
+      {
+        "statement": "청구 조정 기능의 승인 트리거와 승인 주체 규칙을 별도 워크플로우 계층으로 분리하는 것이 필요합니다.",
+        "rationale": "의사결정 분기 조건을 처리 로직에서 분리해야 승인 경로와 예외 흐름을 일관되게 유지할 수 있습니다.",
+        "linked_evidence": [
+          {
+            "asset_name": "approval_policy.py",
+            "asset_type": "source",
+            "locator": "본문 키워드",
+            "excerpt": "claim[\"status\"] = \"TEAM_LEAD_APPROVED\" return claim if claim[\"st",
+            "evidence_kind": "source"
+          },
+          {
+            "asset_name": "claim_approval_page.html",
+            "asset_type": "ui",
+            "locator": "본문 키워드",
+            "excerpt": "_approval_page.html] Claim Approval Approve as Team Lead Approve as Auditor Team Lea",
+            "evidence_kind": "ui"
+          }
+        ],
+        "linked_risks": []
+      },
+      {
+        "statement": "청구 조정 기능의 승인 단계 구조와 의사결정 게이트를 워크플로우 계층으로 고정하는 것이 필요합니다.",
+        "rationale": "단계별 승인, 반려, 보류 게이트를 분리해야 승인 순서와 처리 결과가 흔들리지 않습니다.",
+        "linked_evidence": [
+          {
+            "asset_name": "approval_policy.py",
+            "asset_type": "source",
+            "locator": "본문 키워드",
+            "excerpt": "claim[\"status\"] = \"TEAM_LEAD_APPROVED\" return claim if claim[\"st",
+            "evidence_kind": "source"
+          },
+          {
+            "asset_name": "claim_approval_page.html",
+            "asset_type": "ui",
+            "locator": "본문 키워드",
+            "excerpt": "_approval_page.html] Claim Approval Approve as Team Lead Approve as Auditor Team Lea",
+            "evidence_kind": "ui"
+          }
+        ],
+        "linked_risks": []
+      },
+      {
+        "statement": "청구 조정 기능의 승인 주체와 승인 권한 경계를 같은 워크플로우 정책으로 정리하는 것이 필요합니다.",
+        "rationale": "승인 주체와 승인 권한 경계를 함께 고정해야 승인 누락과 권한 오남용을 줄일 수 있습니다.",
+        "linked_evidence": [
+          {
+            "asset_name": "approval_policy.py",
+            "asset_type": "source",
+            "locator": "본문 키워드",
+            "excerpt": "claim[\"status\"] = \"TEAM_LEAD_APPROVED\" return claim if claim[\"st",
+            "evidence_kind": "source"
+          },
+          {
+            "asset_name": "claim_approval_page.html",
+            "asset_type": "ui",
+            "locator": "본문 키워드",
+            "excerpt": "_approval_page.html] Claim Approval Approve as Team Lead Approve as Auditor Team Lea",
+            "evidence_kind": "ui"
+          }
+        ],
+        "linked_risks": []
+      }
+    ],
+    "retained_contracts": [
+      {
+        "item": "승인 경로와 처리 순서 계약은 유지하는 것이 필요합니다.",
+        "basis": "승인 경로와 처리 순서가 바뀌면 승인 결과와 후속 처리 흐름이 달라질 수 있습니다.",
+        "evidence": [
+          {
+            "asset_name": "approval_policy.py",
+            "asset_type": "source",
+            "locator": "본문 키워드",
+            "excerpt": "claim[\"status\"] = \"TEAM_LEAD_APPROVED\" return claim if claim[\"st",
+            "evidence_kind": "source"
+          },
+          {
+            "asset_name": "claim_approval_page.html",
+            "asset_type": "ui",
+            "locator": "본문 키워드",
+            "excerpt": "_approval_page.html] Claim Approval Approve as Team Lead Approve as Auditor Team Lea",
+            "evidence_kind": "ui"
+          },
+          {
+            "asset_name": "schema.sql",
+            "asset_type": "schema",
+            "locator": "본문 키워드",
+            "excerpt": "30) NOT NULL ); CREATE TABLE claim_approvals ( approval_id BIGINT PRIMARY KEY,",
+            "evidence_kind": "schema"
+          }
+        ]
+      },
+      {
+        "item": "승인 권한 체계 계약은 유지하는 것이 필요합니다.",
+        "basis": "승인 권한 체계가 바뀌면 승인 주체와 승인 경로가 달라질 수 있습니다.",
+        "evidence": [
+          {
+            "asset_name": "approval_policy.py",
+            "asset_type": "source",
+            "locator": "본문 키워드",
+            "excerpt": "-> AUDIT_APPROVED` 순서로 상태가 전이된다. - 승인자는 자신의 현재 역할과 단계에 맞는 액션만 수행할 수 있다. - 같은 승인 단계",
+            "evidence_kind": "source"
+          }
+        ]
+      },
+      {
+        "item": "단계별 승인 순서 계약은 유지하는 것이 필요합니다.",
+        "basis": "단계별 승인 순서가 달라지면 승인 흐름과 후속 상태 반영이 달라질 수 있습니다.",
+        "evidence": [
+          {
+            "asset_name": "approval_policy.py",
+            "asset_type": "source",
+            "locator": "본문 키워드",
+            "excerpt": "션 A. 승인 흐름 중심 모듈형 구조\" execution_stage_count: 5 first_execution_stage_title:",
+            "evidence_kind": "source"
+          }
+        ]
+      },
+      {
+        "item": "승인 경로와 예외 승인 규칙 계약은 유지하는 것이 필요합니다.",
+        "basis": "승인 경로와 예외 승인 규칙이 바뀌면 승인 결과와 운영 예외 흐름이 달라질 수 있습니다.",
+        "evidence": [
+          {
+            "asset_name": "approval_policy.py",
+            "asset_type": "source",
+            "locator": "본문 키워드",
+            "excerpt": "claim[\"status\"] = \"TEAM_LEAD_APPROVED\" return claim if claim[\"st",
+            "evidence_kind": "source"
+          },
+          {
+            "asset_name": "claim_approval_page.html",
+            "asset_type": "ui",
+            "locator": "본문 키워드",
+            "excerpt": "_approval_page.html] Claim Approval Approve as Team Lead Approve as Auditor Team Lea",
+            "evidence_kind": "ui"
+          }
+        ]
+      }
+    ],
+    "priority_split_items": [
+      {
+        "priority": 1,
+        "item": "청구 조정 기능에서 핵심 승인 트리거와 승인 주체 규칙을 먼저 분리하는 것이 필요합니다.",
+        "title": "청구 조정 승인 트리거와 주체 분리",
+        "reason": "의사결정 분기 조건, 승인 주체 정의, 승인 트리거 조건 규칙이 직접 확인되어 직접 확인된 승인 시작 조건과 승인 주체 규칙이 의사결정 경로를 좌우합니다.",
+        "impact_scope": "승인 시작 조건, 승인 주체, 조직별 처리 책임",
+        "prerequisite": "승인 경로와 처리 순서 계약은 유지하는 것이 필요합니다., 승인 권한 체계 계약은 유지하는 것이 필요합니다. 유지 계약 확정",
+        "linked_rules": [
+          "의사결정 분기 조건",
+          "승인 주체 정의",
+          "승인 트리거 조건"
+        ],
+        "linked_contracts": [
+          "승인 경로와 처리 순서 계약은 유지하는 것이 필요합니다.",
+          "승인 권한 체계 계약은 유지하는 것이 필요합니다."
+        ]
+      },
+      {
+        "priority": 3,
+        "item": "청구 조정 기능의 승인 단계 안내와 예외 처리 안내를 마지막에 재구성하는 것이 필요합니다.",
+        "title": "청구 조정 화면 재구성",
+        "reason": "핵심 승인 정책과 단계 구조가 정리된 뒤 화면을 맞춰야 재작업을 줄일 수 있습니다.",
+        "impact_scope": "화면 액션 노출, 상태 표시, 사용자 안내 메시지",
+        "prerequisite": "워크플로우 API 계약 고정",
+        "linked_rules": [
+          "의사결정 분기 조건",
+          "승인 주체 정의"
+        ],
+        "linked_contracts": [
+          "승인 경로와 처리 순서 계약은 유지하는 것이 필요합니다."
+        ]
+      }
+    ],
+    "verification_checkpoints": [
+      {
+        "item": "대리 승인 범위와 병렬 승인 가능 조건을 확인하는 것이 필요합니다.",
+        "reason": "승인 트리거와 승인 주체는 직접 확인되었지만 대리 승인 범위와 병렬 승인 조건은 추가 확인이 필요합니다.",
+        "evidence": []
+      },
+      {
+        "item": "승인 단계별 통지와 후속 처리 절차를 확인하는 것이 필요합니다.",
+        "reason": "승인 단계 구조는 보이지만 단계별 통지와 후속 처리 절차는 현재 자산만으로 모두 확정할 수 없습니다.",
+        "evidence": []
+      }
+    ],
+    "design_options": [
+      {
+        "name": "옵션 A. 승인 흐름 중심 모듈형 구조",
+        "structure_summary": "승인 트리거, 승인 주체, 단계별 의사결정 게이트를 별도 워크플로우 계층으로 분리하고 API는 승인 결과만 반영하도록 구성합니다.",
+        "advantages": [
+          "승인 트리거와 승인 주체를 같은 워크플로우 기준으로 유지해야 합니다.",
+          "단계별 승인 순서와 예외 승인 흐름을 함께 고정해야 합니다."
+        ],
+        "risks": [
+          "승인 단계와 예외 승인 경계가 흐리면 승인 누락이 다시 발생할 수 있습니다."
+        ],
+        "difficulty": "MEDIUM",
+        "duration_weeks": 5,
+        "recommended": true,
+        "selection_reason": "이 샘플에서는 의사결정 게이트, 승인 주체 분리 규칙이 직접 확인되었습니다. 따라서 승인 트리거, 승인 주체, 승인 단계 구조를 중심으로 통제할 수 있는 구조를 기준으로 승인 흐름 중심 모듈형 구조를 우선 적용하는 편이 적절합니다. 이 방식은 승인 경로와 처리 순서, 승인 권한 체계 계약을 유지하면서도 구현 범위를 통제해야 하는 현재 조건과 충돌하지 않습니다. 다른 옵션보다 승인 트리거, 승인 주체, 단계별 의사결정 게이트를 같은 워크플로우 계층으로 먼저 정리하는 편이 안전하므로 승인 흐름 중심 모듈형 구조를 우선 적용하는 편이 적절합니다."
+      },
+      {
+        "name": "옵션 B. 단계 분리형 승인 구조",
+        "structure_summary": "단일 승인과 다단계 승인을 별도 단계 모듈로 나누고 승인 주체 정책은 각 단계에서 공통으로 적용합니다.",
+        "advantages": [
+          "다단계 승인 구조를 독립적으로 추적하기 쉽습니다."
+        ],
+        "risks": [
+          "단계 간 상태 전달 규칙이 늘어나면 관리 비용이 커질 수 있습니다."
+        ],
+        "difficulty": "MEDIUM",
+        "duration_weeks": 6,
+        "recommended": false,
+        "selection_reason": "단계 분리형 승인 구조는 일부 승인 흐름에는 유효하지만 이번 승인 구조 중심 워크플로우보다 뒤에 두어야 합니다."
+      },
+      {
+        "name": "옵션 C. 예외 승인 분리형 구조",
+        "structure_summary": "일반 승인 흐름과 대리 승인, 긴급 승인, 자동 승인 경로를 분리하고 승인 주체는 공통 정책으로 적용합니다.",
+        "advantages": [
+          "예외 흐름을 별도로 통제하기 쉽습니다."
+        ],
+        "risks": [
+          "예외 승인 경로가 늘어나면 일반 승인 흐름과의 정합성 비용이 커질 수 있습니다."
+        ],
+        "difficulty": "HIGH",
+        "duration_weeks": 6,
+        "recommended": false,
+        "selection_reason": "예외 승인 분리형 구조는 일부 승인 흐름에는 유효하지만 이번 승인 구조 중심 워크플로우보다 뒤에 두어야 합니다."
+      }
+    ],
+    "recommended_option": {
+      "name": "옵션 A. 승인 흐름 중심 모듈형 구조",
+      "structure_summary": "승인 트리거, 승인 주체, 단계별 의사결정 게이트를 별도 워크플로우 계층으로 분리하고 API는 승인 결과만 반영하도록 구성합니다.",
+      "selection_reason": "이 샘플에서는 의사결정 게이트, 승인 주체 분리 규칙이 직접 확인되었습니다. 따라서 승인 트리거, 승인 주체, 승인 단계 구조를 중심으로 통제할 수 있는 구조를 기준으로 승인 흐름 중심 모듈형 구조를 우선 적용하는 편이 적절합니다. 이 방식은 승인 경로와 처리 순서, 승인 권한 체계 계약을 유지하면서도 구현 범위를 통제해야 하는 현재 조건과 충돌하지 않습니다. 다른 옵션보다 승인 트리거, 승인 주체, 단계별 의사결정 게이트를 같은 워크플로우 계층으로 먼저 정리하는 편이 안전하므로 승인 흐름 중심 모듈형 구조를 우선 적용하는 편이 적절합니다.",
+      "expected_outcomes": [
+        "핵심 규칙과 정책 분리를 우선 먼저 정리하는 편이 적절합니다.",
+        "기존 데이터 계약을 유지한 상태에서 단계적 전환 순서를 먼저 정리하는 편이 안전합니다."
+      ]
+    },
+    "execution_plan": [
+      {
+        "week_label": "1주차",
+        "goal": "승인 트리거와 승인 주체 규칙을 구조화합니다.",
+        "tasks": [
+          "승인 시작 조건과 승인 요청 트리거를 워크플로우 규칙 표로 정리합니다.",
+          "승인 주체와 승인 권한 관계를 승인 주체 매트릭스로 고정합니다."
+        ],
+        "related_rules": [
+          "의사결정 분기 조건",
+          "승인 주체 정의",
+          "승인 트리거 조건"
+        ],
+        "related_contracts": [
+          "승인 경로와 처리 순서 계약은 유지하는 것이 필요합니다.",
+          "승인 권한 체계 계약은 유지하는 것이 필요합니다."
+        ],
+        "roles": [
+          "컨설턴트",
+          "업무 분석가",
+          "백엔드 아키텍트"
+        ],
+        "duration_weeks": 1,
+        "deliverables": [
+          "승인 트리거 목록",
+          "승인 주체 매트릭스",
+          "승인 권한 계약 목록"
+        ]
+      },
+      {
+        "week_label": "2주차",
+        "goal": "승인 흐름 중심 모듈형 구조 기준으로 승인 단계 구조와 의사결정 게이트를 설계합니다.",
+        "tasks": [
+          "단계별 승인 순서와 조건부 승인 분기를 워크플로우 단계 구조로 정의합니다.",
+          "승인, 반려, 보류 게이트를 단계별 워크플로우 결과로 분리합니다."
+        ],
+        "related_rules": [
+          "의사결정 분기 조건",
+          "승인 주체 정의",
+          "승인 트리거 조건"
+        ],
+        "related_contracts": [
+          "승인 경로와 처리 순서 계약은 유지하는 것이 필요합니다.",
+          "승인 권한 체계 계약은 유지하는 것이 필요합니다."
+        ],
+        "roles": [
+          "백엔드 아키텍트",
+          "시니어 개발자"
+        ],
+        "duration_weeks": 1,
+        "deliverables": [
+          "승인 단계 흐름도",
+          "의사결정 게이트 명세",
+          "단계별 승인 구조안"
+        ]
+      },
+      {
+        "week_label": "3주차",
+        "goal": "청구 조정 승인 API와 워크플로우 서비스에 승인 규칙을 반영합니다.",
+        "tasks": [
+          "승인 주체 규칙과 단계별 승인 순서를 워크플로우 서비스 호출로 반영합니다.",
+          "대리 승인, 긴급 승인, 자동 승인 경로를 예외 워크플로우 결과로 분리합니다."
+        ],
+        "related_rules": [
+          "의사결정 분기 조건",
+          "승인 주체 정의",
+          "승인 트리거 조건"
+        ],
+        "related_contracts": [
+          "승인 경로와 처리 순서 계약은 유지하는 것이 필요합니다.",
+          "승인 권한 체계 계약은 유지하는 것이 필요합니다."
+        ],
+        "roles": [
+          "백엔드 개발자",
+          "QA"
+        ],
+        "duration_weeks": 1,
+        "deliverables": [
+          "승인 API 반영 목록",
+          "워크플로우 테스트 케이스",
+          "예외 승인 구현 체크리스트"
+        ]
+      },
+      {
+        "week_label": "4주차",
+        "goal": "청구 조정 승인 화면과 승인 단계 안내를 워크플로우 기준으로 정렬합니다.",
+        "tasks": [
+          "승인 단계 안내와 승인 주체 메시지를 워크플로우 결과와 맞춰 정렬합니다.",
+          "승인 버튼 노출과 예외 승인 안내가 유지 계약과 일치하는지 확인합니다."
+        ],
+        "related_rules": [
+          "의사결정 분기 조건",
+          "승인 주체 정의",
+          "승인 트리거 조건"
+        ],
+        "related_contracts": [
+          "승인 경로와 처리 순서 계약은 유지하는 것이 필요합니다.",
+          "승인 권한 체계 계약은 유지하는 것이 필요합니다."
+        ],
+        "roles": [
+          "프론트엔드 개발자",
+          "백엔드 개발자",
+          "QA"
+        ],
+        "duration_weeks": 1,
+        "deliverables": [
+          "승인 화면 체크리스트",
+          "승인 단계 안내 시안",
+          "정합성 확인 결과"
+        ]
+      },
+      {
+        "week_label": "5주차",
+        "goal": "청구 조정 상태 전이와 승인 흐름 통합 기준을 확정합니다.",
+        "tasks": [
+          "승인 완료, 반려, 보류 결과가 상태 전이와 어떻게 연결되는지 통합 규칙으로 고정합니다.",
+          "워크플로우 결과와 상태 전이 결과가 충돌하지 않는지 통합 시나리오로 확인합니다."
+        ],
+        "related_rules": [
+          "의사결정 분기 조건",
+          "승인 주체 정의",
+          "승인 트리거 조건"
+        ],
+        "related_contracts": [
+          "승인 경로와 처리 순서 계약은 유지하는 것이 필요합니다.",
+          "승인 권한 체계 계약은 유지하는 것이 필요합니다."
+        ],
+        "roles": [
+          "백엔드 아키텍트",
+          "QA"
+        ],
+        "duration_weeks": 1,
+        "deliverables": [
+          "승인-상태 통합 규칙서",
+          "통합 시나리오 목록",
+          "파일럿 적용안"
+        ]
+      }
+    ],
+    "analysis_summary": [
+      "대표 도메인 범위는 청구 조정 중심으로 정리하는 편이 적절합니다.",
+      "권한 및 상태 규칙 신호가 보여 역할\\/.../가능 액션 표시가 화면 분기와 섞여 있으며 정책 추출이 필요합니다: 역할별 액션 노출 규칙, 상태 전이 규칙",
+      "조회 조건 규칙 신호가 보여 조회 조건, 검색 파라미터, 동적 쿼리 조합이 한 흐름에 묶여 있습니다: SQL 조건 매핑",
+      "저장 검증 규칙 신호가 보여 저장 전 검증, 중복 체크, 저장 가드가 화면[REDACTED_PATH] 경계 없이 퍼져 있습니다: 저장 전 선행 조건",
+      "기존 스키마 호환성을 유지해야 하므로 API 백엔드 분리 시 DB 계약을 우선 보존해야 합니다.",
+      "우선 분해 대상은 저장 검증 규칙이며, 나머지 규칙은 보조 흐름으로 정리하는 편이 적절합니다."
+    ],
+    "rebuild_strategy": [
+      "청구 조정 기능을 단일 범위에서 화면, 업무 처리 API, 데이터 접근 책임으로 분리하는 구조로 재구성합니다.",
+      "화면은 업무 흐름 중심으로 나누고, 상태 판단은 공통 규칙에 따라 일관되게 처리하도록 구성합니다.",
+      "백엔드는 청구 조정 전용 API, 업무 서비스, 데이터 접근 계층으로 나눠 기존 SQL 의존도를 단계적으로 축소합니다.",
+      "저장 검증 규칙을 핵심 흐름으로 보고 입력 검증, 중복 체크, 저장 전 차단 규칙을 별도 검증 계층으로 분리합니다.",
+      "보조 신호로 권한 및 상태 규칙이 감지되어 액션 노출과 상태 전이 규칙도 함께 정리합니다.",
+      "제약 조건 반영: project_name=access_control_workflow"
+    ],
+    "layer_reconstruction": {
+      "database": [
+        "청구 조정 관련 테이블과 컬럼 계약은 유지하되 조회와 저장 책임을 데이터 접근 계층으로 이동합니다.",
+        "중복 체크와 저장 전 선행 조회는 저장 커맨드와 분리된 제약 검사 쿼리로 정리합니다.",
+        "스키마 변경은 최소화하고 V0에서는 호환 레이어를 우선 설계합니다."
+      ],
+      "backend": [
+        "청구 조정 기능 전용 API와 업무 서비스 계층을 분리합니다.",
+        "저장 전 차단 규칙, 중복 체크, 입력 검증을 별도 검증 계층으로 분리합니다.",
+        "저장 전 제약 검사는 저장 처리와 분리해 선행 검증 단계에서 수행합니다.",
+        "보조 정책 신호를 반영해 주요 액션 노출 조건은 정책 서비스에서 계산합니다."
+      ],
+      "frontend": [
+        "청구 조정 화면을 기준으로 상위 화면과 하위 업무 구성 요소를 분리합니다.",
+        "저장 폼 검증 메시지와 제출 가드를 view model 또는 form schema 기준으로 분리합니다.",
+        "보조 정책 신호를 반영해 액션 버튼 가시성 계산을 분리합니다."
+      ]
+    },
+    "recomposition_draft": {
+      "database": [
+        "예시: 청구 조정 승인 트리거, 승인 주체, 단계별 승인 상태를 워크플로우 기준 컬럼으로 분리합니다.",
+        "예시: 승인 단계, 승인 주체, 예외 승인 경로를 워크플로우 기준 컬럼으로 명시해 조회합니다."
+      ],
+      "backend": [
+        "예시: 청구 조정 승인 요청 API와 승인 처리 API를 분리해 워크플로우 기본 구조를 정리합니다.",
+        "예시: 승인 트리거와 승인 주체를 별도 워크플로우 서비스에서 계산합니다.",
+        "예시: 승인, 반려, 보류, 예외 승인 경로를 단계별 워크플로우로 분리합니다.",
+        "예시: 보조 정책 신호를 반영해 처리 가능 여부 판단 계층을 함께 둡니다."
+      ],
+      "frontend": [
+        "예시: 청구 조정 화면을 승인 요청 영역, 승인 단계 안내 영역, 예외 처리 안내 영역으로 나눕니다.",
+        "예시: 승인 주체, 단계 상태, 예외 승인 안내를 워크플로우 결과에 따라 분리해 표시합니다.",
+        "예시: 보조 정책 신호를 반영해 액션 노출 계산 영역을 함께 둡니다."
+      ]
+    },
+    "risks": [
+      "승인 트리거와 승인 주체 규칙이 분산되면 승인 누락이 발생할 수 있습니다.",
+      "의사결정 분기 조건 규칙이 누락되면 청구 조정 핵심 흐름을 잘못 재현할 수 있습니다.",
+      "승인 경로와 처리 순서 계약은 유지하는 것이 필요합니다. 계약이 흔들리면 기존 처리 조건과 화면 표시가 어긋날 수 있습니다."
+    ],
+    "extracted_rules": {
+      "status_permissions": {
+        "entities": [
+          "claim_adjustment"
+        ],
+        "roles": [
+          "USER"
+        ],
+        "statuses": [],
+        "actions": [
+          "approve",
+          "Reject"
+        ],
+        "role_action_matrix": [
+          {
+            "role": "USER",
+            "allowed_actions": [
+              "approve"
+            ]
+          }
+        ],
+        "status_action_matrix": [],
+        "transition_rules": [],
+        "ui_visibility_rules": [],
+        "policy_hints": [
+          "extract role[REDACTED_PATH] visibility into 정책 서비스"
+        ]
+      },
+      "search_filters": {
+        "entities": [],
+        "filter_fields": [],
+        "query_params": [],
+        "sort_rules": [],
+        "paging_rules": [],
+        "query_binding_rules": [],
+        "default_filters": [],
+        "result_shape_hints": []
+      },
+      "save_validation": {
+        "entities": [
+          "claim_adjustment"
+        ],
+        "required_fields": [],
+        "field_validation_rules": [],
+        "duplicate_check_rules": [],
+        "save_guard_rules": [
+          "enforce role-based save restrictions before save",
+          "enforce status-change restrictions before save"
+        ],
+        "exception_rules": [],
+        "command_boundary_hints": [
+          "split validation from persistence",
+          "use 입력 모델 and 검증 계층"
+        ]
+      }
+    },
+    "recommended_directions": [
+      "청구 조정 기능의 승인 트리거와 승인 단계를 먼저 확정하는 것이 필요합니다.",
+      "승인 주체와 예외 승인 경로를 같은 워크플로우 기준으로 정리하는 것이 필요합니다.",
+      "상태 전이와 승인 결과 연결 기준을 후속 단계에서 확정하는 것이 필요합니다."
+    ],
+    "confidence": 1.0,
+    "missing_context": [],
+    "missing_context_details": [],
+    "extensions": {
+      "narrative": {
+        "source": "deterministic_fallback",
+        "fields_rewritten": [],
+        "model": "",
+        "prompt_version": "phase1.8-top-narrative-v1",
+        "validation_passed": false,
+        "failure_reason": "llm_generate_failed:LLMServiceTimeoutError",
+        "axis": "workflow"
+      },
+      "decision_governance": {
+        "synthetic_signal_detected": true,
+        "packager_guard_applied": false
+      }
+    },
+    "structure_snapshot": {
+      "feature_slices": [
+        {
+          "slice_id": "SLICE-7B1E0A5430",
+          "name": "ui:ClaimApprovalPage#approve",
+          "entry_points": [
+            "ui:ClaimApprovalPage#approve"
+          ],
+          "related_components": [
+            "CMP-A0DAC0EB04"
+          ],
+          "related_tables": [],
+          "business_rules": [
+            "project_name=access_control_workflow",
+            "client_name=si company"
+          ],
+          "dependencies": []
+        }
+      ],
+      "components": [
+        {
+          "component_id": "CMP-92AF2ECDC7",
+          "name": "FUNC001",
+          "component_type": "component",
+          "layer": "service",
+          "asset_ids": [
+            ""
+          ],
+          "responsibility_families": [
+            "business"
+          ]
+        },
+        {
+          "component_id": "CMP-A0DAC0EB04",
+          "name": "ClaimApprovalPage",
+          "component_type": "screen",
+          "layer": "ui",
+          "asset_ids": [
+            ""
+          ],
+          "responsibility_families": [
+            "business",
+            "ui_orchestration"
+          ]
+        },
+        {
+          "component_id": "CMP-3F61A04200",
+          "name": "",
+          "component_type": "table",
+          "layer": "data",
+          "asset_ids": [
+            ""
+          ],
+          "responsibility_families": [
+            "persistence"
+          ]
+        },
+        {
+          "component_id": "CMP-6A1D657A94",
+          "name": "FUNC001",
+          "component_type": "component",
+          "layer": "service",
+          "asset_ids": [
+            ""
+          ],
+          "responsibility_families": [
+            "business"
+          ]
+        },
+        {
+          "component_id": "CMP-5B13E3D3D3",
+          "name": "claims",
+          "component_type": "table",
+          "layer": "data",
+          "asset_ids": [
+            ""
+          ],
+          "responsibility_families": [
+            "business"
+          ]
+        },
+        {
+          "component_id": "CMP-AC020B8170",
+          "name": "claim_approvals",
+          "component_type": "table",
+          "layer": "data",
+          "asset_ids": [
+            ""
+          ],
+          "responsibility_families": [
+            "business"
+          ]
+        }
+      ],
+      "dependencies": [],
+      "hotspots": [
+        {
+          "component_id": "CMP-A0DAC0EB04",
+          "reasons": [
+            "multiple responsibility families"
+          ],
+          "score": 2
+        }
+      ],
+      "layer_map": [
+        {
+          "component_id": "CMP-92AF2ECDC7",
+          "layer": "service"
+        },
+        {
+          "component_id": "CMP-A0DAC0EB04",
+          "layer": "ui"
+        },
+        {
+          "component_id": "CMP-3F61A04200",
+          "layer": "data"
+        },
+        {
+          "component_id": "CMP-6A1D657A94",
+          "layer": "service"
+        },
+        {
+          "component_id": "CMP-5B13E3D3D3",
+          "layer": "data"
+        },
+        {
+          "component_id": "CMP-AC020B8170",
+          "layer": "data"
+        }
+      ],
+      "coverage_summary": {
+        "asset_count": 9,
+        "source_block_count": 9,
+        "component_count": 6,
+        "slice_count": 1,
+        "missing_context_count": 0
+      }
+    },
+    "diagnosis_report": {
+      "issues": [
+        {
+          "issue_id": "ISSUE-53B6C6EA6E",
+          "detector_id": "rule_scatter",
+          "category": "rule_distribution",
+          "severity": 4,
+          "blast_radius": 3,
+          "effort": 4,
+          "summary": "Repeated business predicate appears in multiple locations",
+          "affected_component_ids": [
+            "CMP-6A1D657A94",
+            "CMP-92AF2ECDC7"
+          ],
+          "affected_slice_ids": [
+            "global"
+          ],
+          "evidence_ids": [
+            "EVID-114CFF24D5",
+            "EVID-A268E00D87"
+          ],
+          "confidence": 0.71
+        },
+        {
+          "issue_id": "ISSUE-BA2ED63031",
+          "detector_id": "state_transition_leak",
+          "category": "workflow",
+          "severity": 4,
+          "blast_radius": 3,
+          "effort": 3,
+          "summary": "State transition logic appears in multiple locations",
+          "affected_component_ids": [
+            "CMP-6A1D657A94",
+            "CMP-92AF2ECDC7"
+          ],
+          "affected_slice_ids": [
+            "global"
+          ],
+          "evidence_ids": [
+            "EVID-31767F9CA1",
+            "EVID-32FC28FF6B",
+            "EVID-98A9C32B5A"
+          ],
+          "confidence": 0.79
+        },
+        {
+          "issue_id": "ISSUE-E6934C19E0",
+          "detector_id": "rule_scatter",
+          "category": "rule_distribution",
+          "severity": 4,
+          "blast_radius": 3,
+          "effort": 4,
+          "summary": "Repeated business predicate appears in multiple locations",
+          "affected_component_ids": [
+            "CMP-6A1D657A94",
+            "CMP-92AF2ECDC7"
+          ],
+          "affected_slice_ids": [
+            "global"
+          ],
+          "evidence_ids": [
+            "EVID-31767F9CA1",
+            "EVID-32FC28FF6B",
+            "EVID-98A9C32B5A"
+          ],
+          "confidence": 0.79
+        },
+        {
+          "issue_id": "ISSUE-1D255F06E8",
+          "detector_id": "duplicate_logic_candidate",
+          "category": "duplication",
+          "severity": 2,
+          "blast_radius": 3,
+          "effort": 2,
+          "summary": "claims and claim_approvals share highly similar logic",
+          "affected_component_ids": [
+            "CMP-5B13E3D3D3",
+            "CMP-AC020B8170"
+          ],
+          "affected_slice_ids": [
+            "global"
+          ],
+          "evidence_ids": [
+            "EVID-322430ABED",
+            "EVID-BA447CC3E0"
+          ],
+          "confidence": 0.71
+        },
+        {
+          "issue_id": "ISSUE-8428ADE8AD",
+          "detector_id": "duplicate_logic_candidate",
+          "category": "duplication",
+          "severity": 2,
+          "blast_radius": 3,
+          "effort": 2,
+          "summary": "FUNC001 and FUNC001 share highly similar logic",
+          "affected_component_ids": [
+            "CMP-6A1D657A94",
+            "CMP-92AF2ECDC7"
+          ],
+          "affected_slice_ids": [
+            "global"
+          ],
+          "evidence_ids": [
+            "EVID-B7DA024A63",
+            "EVID-E22ADD726B"
+          ],
+          "confidence": 0.71
+        }
+      ],
+      "coverage_summary": {
+        "asset_count": 9,
+        "source_block_count": 9,
+        "component_count": 6,
+        "slice_count": 1,
+        "missing_context_count": 0
+      },
+      "detector_stats": [
+        {
+          "detector_id": "mixed_responsibility",
+          "issue_count": 0,
+          "evidence_count": 0
+        },
+        {
+          "detector_id": "ui_data_access_coupling",
+          "issue_count": 0,
+          "evidence_count": 0
+        },
+        {
+          "detector_id": "rule_scatter",
+          "issue_count": 2,
+          "evidence_count": 5
+        },
+        {
+          "detector_id": "duplicate_logic_candidate",
+          "issue_count": 2,
+          "evidence_count": 4
+        },
+        {
+          "detector_id": "boundary_mismatch",
+          "issue_count": 0,
+          "evidence_count": 0
+        },
+        {
+          "detector_id": "state_transition_leak",
+          "issue_count": 1,
+          "evidence_count": 3
+        },
+        {
+          "detector_id": "validation_guard_leak",
+          "issue_count": 0,
+          "evidence_count": 0
+        },
+        {
+          "detector_id": "query_filter_leak",
+          "issue_count": 0,
+          "evidence_count": 0
+        }
+      ]
+    },
+    "decision_summary": {
+      "decisions": [
+        {
+          "decision_id": "DEC-E744F720ED",
+          "issue_ids": [
+            "ISSUE-BA2ED63031"
+          ],
+          "decision_type": "refactor",
+          "target_component_ids": [
+            "CMP-6A1D657A94",
+            "CMP-92AF2ECDC7"
+          ],
+          "priority_score": 10,
+          "score_breakdown": {
+            "severity_component": 8,
+            "blast_radius_component": 3,
+            "effort_component": 3,
+            "confidence_bonus": 1,
+            "detector_weight": 1,
+            "hotspot_bonus": 0,
+            "multi_slice_bonus": 0,
+            "redesign_bonus": 0,
+            "final_score": 10
+          },
+          "explainability": {
+            "decision_rule": "detector_id=state_transition_leak 기준으로 기본 refactor 규칙에 분기했습니다.",
+            "score_formula": "severity*2 + blast_radius*1 - effort*1 + confidence_bonus + detector_weight + hotspot_bonus + multi_slice_bonus + redesign_bonus",
+            "score_summary": "severity(4x2)=8, blast_radius(3x1)=3, effort(3x1)=3, confidence_bonus=1, detector_weight=1, hotspot_bonus=0, multi_slice_bonus=0, redesign_bonus=0, final_score=10",
+            "evidence_count": 3,
+            "affected_slice_count": 0
+          },
+          "rationale": "State transition logic appears in multiple locations. 데이터 계약 변경 없이 책임 분리 후보로 다루는 편이 적절합니다.",
+          "confidence": 0.81,
+          "evidence_ids": [
+            "EVID-31767F9CA1",
+            "EVID-32FC28FF6B",
+            "EVID-98A9C32B5A"
+          ]
+        },
+        {
+          "decision_id": "DEC-BAF636B89E",
+          "issue_ids": [
+            "ISSUE-E6934C19E0"
+          ],
+          "decision_type": "refactor",
+          "target_component_ids": [
+            "CMP-6A1D657A94",
+            "CMP-92AF2ECDC7"
+          ],
+          "priority_score": 9,
+          "score_breakdown": {
+            "severity_component": 8,
+            "blast_radius_component": 3,
+            "effort_component": 4,
+            "confidence_bonus": 1,
+            "detector_weight": 1,
+            "hotspot_bonus": 0,
+            "multi_slice_bonus": 0,
+            "redesign_bonus": 0,
+            "final_score": 9
+          },
+          "explainability": {
+            "decision_rule": "detector_id=rule_scatter 기준으로 기본 refactor 규칙에 분기했습니다.",
+            "score_formula": "severity*2 + blast_radius*1 - effort*1 + confidence_bonus + detector_weight + hotspot_bonus + multi_slice_bonus + redesign_bonus",
+            "score_summary": "severity(4x2)=8, blast_radius(3x1)=3, effort(4x1)=4, confidence_bonus=1, detector_weight=1, hotspot_bonus=0, multi_slice_bonus=0, redesign_bonus=0, final_score=9",
+            "evidence_count": 3,
+            "affected_slice_count": 0
+          },
+          "rationale": "Repeated business predicate appears in multiple locations. 데이터 계약 변경 없이 책임 분리 후보로 다루는 편이 적절합니다.",
+          "confidence": 0.81,
+          "evidence_ids": [
+            "EVID-31767F9CA1",
+            "EVID-32FC28FF6B",
+            "EVID-98A9C32B5A"
+          ]
+        },
+        {
+          "decision_id": "DEC-D14A260C2F",
+          "issue_ids": [
+            "ISSUE-53B6C6EA6E"
+          ],
+          "decision_type": "refactor",
+          "target_component_ids": [
+            "CMP-6A1D657A94",
+            "CMP-92AF2ECDC7"
+          ],
+          "priority_score": 8,
+          "score_breakdown": {
+            "severity_component": 8,
+            "blast_radius_component": 3,
+            "effort_component": 4,
+            "confidence_bonus": 0,
+            "detector_weight": 1,
+            "hotspot_bonus": 0,
+            "multi_slice_bonus": 0,
+            "redesign_bonus": 0,
+            "final_score": 8
+          },
+          "explainability": {
+            "decision_rule": "detector_id=rule_scatter 기준으로 기본 refactor 규칙에 분기했습니다.",
+            "score_formula": "severity*2 + blast_radius*1 - effort*1 + confidence_bonus + detector_weight + hotspot_bonus + multi_slice_bonus + redesign_bonus",
+            "score_summary": "severity(4x2)=8, blast_radius(3x1)=3, effort(4x1)=4, confidence_bonus=0, detector_weight=1, hotspot_bonus=0, multi_slice_bonus=0, redesign_bonus=0, final_score=8",
+            "evidence_count": 2,
+            "affected_slice_count": 0
+          },
+          "rationale": "Repeated business predicate appears in multiple locations. 데이터 계약 변경 없이 책임 분리 후보로 다루는 편이 적절합니다.",
+          "confidence": 0.73,
+          "evidence_ids": [
+            "EVID-114CFF24D5",
+            "EVID-A268E00D87"
+          ]
+        },
+        {
+          "decision_id": "DEC-57C739696E",
+          "issue_ids": [
+            "ISSUE-1D255F06E8"
+          ],
+          "decision_type": "refactor",
+          "target_component_ids": [
+            "CMP-5B13E3D3D3",
+            "CMP-AC020B8170"
+          ],
+          "priority_score": 4,
+          "score_breakdown": {
+            "severity_component": 4,
+            "blast_radius_component": 3,
+            "effort_component": 2,
+            "confidence_bonus": 0,
+            "detector_weight": -1,
+            "hotspot_bonus": 0,
+            "multi_slice_bonus": 0,
+            "redesign_bonus": 0,
+            "final_score": 4
+          },
+          "explainability": {
+            "decision_rule": "detector_id=duplicate_logic_candidate 기준으로 기본 refactor 규칙에 분기했습니다.",
+            "score_formula": "severity*2 + blast_radius*1 - effort*1 + confidence_bonus + detector_weight + hotspot_bonus + multi_slice_bonus + redesign_bonus",
+            "score_summary": "severity(2x2)=4, blast_radius(3x1)=3, effort(2x1)=2, confidence_bonus=0, detector_weight=-1, hotspot_bonus=0, multi_slice_bonus=0, redesign_bonus=0, final_score=4",
+            "evidence_count": 2,
+            "affected_slice_count": 0
+          },
+          "rationale": "claims and claim_approvals share highly similar logic. 데이터 계약 변경 없이 책임 분리 후보로 다루는 편이 적절합니다.",
+          "confidence": 0.73,
+          "evidence_ids": [
+            "EVID-322430ABED",
+            "EVID-BA447CC3E0"
+          ]
+        },
+        {
+          "decision_id": "DEC-967391B9F4",
+          "issue_ids": [
+            "ISSUE-8428ADE8AD"
+          ],
+          "decision_type": "refactor",
+          "target_component_ids": [
+            "CMP-6A1D657A94",
+            "CMP-92AF2ECDC7"
+          ],
+          "priority_score": 4,
+          "score_breakdown": {
+            "severity_component": 4,
+            "blast_radius_component": 3,
+            "effort_component": 2,
+            "confidence_bonus": 0,
+            "detector_weight": -1,
+            "hotspot_bonus": 0,
+            "multi_slice_bonus": 0,
+            "redesign_bonus": 0,
+            "final_score": 4
+          },
+          "explainability": {
+            "decision_rule": "detector_id=duplicate_logic_candidate 기준으로 기본 refactor 규칙에 분기했습니다.",
+            "score_formula": "severity*2 + blast_radius*1 - effort*1 + confidence_bonus + detector_weight + hotspot_bonus + multi_slice_bonus + redesign_bonus",
+            "score_summary": "severity(2x2)=4, blast_radius(3x1)=3, effort(2x1)=2, confidence_bonus=0, detector_weight=-1, hotspot_bonus=0, multi_slice_bonus=0, redesign_bonus=0, final_score=4",
+            "evidence_count": 2,
+            "affected_slice_count": 0
+          },
+          "rationale": "FUNC001 and FUNC001 share highly similar logic. 데이터 계약 변경 없이 책임 분리 후보로 다루는 편이 적절합니다.",
+          "confidence": 0.73,
+          "evidence_ids": [
+            "EVID-B7DA024A63",
+            "EVID-E22ADD726B"
+          ]
+        }
+      ],
+      "recommended_strategy": "리팩터링 우선",
+      "priority_queue": [
+        "DEC-E744F720ED",
+        "DEC-BAF636B89E",
+        "DEC-D14A260C2F",
+        "DEC-57C739696E",
+        "DEC-967391B9F4"
+      ]
+    },
+    "improvement_plan_bundle": {
+      "design_options": [
+        {
+          "name": "옵션 A. 승인 흐름 중심 모듈형 구조",
+          "structure_summary": "승인 트리거, 승인 주체, 단계별 의사결정 게이트를 별도 워크플로우 계층으로 분리하고 API는 승인 결과만 반영하도록 구성합니다.",
+          "advantages": [
+            "승인 트리거와 승인 주체를 같은 워크플로우 기준으로 유지해야 합니다.",
+            "단계별 승인 순서와 예외 승인 흐름을 함께 고정해야 합니다."
+          ],
+          "risks": [
+            "승인 단계와 예외 승인 경계가 흐리면 승인 누락이 다시 발생할 수 있습니다."
+          ],
+          "difficulty": "MEDIUM",
+          "duration_weeks": 5,
+          "recommended": true,
+          "selection_reason": "이 샘플에서는 의사결정 게이트, 승인 주체 분리 규칙이 직접 확인되었습니다. 따라서 승인 트리거, 승인 주체, 승인 단계 구조를 중심으로 통제할 수 있는 구조를 기준으로 승인 흐름 중심 모듈형 구조를 우선 적용해야 합니다. 이 방식은 승인 경로와 처리 순서, 승인 권한 체계 계약을 유지하면서도 구현 범위를 통제해야 하는 현재 조건과 충돌하지 않습니다. 다른 옵션보다 승인 트리거, 승인 주체, 단계별 의사결정 게이트를 같은 워크플로우 계층으로 고정해야 하므로 승인 흐름 중심 모듈형 구조를 우선 적용해야 합니다."
+        },
+        {
+          "name": "옵션 B. 단계 분리형 승인 구조",
+          "structure_summary": "단일 승인과 다단계 승인을 별도 단계 모듈로 나누고 승인 주체 정책은 각 단계에서 공통으로 적용합니다.",
+          "advantages": [
+            "다단계 승인 구조를 독립적으로 추적하기 쉽습니다."
+          ],
+          "risks": [
+            "단계 간 상태 전달 규칙이 늘어나면 관리 비용이 커질 수 있습니다."
+          ],
+          "difficulty": "MEDIUM",
+          "duration_weeks": 6,
+          "recommended": false,
+          "selection_reason": "단계 분리형 승인 구조는 일부 승인 흐름에는 유효하지만 이번 승인 구조 중심 워크플로우보다 뒤에 두어야 합니다."
+        },
+        {
+          "name": "옵션 C. 예외 승인 분리형 구조",
+          "structure_summary": "일반 승인 흐름과 대리 승인, 긴급 승인, 자동 승인 경로를 분리하고 승인 주체는 공통 정책으로 적용합니다.",
+          "advantages": [
+            "예외 흐름을 별도로 통제하기 쉽습니다."
+          ],
+          "risks": [
+            "예외 승인 경로가 늘어나면 일반 승인 흐름과의 정합성 비용이 커질 수 있습니다."
+          ],
+          "difficulty": "HIGH",
+          "duration_weeks": 6,
+          "recommended": false,
+          "selection_reason": "예외 승인 분리형 구조는 일부 승인 흐름에는 유효하지만 이번 승인 구조 중심 워크플로우보다 뒤에 두어야 합니다."
+        }
+      ],
+      "recommended_option": {
+        "name": "옵션 A. 승인 흐름 중심 모듈형 구조",
+        "structure_summary": "승인 트리거, 승인 주체, 단계별 의사결정 게이트를 별도 워크플로우 계층으로 분리하고 API는 승인 결과만 반영하도록 구성합니다.",
+        "selection_reason": "이 샘플에서는 의사결정 게이트, 승인 주체 분리 규칙이 직접 확인되었습니다. 따라서 승인 트리거, 승인 주체, 승인 단계 구조를 중심으로 통제할 수 있는 구조를 기준으로 승인 흐름 중심 모듈형 구조를 우선 적용해야 합니다. 이 방식은 승인 경로와 처리 순서, 승인 권한 체계 계약을 유지하면서도 구현 범위를 통제해야 하는 현재 조건과 충돌하지 않습니다. 다른 옵션보다 승인 트리거, 승인 주체, 단계별 의사결정 게이트를 같은 워크플로우 계층으로 고정해야 하므로 승인 흐름 중심 모듈형 구조를 우선 적용해야 합니다.",
+        "expected_outcomes": [
+          "핵심 규칙과 정책 분리를 우선 완료해야 합니다.",
+          "기존 데이터 계약을 유지한 상태에서 단계적 전환 순서를 고정해야 합니다."
+        ]
+      },
+      "execution_stages": [
+        {
+          "stage_id": "STAGE-AA0067B8FB",
+          "title": "승인 트리거와 승인 주체 규칙을 구조화합니다.",
+          "tasks": [
+            "승인 시작 조건과 승인 요청 트리거를 워크플로우 규칙 표로 정리합니다.",
+            "승인 주체와 승인 권한 관계를 승인 주체 매트릭스로 고정합니다."
+          ],
+          "decision_ids": [
+            "DEC-E744F720ED",
+            "DEC-BAF636B89E"
+          ],
+          "verification_checkpoint_ids": [
+            "VERIFY-8FE0ACA1DC"
+          ],
+          "risk_ids": [
+            "RISK-29D3813D5C",
+            "RISK-FAF2BE72A0"
+          ],
+          "depends_on": []
+        },
+        {
+          "stage_id": "STAGE-21C1CECAC5",
+          "title": "승인 흐름 중심 모듈형 구조 기준으로 승인 단계 구조와 의사결정 게이트를 설계합니다.",
+          "tasks": [
+            "단계별 승인 순서와 조건부 승인 분기를 워크플로우 단계 구조로 정의합니다.",
+            "승인, 반려, 보류 게이트를 단계별 워크플로우 결과로 분리합니다."
+          ],
+          "decision_ids": [
+            "DEC-BAF636B89E",
+            "DEC-D14A260C2F"
+          ],
+          "verification_checkpoint_ids": [
+            "VERIFY-8FE0ACA1DC"
+          ],
+          "risk_ids": [
+            "RISK-89C6CFC3ED",
+            "RISK-C57DBD7F78"
+          ],
+          "depends_on": [
+            "STAGE-AA0067B8FB"
+          ]
+        },
+        {
+          "stage_id": "STAGE-30A49718B5",
+          "title": "청구 조정 승인 API와 워크플로우 서비스에 승인 규칙을 반영합니다.",
+          "tasks": [
+            "승인 주체 규칙과 단계별 승인 순서를 워크플로우 서비스 호출로 반영합니다.",
+            "대리 승인, 긴급 승인, 자동 승인 경로를 예외 워크플로우 결과로 분리합니다."
+          ],
+          "decision_ids": [
+            "DEC-D14A260C2F",
+            "DEC-57C739696E"
+          ],
+          "verification_checkpoint_ids": [
+            "VERIFY-8FE0ACA1DC"
+          ],
+          "risk_ids": [
+            "RISK-18EB7C46F7",
+            "RISK-A6B079F18E"
+          ],
+          "depends_on": [
+            "STAGE-21C1CECAC5"
+          ]
+        },
+        {
+          "stage_id": "STAGE-748E7FE4D2",
+          "title": "청구 조정 승인 화면과 승인 단계 안내를 워크플로우 기준으로 정렬합니다.",
+          "tasks": [
+            "승인 단계 안내와 승인 주체 메시지를 워크플로우 결과와 맞춰 정렬합니다.",
+            "승인 버튼 노출과 예외 승인 안내가 유지 계약과 일치하는지 확인합니다."
+          ],
+          "decision_ids": [
+            "DEC-57C739696E",
+            "DEC-967391B9F4"
+          ],
+          "verification_checkpoint_ids": [
+            "VERIFY-8FE0ACA1DC"
+          ],
+          "risk_ids": [
+            "RISK-E47AEA17D7",
+            "RISK-F833304126"
+          ],
+          "depends_on": [
+            "STAGE-30A49718B5"
+          ]
+        },
+        {
+          "stage_id": "STAGE-987DA224CB",
+          "title": "청구 조정 상태 전이와 승인 흐름 통합 기준을 확정합니다.",
+          "tasks": [
+            "승인 완료, 반려, 보류 결과가 상태 전이와 어떻게 연결되는지 통합 규칙으로 고정합니다.",
+            "워크플로우 결과와 상태 전이 결과가 충돌하지 않는지 통합 시나리오로 확인합니다."
+          ],
+          "decision_ids": [
+            "DEC-967391B9F4"
+          ],
+          "verification_checkpoint_ids": [
+            "VERIFY-8FE0ACA1DC"
+          ],
+          "risk_ids": [
+            "RISK-AF986891E2",
+            "RISK-826C0BF643"
+          ],
+          "depends_on": [
+            "STAGE-748E7FE4D2"
+          ]
+        }
+      ],
+      "risk_checkpoints": [
+        {
+          "checkpoint_id": "RISK-F476C684D8",
+          "title": "승인 트리거와 승인 주체 규칙이 분산되면 승인 누락이 발생할 수 있습니다.",
+          "description": "승인 트리거와 승인 주체 규칙이 분산되면 승인 누락이 발생할 수 있습니다.",
+          "decision_ids": [
+            "DEC-E744F720ED"
+          ]
+        },
+        {
+          "checkpoint_id": "RISK-63D9034833",
+          "title": "의사결정 분기 조건 규칙이 누락되면 청구 조정 핵심 흐름을 잘못 재현할 수 있습니다.",
+          "description": "의사결정 분기 조건 규칙이 누락되면 청구 조정 핵심 흐름을 잘못 재현할 수 있습니다.",
+          "decision_ids": [
+            "DEC-E744F720ED"
+          ]
+        },
+        {
+          "checkpoint_id": "RISK-B1A1B59398",
+          "title": "승인 경로와 처리 순서 계약은 유지하는 것이 필요합니다. 계약이 흔들리면 기존 처리 조건과 화면 표시가 어긋",
+          "description": "승인 경로와 처리 순서 계약은 유지하는 것이 필요합니다. 계약이 흔들리면 기존 처리 조건과 화면 표시가 어긋날 수 있습니다.",
+          "decision_ids": [
+            "DEC-E744F720ED"
+          ]
+        },
+        {
+          "checkpoint_id": "RISK-DBA4CBBD86",
+          "title": "대리 승인 범위와 병렬 승인 가능 조건을 확인하는 것이 필요합니다.",
+          "description": "승인 트리거와 승인 주체는 직접 확인되었지만 대리 승인 범위와 병렬 승인 조건은 추가 확인이 필요합니다.",
+          "decision_ids": [
+            "DEC-E744F720ED"
+          ]
+        },
+        {
+          "checkpoint_id": "RISK-86DFBA122D",
+          "title": "승인 단계별 통지와 후속 처리 절차를 확인하는 것이 필요합니다.",
+          "description": "승인 단계 구조는 보이지만 단계별 통지와 후속 처리 절차는 현재 자산만으로 모두 확정할 수 없습니다.",
+          "decision_ids": [
+            "DEC-E744F720ED"
+          ]
+        }
+      ]
+    },
+    "appendix": {
+      "evidence_index": [
+        {
+          "evidence_id": "EVID-114CFF24D5",
+          "asset_id": "",
+          "asset_name": "claim_approval_service.py",
+          "asset_type": "source",
+          "locator": "line:2",
+          "excerpt": "if claim[\"amount\"] >= 10000000 and user[\"dept\"] != \"CLAIM_AUDIT\":",
+          "fingerprint": "if claim[\"STR\"] >= NUM and user[\"STR\"] != \"STR\":"
+        },
+        {
+          "evidence_id": "EVID-31767F9CA1",
+          "asset_id": "",
+          "asset_name": "approval_policy.py",
+          "asset_type": "source",
+          "locator": "line:5",
+          "excerpt": "if claim[\"status\"] == \"REQUESTED\" and user[\"role\"] == \"TEAM_LEAD\":",
+          "fingerprint": "if claim[\"STR\"] == \"STR\" and user[\"STR\"] == \"STR\":"
+        },
+        {
+          "evidence_id": "EVID-322430ABED",
+          "asset_id": "",
+          "asset_name": "schema.sql",
+          "asset_type": "schema",
+          "locator": "CMP-5B13E3D3D3:duplicate_logic",
+          "excerpt": "CREATE TABLE claims (",
+          "fingerprint": "create table claims ("
+        },
+        {
+          "evidence_id": "EVID-32FC28FF6B",
+          "asset_id": "",
+          "asset_name": "claim_approval_service.py",
+          "asset_type": "source",
+          "locator": "line:5",
+          "excerpt": "if claim[\"status\"] == \"REQUESTED\" and user[\"role\"] == \"TEAM_LEAD\":",
+          "fingerprint": "if claim[\"STR\"] == \"STR\" and user[\"STR\"] == \"STR\":"
+        },
+        {
+          "evidence_id": "EVID-98A9C32B5A",
+          "asset_id": "",
+          "asset_name": "approval_policy.py",
+          "asset_type": "source",
+          "locator": "line:9",
+          "excerpt": "if claim[\"status\"] == \"TEAM_LEAD_APPROVED\" and user[\"role\"] == \"AUDITOR\":",
+          "fingerprint": "if claim[\"STR\"] == \"STR\" and user[\"STR\"] == \"STR\":"
+        },
+        {
+          "evidence_id": "EVID-A268E00D87",
+          "asset_id": "",
+          "asset_name": "approval_policy.py",
+          "asset_type": "source",
+          "locator": "line:2",
+          "excerpt": "if claim[\"amount\"] >= 10000000 and user[\"dept\"] != \"CLAIM_AUDIT\":",
+          "fingerprint": "if claim[\"STR\"] >= NUM and user[\"STR\"] != \"STR\":"
+        },
+        {
+          "evidence_id": "EVID-B7DA024A63",
+          "asset_id": "",
+          "asset_name": "approval_policy.py",
+          "asset_type": "source",
+          "locator": "CMP-92AF2ECDC7:duplicate_logic",
+          "excerpt": "def (claim, user):",
+          "fingerprint": "def ( claim, user ):"
+        },
+        {
+          "evidence_id": "EVID-BA447CC3E0",
+          "asset_id": "",
+          "asset_name": "schema.sql",
+          "asset_type": "schema",
+          "locator": "CMP-AC020B8170:duplicate_logic",
+          "excerpt": "CREATE TABLE claims (",
+          "fingerprint": "create table claims ("
+        },
+        {
+          "evidence_id": "EVID-E22ADD726B",
+          "asset_id": "",
+          "asset_name": "claim_approval_service.py",
+          "asset_type": "source",
+          "locator": "CMP-6A1D657A94:duplicate_logic",
+          "excerpt": "def (claim, user):",
+          "fingerprint": "def ( claim, user ):"
+        }
+      ]
+    }
+  }
+}

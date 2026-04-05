@@ -1,0 +1,54 @@
+sample_id: 01_crud_simple
+source_documents:
+  human_review_sample: notes/human_review_result_sample.md
+  source_type: human_review_output_reference
+assertions:
+  deterministic_core:
+    primary_judgment: query_filter
+    structural_judgment: observation_only
+    selected_narrative_judgment: query_filter
+    report_purpose: 조회 조건, 필터 조합, 정렬 및 결과 구성 규칙을 분석하기 위한 보고서입니다.
+    recommended_strategy: 리팩터링 우선
+    first_entry_point: ui:CrudPage#submit
+    top_decision_type: null
+    top_priority_score: null
+    decision_count: 0
+    feature_slice_count: 1
+  stable_hashes:
+    execution_plan: 818203dc7ef44a65ddc9fa0977b7ee96dc609fd0
+    design_options: 805cae182091d43459516618a305ad0bea8319cd
+    recommended_option: 5e323229e3641d50aa3ec151622b02ae60db5977
+  issue_expectations:
+    must_include_detectors: []
+    must_not_include_detectors:
+      - boundary_mismatch
+      - duplicate_logic_candidate
+      - mixed_responsibility
+      - state_transition_leak
+      - validation_guard_leak
+  planning_expectations:
+    recommended_option_title: "옵션 A. 조회 모델 중심 모듈형 구조"
+    execution_stage_count: 4
+    first_execution_stage_title: "1주차"
+    last_execution_stage_title: "4주차"
+    must_link_decision_ids: true
+  ai_narrative_expectations:
+    allowed_to_change_fields:
+      - report_purpose
+      - primary_judgment_reason
+      - one_line_conclusion
+      - executive_summary_v2
+    deterministic_fields_must_match: true
+  draft_notes:
+    status: promoted_expansion_regression
+    sample_role: expansion_candidate
+    current_report_purpose: 조회 조건, 필터 조합, 정렬 및 결과 구성 규칙을 분석하기 위한 보고서입니다.
+    promotion_reason:
+      - low-signal 샘플에서도 structural_judgment와 narrative_axis가 분리되는지 검증한다.
+      - decision_count 0인 경우에도 설명 surface가 구조 판단을 과장하지 않는지 고정한다.
+    measured_behavior:
+      - detector가 발생하지 않는 저강도 CRUD/query sample로 정리됐다.
+      - query/filter 중심 read path가 narrative를 주도하고, structural decision은 발생하지 않는다.
+    inferred_from_markdown:
+      - human review markdown는 참고 문서이며 measured anchor의 직접 source가 아니다.
+      - execution plan anchor는 prose equality가 아니라 stage count와 경계 title을 사용한다.

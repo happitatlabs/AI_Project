@@ -93,7 +93,11 @@ def diagnose_dependencies(
 
     for key, req_path in check_targets:
         if not req_path.exists() and key == "mellow_link":
-            req_path = base_dir / "mellow_link" / "requirements.txt"
+            candidates = [
+                base_dir / "core" / "mellow_link" / "requirements.txt",
+                base_dir / "mellow_link" / "requirements.txt",
+            ]
+            req_path = next((candidate for candidate in candidates if candidate.exists()), candidates[0])
 
         packages = parse_requirements_file(req_path)
         if packages:

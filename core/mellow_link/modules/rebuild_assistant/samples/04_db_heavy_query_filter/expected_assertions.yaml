@@ -1,0 +1,47 @@
+sample_id: 04_db_heavy_query_filter
+assertions:
+  deterministic_core:
+    primary_judgment: query_filter
+    structural_judgment: refactor
+    selected_narrative_judgment: query_filter
+    report_purpose: 조회 조건, 필터 조합, 정렬 및 결과 구성 규칙을 분석하기 위한 보고서입니다.
+    recommended_strategy: 리팩터링 우선
+    first_entry_point: usecase:db_heavy_query
+    top_decision_type: refactor
+    top_priority_score: 6
+    decision_count: 3
+    feature_slice_count: 1
+  stable_hashes:
+    execution_plan: 7304a391520041a11ff277be528be461ebd65172
+    design_options: 805cae182091d43459516618a305ad0bea8319cd
+    recommended_option: 5e323229e3641d50aa3ec151622b02ae60db5977
+  issue_expectations:
+    must_include_detectors:
+      - duplicate_logic_candidate
+      - query_filter_leak
+    must_not_include_detectors:
+      - mixed_responsibility
+      - state_transition_leak
+  planning_expectations:
+    recommended_option_title: "옵션 A. 조회 모델 중심 모듈형 구조"
+    execution_stage_count: 4
+    first_execution_stage_title: "1주차"
+    last_execution_stage_title: "4주차"
+    must_link_decision_ids: true
+  ai_narrative_expectations:
+    allowed_to_change_fields:
+      - report_purpose
+      - primary_judgment_reason
+      - one_line_conclusion
+      - executive_summary_v2
+    deterministic_fields_must_match: true
+  draft_notes:
+    status: promoted_expansion_regression
+    sample_role: expansion_candidate
+    current_report_purpose: 조회 조건, 필터 조합, 정렬 및 결과 구성 규칙을 분석하기 위한 보고서입니다.
+    promotion_reason:
+      - query_filter_leak 기반 refactor 판단과 planning linkage가 안정적인지 검증한다.
+      - query/filter 축의 중간 강도 detector overlap을 promoted regression으로 고정한다.
+    measured_behavior:
+      - query_filter_leak가 top decision으로 연결되고 recommended option도 조회 모델 중심 구조로 수렴한다.
+      - duplicate query가 함께 존재해 duplicate_logic_candidate가 보조 detector로 유지된다.

@@ -1,0 +1,188 @@
+{
+  "version": "phase3-qa-v1",
+  "delivery_mode_applied": false,
+  "notes": [
+    "audience changes wording only; canonical facts and citations must remain unchanged",
+    "questions are designed for POST /projects/{project_id}/result/qa",
+    "run audience invariance checks with developer, manager, client"
+  ],
+  "common_audience_invariance_checks": [
+    {
+      "id": "priority-invariance",
+      "question": "왜 이게 우선순위가 높아?",
+      "intent": "priority",
+      "audiences": ["developer", "manager", "client"],
+      "must_match": ["priority_score", "score_breakdown", "citations", "referenced_sections"],
+      "may_vary": ["answer_tone", "answer_length"]
+    },
+    {
+      "id": "evidence-invariance",
+      "question": "이 판단의 직접 근거는 뭐야?",
+      "intent": "evidence",
+      "audiences": ["developer", "manager", "client"],
+      "must_match": ["citations", "locator", "excerpt", "referenced_sections"],
+      "may_vary": ["answer_tone", "answer_length"]
+    },
+    {
+      "id": "execution-invariance",
+      "question": "실행 단계는 어떻게 잡혀 있어?",
+      "intent": "execution",
+      "audiences": ["developer", "manager", "client"],
+      "must_match": ["stage_title", "citations", "referenced_sections"],
+      "may_vary": ["answer_tone", "answer_length"]
+    }
+  ],
+  "sample_question_sets": [
+    {
+      "sample_name": "00. rca_exception_case_01",
+      "focus": "workflow narrative and redesign",
+      "questions": [
+        {
+          "id": "strategy-redesign",
+          "intent": "strategy",
+          "question": "왜 refactor가 아니라 redesign이야?",
+          "audience": "manager",
+          "expected_referenced_sections": ["decision_summary", "diagnosis_report"],
+          "expect_citations": true
+        },
+        {
+          "id": "evidence-workflow",
+          "intent": "evidence",
+          "question": "가장 큰 구조 문제의 직접 근거는 뭐야?",
+          "audience": "developer",
+          "expected_referenced_sections": ["appendix", "diagnosis_report"],
+          "expect_citations": true
+        },
+        {
+          "id": "execution-workflow",
+          "intent": "execution",
+          "question": "첫 실행 단계가 workflow 관점에서 왜 필요한 거야?",
+          "audience": "client",
+          "expected_referenced_sections": ["improvement_plan_bundle"],
+          "expect_citations": true
+        }
+      ]
+    },
+    {
+      "sample_name": "01. java_order_closure_case_01",
+      "focus": "state transition and ui/data coupling",
+      "questions": [
+        {
+          "id": "strategy-refactor",
+          "intent": "strategy",
+          "question": "왜 이게 리팩터링 우선이야?",
+          "audience": "manager",
+          "expected_referenced_sections": ["decision_summary", "diagnosis_report"],
+          "expect_citations": true
+        },
+        {
+          "id": "evidence-state-transition",
+          "intent": "evidence",
+          "question": "상태 전이 기준에서 어떤 근거가 잡혔어?",
+          "audience": "developer",
+          "expected_referenced_sections": ["appendix", "diagnosis_report"],
+          "expect_citations": true
+        },
+        {
+          "id": "execution-first-split",
+          "intent": "execution",
+          "question": "첫 단계에서 어떤 책임을 분리해야 해?",
+          "audience": "manager",
+          "expected_referenced_sections": ["improvement_plan_bundle"],
+          "expect_citations": true
+        }
+      ]
+    },
+    {
+      "sample_name": "02. python_claim_adjustment_case_01",
+      "focus": "access control narrative and redesign",
+      "questions": [
+        {
+          "id": "strategy-access-control",
+          "intent": "strategy",
+          "question": "권한 구조 때문에 왜 redesign이 필요한 거야?",
+          "audience": "manager",
+          "expected_referenced_sections": ["decision_summary", "diagnosis_report"],
+          "expect_citations": true
+        },
+        {
+          "id": "evidence-organization-scope",
+          "intent": "evidence",
+          "question": "조직별 처리 범위가 어디서 확인됐어?",
+          "audience": "client",
+          "expected_referenced_sections": ["appendix", "diagnosis_report"],
+          "expect_citations": true
+        },
+        {
+          "id": "priority-why-high",
+          "intent": "priority",
+          "question": "왜 이 판단의 우선순위가 높아?",
+          "audience": "developer",
+          "expected_referenced_sections": ["decision_summary"],
+          "expect_citations": true
+        }
+      ]
+    },
+    {
+      "sample_name": "04. amount_limit",
+      "focus": "amount threshold and low-scope refactor",
+      "questions": [
+        {
+          "id": "priority-score-nine",
+          "intent": "priority",
+          "question": "왜 우선순위가 9야?",
+          "audience": "manager",
+          "expected_referenced_sections": ["decision_summary"],
+          "expect_citations": true
+        },
+        {
+          "id": "evidence-amount-limit",
+          "intent": "evidence",
+          "question": "금액 기준 관련 직접 근거는 뭐야?",
+          "audience": "developer",
+          "expected_referenced_sections": ["appendix", "diagnosis_report"],
+          "expect_citations": true
+        },
+        {
+          "id": "strategy-why-not-redesign",
+          "intent": "strategy",
+          "question": "이건 왜 redesign이 아니라 refactor야?",
+          "audience": "client",
+          "expected_referenced_sections": ["decision_summary", "diagnosis_report"],
+          "expect_citations": true
+        }
+      ]
+    },
+    {
+      "sample_name": "01_success_full",
+      "focus": "accounting extension and no false structural decision",
+      "questions": [
+        {
+          "id": "scope-accounting",
+          "intent": "scope",
+          "question": "이번 분석 범위는 어디까지야?",
+          "audience": "manager",
+          "expected_referenced_sections": ["structure_snapshot", "appendix"],
+          "expect_citations": false
+        },
+        {
+          "id": "execution-accounting",
+          "intent": "execution",
+          "question": "실행 계획은 어떻게 정리됐어?",
+          "audience": "developer",
+          "expected_referenced_sections": ["improvement_plan_bundle"],
+          "expect_citations": true
+        },
+        {
+          "id": "strategy-accounting-centered",
+          "intent": "strategy",
+          "question": "구조 판단보다 회계 계산 검토가 왜 중심이야?",
+          "audience": "client",
+          "expected_referenced_sections": ["decision_summary", "diagnosis_report"],
+          "expect_citations": false,
+          "expect_insufficient_grounding": true
+        }
+      ]
+    }
+  ]
+}
