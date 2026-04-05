@@ -18,16 +18,30 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+
+def _pick_existing_path(*candidates: Path) -> Path:
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
 # Setup paths
 PROJECT_ROOT = Path(__file__).parent
-MELLOW_LINK_ROOT = PROJECT_ROOT / "mellow_link"
+MELLOW_LINK_ROOT = _pick_existing_path(
+    PROJECT_ROOT / "core" / "mellow_link",
+    PROJECT_ROOT / "mellow_link",
+)
 sys.path.insert(0, str(PROJECT_ROOT))
 
 # Test environment paths
 TEST_ROOT = PROJECT_ROOT / "mellow_link_test"
 WORKSPACE_TEST = TEST_ROOT / "workspace_test"
 OUTPUTS_TEST = TEST_ROOT / "outputs_test"
-OUTSIDE_ROOT = PROJECT_ROOT / "redteam_outside_root"
+OUTSIDE_ROOT = _pick_existing_path(
+    PROJECT_ROOT / "experiments" / "redteam_outside_root",
+    PROJECT_ROOT / "redteam_outside_root",
+)
 
 # Configure logging
 logging.basicConfig(

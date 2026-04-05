@@ -1,0 +1,46 @@
+{
+  "transactions": [
+    {
+      "tx_id": "T1",
+      "tx_type": "BUY_FX",
+      "currency": "USD",
+      "amount_fc": 100,
+      "rate": 1200,
+      "occurred_at": "2026-03-01"
+    }
+  ],
+  "exchange_rates": [
+    {
+      "rate_date": "2026-03-01",
+      "currency": "USD",
+      "rate": 1200
+    }
+  ],
+  "policies": [
+    {
+      "policy_id": "P1",
+      "fx_cost_method": "MOVING_AVERAGE"
+    },
+    {
+      "policy_id": "P2",
+      "fx_cost_method": "FIFO"
+    }
+  ],
+  "strict": false,
+  "vouchers": [
+    {
+      "voucher_id": "V1",
+      "source_tx_ids": [
+        "T1"
+      ],
+      "debit": 120000,
+      "credit": 120000
+    }
+  ],
+  "account_mappings": [
+    {
+      "account": "FX_GAIN",
+      "type": "gain"
+    }
+  ]
+}

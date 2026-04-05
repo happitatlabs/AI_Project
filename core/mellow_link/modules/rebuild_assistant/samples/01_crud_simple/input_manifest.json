@@ -1,0 +1,48 @@
+{
+  "sample_id": "01_crud_simple",
+  "title": "CRUD 단순형",
+  "category": "crud_simple",
+  "description": "기본 CRUD 흐름에서 과잉 detector 없이 안정적인 feature slice / refactor 판단을 고정 검증",
+  "assets": [
+    {
+      "name": "crud_controller.py",
+      "type": "code",
+      "path": "assets/crud_controller.py",
+      "purpose": "목록/상세/생성/수정/삭제 endpoint 진입점 예시"
+    },
+    {
+      "name": "crud_repository.sql",
+      "type": "sql",
+      "path": "assets/crud_repository.sql",
+      "purpose": "기본 조회/상세/등록/수정/삭제 query 예시"
+    },
+    {
+      "name": "crud_page.html",
+      "type": "ui",
+      "path": "assets/crud_page.html",
+      "purpose": "목록/필터/등록 버튼이 있는 단일 화면 예시"
+    },
+    {
+      "name": "schema.sql",
+      "type": "schema",
+      "path": "assets/schema.sql",
+      "purpose": "reports 테이블 구조"
+    },
+    {
+      "name": "usecase.md",
+      "type": "doc",
+      "path": "assets/usecase.md",
+      "purpose": "샘플 기능 흐름과 기대 포인트 설명"
+    }
+  ],
+  "expected_focus": {
+    "feature_slices": 1,
+    "primary_judgment": "query_filter",
+    "top_decision_type": "none",
+    "notes": [
+      "이 샘플은 권한/승인/복합 정책을 제외한 저강도 CRUD 흐름을 목표로 한다.",
+      "현재 measured output은 detector 0개, query_filter narrative, refactor strategy로 수렴한다.",
+      "notes/human_review_result_sample.md는 사람이 읽는 참고 문서이며 regression source가 아니다."
+    ]
+  }
+}

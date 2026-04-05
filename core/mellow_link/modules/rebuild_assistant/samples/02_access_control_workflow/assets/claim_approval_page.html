@@ -1,0 +1,8 @@
+<section class="claim-approval">
+  <h1>Claim Approval</h1>
+  <div data-condition="currentRole == 'TEAM_LEAD' && claim.status == 'REQUESTED'">Approve as Team Lead</div>
+  <div data-condition="currentRole == 'AUDITOR' && claim.status == 'TEAM_LEAD_APPROVED'">Approve as Auditor</div>
+  <button data-action="approve-team-lead">Team Lead Approve</button>
+  <button data-action="approve-audit">Audit Approve</button>
+  <button data-action="reject">Reject</button>
+</section>

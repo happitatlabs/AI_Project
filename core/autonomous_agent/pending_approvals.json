@@ -1,0 +1,28 @@
+[
+  {
+    "requested_at": "2026-04-05T09:32:57.364248+00:00",
+    "priority": "중간",
+    "suggestion": "설정 파일 2개(`.json`, `.yaml`)를 → `config/` 디렉토리 생성 후 통합 → 설정 변경 시 단일 위치 관리, 오설정 위험 감소",
+    "action": {
+      "op": "mkdir_and_move",
+      "target_dir": "config",
+      "file_filter": "config",
+      "risk": "safe"
+    },
+    "status": "approved",
+    "type": "suggestion",
+    "source": "suggestion_engine"
+  },
+  {
+    "requested_at": "2026-04-05T09:32:57.368754+00:00",
+    "priority": "중간",
+    "suggestion": "`.gitignore` 파일을 → 신규 작성 또는 업데이트 (`*.log`, `*.jsonl`, `reports/`, `archive/` 추가) → 자동 생성 파일이 버전 관리에서 자동 제외, 저장소 오염 방지",
+    "action": {
+      "op": "create_gitignore",
+      "risk": "safe"
+    },
+    "status": "approved",
+    "type": "suggestion",
+    "source": "suggestion_engine"
+  }
+]

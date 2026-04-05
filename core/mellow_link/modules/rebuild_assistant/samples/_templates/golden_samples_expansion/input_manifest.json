@@ -1,0 +1,20 @@
+{
+  "sample_id": "sample_xx",
+  "title": "",
+  "category": "",
+  "description": "",
+  "assets": [
+    {
+      "name": "",
+      "type": "code|sql|ui|schema|doc",
+      "path": "",
+      "purpose": ""
+    }
+  ],
+  "expected_focus": {
+    "feature_slices": 0,
+    "primary_judgment": "",
+    "top_decision_type": "",
+    "notes": []
+  }
+}

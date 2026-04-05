@@ -1,0 +1,22 @@
+<section class="review-queue">
+  <header>
+    <h1>검토 대기열</h1>
+  </header>
+  <form id="reviewQueueFilter">
+    <input type="hidden" name="display_order" value="priority_desc" />
+    <label>
+      <span>검토 필요만 보기</span>
+      <input type="checkbox" name="review_required" checked />
+    </label>
+    <button type="button" onclick="closeDialog()">필터 닫기</button>
+  </form>
+</section>
+
+<script>
+function closeDialog() {
+  const panel = document.getElementById('reviewQueueFilter');
+  if (panel) {
+    panel.classList.remove('is-open');
+  }
+}
+</script>

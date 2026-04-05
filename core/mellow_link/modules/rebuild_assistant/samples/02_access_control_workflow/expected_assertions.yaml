@@ -1,0 +1,47 @@
+sample_id: 02_access_control_workflow
+assertions:
+  deterministic_core:
+    primary_judgment: workflow
+    structural_judgment: refactor
+    selected_narrative_judgment: workflow
+    report_purpose: 승인 트리거, 승인 단계, 예외 처리 흐름을 분석하기 위한 보고서입니다.
+    recommended_strategy: 리팩터링 우선
+    first_entry_point: ui:ClaimApprovalPage#approve
+    top_decision_type: refactor
+    top_priority_score: 10
+    decision_count: 4
+    feature_slice_count: 1
+  stable_hashes:
+    execution_plan: c78e8636aba7f56254cc4d27b5e97068c3a30f43
+    design_options: 3ecb19da881cafc0a3125cd4974cf7ee721bc5f1
+    recommended_option: 8863eed29ffeeba02195975bae5fee5cc069577b
+  issue_expectations:
+    must_include_detectors:
+      - duplicate_logic_candidate
+      - rule_scatter
+      - state_transition_leak
+    must_not_include_detectors: []
+  planning_expectations:
+    recommended_option_title: "옵션 A. 승인 흐름 중심 모듈형 구조"
+    execution_stage_count: 5
+    first_execution_stage_title: "1주차"
+    last_execution_stage_title: "5주차"
+    must_link_decision_ids: true
+  ai_narrative_expectations:
+    allowed_to_change_fields:
+      - report_purpose
+      - primary_judgment_reason
+      - one_line_conclusion
+      - executive_summary_v2
+    deterministic_fields_must_match: true
+  draft_notes:
+    status: promoted_expansion_regression
+    sample_role: expansion_candidate
+    current_report_purpose: 승인 트리거, 승인 단계, 예외 처리 흐름을 분석하기 위한 보고서입니다.
+    measured_axes:
+      - workflow
+      - duplicate_logic_candidate
+      - rule_scatter
+      - state_transition
+    next_fill_rule:
+      - 실제 업무 자산이 추가되더라도 workflow narrative와 승인 흐름 plan linkage가 유지되는지 우선 검증한다.

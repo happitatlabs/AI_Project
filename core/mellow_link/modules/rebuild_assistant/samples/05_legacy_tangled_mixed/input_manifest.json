@@ -1,0 +1,56 @@
+{
+  "sample_id": "05_legacy_tangled_mixed",
+  "title": "레거시 뒤엉킴 구조형",
+  "category": "legacy_tangled_mixed",
+  "description": "여러 책임 혼합, boundary mismatch, mixed responsibility가 동시에 나오는 최악 구조 샘플 검증",
+  "assets": [
+    {
+      "name": "legacy_report_service.py",
+      "type": "code",
+      "path": "assets/legacy_report_service.py",
+      "purpose": "validation, UI, persistence, state transition이 한 함수에 섞인 레거시 코드 예시"
+    },
+    {
+      "name": "report_repository.py",
+      "type": "code",
+      "path": "assets/report_repository.py",
+      "purpose": "repository 안에 business/state transition 로직이 섞인 경계 위반 예시"
+    },
+    {
+      "name": "legacy_report_query.sql",
+      "type": "sql",
+      "path": "assets/legacy_report_query.sql",
+      "purpose": "상태 변경과 pending check, filter query가 함께 있는 SQL 예시"
+    },
+    {
+      "name": "legacy_report_page.jsp",
+      "type": "ui",
+      "path": "assets/legacy_report_page.jsp",
+      "purpose": "submit/search action이 함께 노출되는 레거시 화면 예시"
+    },
+    {
+      "name": "schema.sql",
+      "type": "schema",
+      "path": "assets/schema.sql",
+      "purpose": "reports / claim_adjustments 테이블 구조"
+    },
+    {
+      "name": "legacy_notes.md",
+      "type": "doc",
+      "path": "assets/legacy_notes.md",
+      "purpose": "샘플의 의도와 혼합 책임 포인트 설명"
+    }
+  ],
+  "expected_focus": {
+    "feature_slices": 1,
+    "primary_judgment": "state_transition",
+    "top_decision_type": "redesign",
+    "notes": [
+      "mixed_responsibility와 validation_guard_leak를 함께 보는 tangled legacy sample이다.",
+      "UI 직접 query/repository 접근과 repository 내부 business logic을 동시에 넣어 boundary mismatch를 강하게 드러낸다.",
+      "현재 measured output은 redesign top decision과 다수 boundary mismatch/rule scatter detector로 수렴한다.",
+      "현재 human review sample은 참고용이고 regression source는 measured anchor를 우선 사용한다.",
+      "현재 anchor는 별도 promoted expansion regression에 잠긴 measured 값으로 유지한다."
+    ]
+  }
+}
