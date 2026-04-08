@@ -4,12 +4,188 @@ from types import SimpleNamespace
 from mellow_link import app_state
 from mellow_link.modules.rebuild_assistant import compat as rebuild_compat
 from mellow_link.modules.rebuild_assistant import runner as rebuild_runner
+from mellow_link.modules.rebuild_assistant.schemas import RebuildAssetsPayload
 from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+from mellow_link.services.refactoring_support_engine.diagnosis_engine import DiagnosisEngine
+from mellow_link.services.refactoring_support_engine.input_assembler import InputAssembler
 from mellow_link.services.refactoring_support_engine.narrative_augmentation import (
     NarrativeAugmentationService,
 )
+from mellow_link.services.refactoring_support_engine.schemas import FeatureSignals, PreparedRebuildInput
+from mellow_link.services.refactoring_support_engine.structure_analyzer import StructureAnalyzer
+from mellow_link.services.refactoring_support_engine.template_support import TemplateSupport
 
 from .refactoring_support_test_utils import build_safe_bundle
+
+
+def test_rebuild_assistant_safe_bundle_readme_only_keeps_source_and_framework_missing_context():
+    bundle = build_safe_bundle(
+        [
+            {
+                "name": "README.md",
+                "content": """
+# Order Flow
+이 문서는 주문 승인 흐름과 저장 검증 규칙을 설명합니다.
+                """,
+            }
+        ]
+    )
+    service = RebuildAssistantService()
+
+    prepared = service.prepare_safe_bundle_input(goal="modernize order flow", safe_bundle=bundle, constraints=[])
+
+    assert "레거시 화면 또는 서버 코드" in prepared.missing_context
+    assert "기존 프레임워크/런타임 정보" in prepared.missing_context
+    assert prepared.asset_presence.has_source_code is False
+    assert prepared.asset_presence.has_framework_hint is False
+    assert prepared.assets.source_code == ""
+    assert prepared.assets.framework_info == ""
+    assert prepared.supporting_docs
+
+
+def test_rebuild_assistant_safe_bundle_ddl_dump_marks_schema_asset():
+    bundle = build_safe_bundle(
+        [
+            {
+                "name": "orders_tables.sql",
+                "content": """
+CREATE TABLE orders (
+    id bigint primary key,
+    status varchar(20)
+);
+ALTER TABLE orders
+    ADD CONSTRAINT fk_orders_customer FOREIGN KEY (id) REFERENCES customers(id);
+                """,
+            }
+        ]
+    )
+    service = RebuildAssistantService()
+
+    prepared = service.prepare_safe_bundle_input(goal="modernize order flow", safe_bundle=bundle, constraints=[])
+
+    assert prepared.asset_presence.has_schema_asset is True
+    assert "orders_tables.sql" in prepared.asset_presence.schema_asset_names
+    assert prepared.assets.database_schema.startswith("[SAFE SOURCE:")
+    assert prepared.assets.sql_queries == ""
+    assert "DB 스키마" not in prepared.missing_context
+    assert "핵심 SQL" in prepared.missing_context
+
+
+def test_rebuild_assistant_safe_bundle_scenario_only_keeps_missing_context_and_intent_separate():
+    bundle = build_safe_bundle(
+        [
+            {
+                "name": "scenario.md",
+                "content": """
+# 업무 시나리오
+승인 화면과 저장 흐름을 나중에 React와 API로 나누고 싶다.
+                """,
+            }
+        ]
+    )
+    service = RebuildAssistantService()
+
+    prepared = service.prepare_safe_bundle_input(goal="", safe_bundle=bundle, constraints=[])
+    analysis_input = InputAssembler().assemble(prepared)
+
+    assert prepared.intent.goal == ""
+    assert prepared.intent.scenario.startswith("# 업무 시나리오")
+    assert prepared.assets.source_code == ""
+    assert prepared.assets.framework_info == ""
+    assert prepared.supporting_docs == ""
+    assert prepared.asset_presence.doc_asset_names == []
+    assert analysis_input.asset_inventory == []
+    assert analysis_input.source_blocks == []
+    assert "레거시 화면 또는 서버 코드" in prepared.missing_context
+    assert "기존 프레임워크/런타임 정보" in prepared.missing_context
+
+
+def test_rebuild_assistant_goal_only_keeps_analysis_possible_but_low_confidence():
+    service = RebuildAssistantService()
+    prepared = service.prepare_input(
+        goal="reports CRUD 구조를 점검하고 전환 초안을 작성하라.",
+        assets=RebuildAssetsPayload(),
+        constraints=[],
+    )
+    structure = StructureAnalyzer().analyze(InputAssembler().assemble(prepared))
+    diagnosis = DiagnosisEngine().run(prepared, structure, service)
+
+    assert diagnosis.analysis_summary
+    assert service.estimate_confidence(prepared) < 0.2
+    assert "레거시 화면 또는 서버 코드" in prepared.missing_context
+    assert "기존 프레임워크/런타임 정보" in prepared.missing_context
+    assert not diagnosis.grounded_business_rules or all(
+        rule.confidence != "확정" and rule.needs_verification for rule in diagnosis.grounded_business_rules
+    )
+
+
+def test_rebuild_assistant_constraints_only_do_not_become_rule_evidence():
+    service = RebuildAssistantService()
+    prepared = service.prepare_input(
+        goal="",
+        assets=RebuildAssetsPayload(),
+        constraints=[
+            "VIP 고객은 야간 시간대에 주문 마감을 수행할 수 없습니다.",
+            "VIP 고객은 야간 시간대에 주문 마감을 수행할 수 없습니다.",
+        ],
+    )
+    structure = StructureAnalyzer().analyze(InputAssembler().assemble(prepared))
+    diagnosis = DiagnosisEngine().run(prepared, structure, service)
+
+    assert prepared.intent.constraints == ["VIP 고객은 야간 시간대에 주문 마감을 수행할 수 없습니다."]
+    assert diagnosis.core_business_rules == []
+    assert not diagnosis.grounded_business_rules or all(not rule.evidence for rule in diagnosis.grounded_business_rules)
+    assert "레거시 화면 또는 서버 코드" in prepared.missing_context
+
+
+def test_rebuild_assistant_intent_inputs_do_not_change_structure_snapshot():
+    base_assets = [
+        {
+            "name": "order_service.py",
+            "content": """
+class OrderService:
+    def submit(self, order, repo):
+        if order.status == "READY":
+            repo.save(order)
+        return order
+            """,
+        },
+        {
+            "name": "order_page.html",
+            "content": '<button onclick="submitOrder()">submit</button>',
+        },
+    ]
+    bundle_without_intent = build_safe_bundle(base_assets)
+    bundle_with_intent = build_safe_bundle(
+        base_assets
+        + [
+            {"name": "goal.txt", "content": "주문 저장 흐름을 점검한다."},
+            {"name": "constraints.txt", "content": "기존 DB 계약 유지\n기존 DB 계약 유지"},
+            {"name": "scenario.md", "content": "업무 시나리오: 승인 이후 저장 흐름을 설명한다."},
+        ]
+    )
+    service = RebuildAssistantService()
+
+    prepared_without_intent = service.prepare_safe_bundle_input(
+        goal="legacy order flow",
+        safe_bundle=bundle_without_intent,
+        constraints=["keep db contract"],
+    )
+    prepared_with_intent = service.prepare_safe_bundle_input(
+        goal="",
+        safe_bundle=bundle_with_intent,
+        constraints=[],
+    )
+    assembled_with_intent = InputAssembler().assemble(prepared_with_intent)
+    structure_without_intent = StructureAnalyzer().analyze(InputAssembler().assemble(prepared_without_intent))
+    structure_with_intent = StructureAnalyzer().analyze(assembled_with_intent)
+
+    assert prepared_with_intent.intent.goal == "주문 저장 흐름을 점검한다."
+    assert prepared_with_intent.intent.constraints == ["기존 DB 계약 유지"]
+    assert prepared_with_intent.intent.scenario == "업무 시나리오: 승인 이후 저장 흐름을 설명한다."
+    assert [item.name for item in assembled_with_intent.asset_inventory] == ["order_service.py", "order_page.html"]
+    assert [item.asset_name for item in assembled_with_intent.source_blocks] == ["order_service.py", "order_page.html"]
+    assert structure_without_intent.structure_snapshot.model_dump() == structure_with_intent.structure_snapshot.model_dump()
 
 
 def test_rebuild_assistant_result_contains_authoritative_blocks():
@@ -306,3 +482,56 @@ class OrderService:
     assert result.primary_judgment_reason
     assert "확정" not in " ".join(result.executive_summary_v2[1:]) if len(result.executive_summary_v2) > 1 else True
     assert result.recommended_option is None or ("적절" in result.recommended_option.selection_reason or "안전" in result.recommended_option.selection_reason)
+
+
+def test_rebuild_assistant_service_prepare_safe_bundle_input_uses_engine_input_assembler(monkeypatch):
+    bundle = build_safe_bundle([{"name": "order_service.py", "content": "class OrderService: pass"}])
+    expected = PreparedRebuildInput(
+        goal="modernize order flow",
+        assets=RebuildAssetsPayload(),
+        constraints=[],
+        signals=FeatureSignals(),
+        missing_context=[],
+    )
+
+    def fake_prepare_safe_bundle_input(self, legacy_service, **kwargs):
+        assert isinstance(legacy_service, RebuildAssistantService)
+        assert kwargs["safe_bundle"] == bundle
+        return expected
+
+    monkeypatch.setattr(InputAssembler, "prepare_safe_bundle_input", fake_prepare_safe_bundle_input)
+
+    service = RebuildAssistantService()
+    prepared = service.prepare_safe_bundle_input(goal="modernize order flow", safe_bundle=bundle, constraints=[])
+
+    assert prepared is expected
+
+
+def test_rebuild_assistant_service_planning_wrappers_delegate_to_engine_support(monkeypatch):
+    bundle = build_safe_bundle([{"name": "order_service.py", "content": "class OrderService: pass"}])
+    service = RebuildAssistantService()
+    prepared = service.prepare_safe_bundle_input(goal="modernize order flow", safe_bundle=bundle, constraints=[])
+
+    calls = []
+
+    def fake_infer(self, arg):
+        calls.append(("infer", arg.goal))
+        return ["engine strategy"]
+
+    def fake_recompose(self, arg, applied_templates=None):
+        calls.append(("recompose", arg.goal, tuple(applied_templates or [])))
+        return SimpleNamespace(database=["db"], backend=["api"], frontend=["ui"])
+
+    monkeypatch.setattr(TemplateSupport, "infer_target_architecture", fake_infer)
+    monkeypatch.setattr(TemplateSupport, "build_recomposition_draft", fake_recompose)
+
+    assert service.infer_target_architecture(prepared) == ["engine strategy"]
+    draft = service.build_recomposition_draft(prepared)
+
+    assert draft.database == ["db"]
+    assert draft.backend == ["api"]
+    assert draft.frontend == ["ui"]
+    assert calls == [
+        ("infer", "modernize order flow"),
+        ("recompose", "modernize order flow", ()),
+    ]

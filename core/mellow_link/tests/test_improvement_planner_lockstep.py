@@ -94,3 +94,39 @@ class OrderService:
 
     assert improvement.execution_plan
     assert improvement.design_options
+
+
+def test_improvement_planner_runs_without_legacy_service():
+    bundle = build_safe_bundle(
+        [
+            {
+                "name": "order_service.py",
+                "content": """
+class OrderService:
+    def submit(self, order, repo):
+        if not order.amount:
+            raise ValueError("required")
+        if order.status == "READY":
+            repo.save(order)
+            return approve(order)
+                """,
+            },
+            {"name": "query.sql", "content": "SELECT * FROM orders WHERE status = 'READY'"},
+        ]
+    )
+    service = RebuildAssistantService()
+    prepared = service.prepare_safe_bundle_input(goal="modernize order creation flow", safe_bundle=bundle, constraints=["keep db contract"])
+
+    from mellow_link.services.refactoring_support_engine.decision_engine import DecisionEngine
+    from mellow_link.services.refactoring_support_engine.diagnosis_engine import DiagnosisEngine
+    from mellow_link.services.refactoring_support_engine.improvement_planner import ImprovementPlanner
+    from mellow_link.services.refactoring_support_engine.input_assembler import InputAssembler
+    from mellow_link.services.refactoring_support_engine.structure_analyzer import StructureAnalyzer
+
+    structure = StructureAnalyzer().analyze(InputAssembler().assemble(prepared))
+    diagnosis = DiagnosisEngine().run(prepared, structure, service)
+    decisions = DecisionEngine().run(prepared, structure, diagnosis, None)
+    improvement = ImprovementPlanner().run(prepared, structure, diagnosis, decisions, None)
+
+    assert improvement.execution_plan
+    assert improvement.design_options

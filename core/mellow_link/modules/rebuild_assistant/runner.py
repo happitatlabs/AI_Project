@@ -17,6 +17,7 @@ from mellow_link.services.anonymization.schemas import SafeAnalysisBundle
 from mellow_link.services.refactoring_support_engine.narrative_augmentation import (
     NarrativeAugmentationService,
 )
+from mellow_link.services.refactoring_support_engine.template_support import TemplateSupport
 
 from .service import RebuildAssistantService
 
@@ -44,6 +45,7 @@ def _spawn_rebuild_run(
 
     def _run() -> None:
         service = RebuildAssistantService()
+        template_support = TemplateSupport()
         try:
             emit_event(
                 run_id,
@@ -77,12 +79,12 @@ def _spawn_rebuild_run(
             emit_event(run_id, EVENT_TYPE_TODO_DONE, {**todos[1], "detail": "레거시 구조와 기능 슬라이스 후보를 분석했습니다."})
 
             emit_event(run_id, EVENT_TYPE_TODO_STARTED, todos[2])
-            strategy = service.infer_target_architecture(prepared)
+            strategy = template_support.infer_target_architecture(prepared)
             emit_event(run_id, EVENT_TYPE_LOG, {"level": "info", "message": "rebuild design complete", "strategy": strategy[:3]})
             emit_event(run_id, EVENT_TYPE_TODO_DONE, {**todos[2], "detail": "구조 진단과 의사결정 방향을 확정했습니다."})
 
             emit_event(run_id, EVENT_TYPE_TODO_STARTED, todos[3])
-            draft = service.build_recomposition_draft(prepared)
+            draft = template_support.build_recomposition_draft(prepared)
             emit_event(
                 run_id,
                 EVENT_TYPE_LOG,
