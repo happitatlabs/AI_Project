@@ -15,9 +15,9 @@ assertions:
     decision_count: 0
     feature_slice_count: 1
   stable_hashes:
-    execution_plan: 818203dc7ef44a65ddc9fa0977b7ee96dc609fd0
-    design_options: 805cae182091d43459516618a305ad0bea8319cd
-    recommended_option: 5e323229e3641d50aa3ec151622b02ae60db5977
+    execution_plan: 4684ffd85b644a699103a04cd55a2fe885639de8
+    design_options: 771342c6b21f542bda46adcb348a5932833a61c9
+    recommended_option: fa9a476a3ee21e8712a30f261c51a1b67c7bcef0
   issue_expectations:
     must_include_detectors: []
     must_not_include_detectors:

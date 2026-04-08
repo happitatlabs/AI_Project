@@ -16,8 +16,8 @@ assertions:
     feature_slice_count: 1
   stable_hashes:
     execution_plan: cd7d0e21f56fd621419d1f21d727258dccc28043
-    design_options: 1b2969232591284ed4caa77e79b05a77f8ad9cfc
-    recommended_option: 8dfc4585b23800a3506090d7de62da7e07fd5593
+    design_options: 5cab01966144f61452341bfd38c2087b4ad500ec
+    recommended_option: d053706bdbd515d95149cb5915b3d6d7b938f156
   issue_expectations:
     must_include_detectors:
       - boundary_mismatch

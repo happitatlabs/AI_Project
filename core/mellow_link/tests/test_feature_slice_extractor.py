@@ -2,7 +2,7 @@ from mellow_link.modules.rebuild_assistant.service import RebuildAssistantServic
 from mellow_link.services.refactoring_support_engine.input_assembler import InputAssembler
 from mellow_link.services.refactoring_support_engine.structure_analyzer import StructureAnalyzer
 
-from .refactoring_support_test_utils import build_safe_bundle
+from .refactoring_support_test_utils import build_safe_bundle, load_sample_case
 
 
 def test_feature_slice_extractor_prefers_api_endpoint_seed():
@@ -60,6 +60,32 @@ def test_feature_slice_extractor_falls_back_to_usecase_seed():
     structure = StructureAnalyzer().analyze(InputAssembler().assemble(prepared))
 
     assert structure.structure_snapshot.feature_slices[0].entry_points[0].startswith("usecase:")
+
+
+def test_feature_slice_extractor_prefers_descriptive_source_asset_for_order_closure_sample():
+    service = RebuildAssistantService()
+    case = load_sample_case("01. java_order_closure_case_01")
+
+    prepared = service.prepare_safe_bundle_input(
+        goal=case["goal"],
+        safe_bundle=case["safe_bundle"],
+        constraints=case["constraints"],
+    )
+    structure = StructureAnalyzer().analyze(InputAssembler().assemble(prepared))
+
+    prepared_with_different_goal = service.prepare_safe_bundle_input(
+        goal="wrapper wording should not decide the structural seed for this feature",
+        safe_bundle=case["safe_bundle"],
+        constraints=case["constraints"],
+    )
+    structure_with_different_goal = StructureAnalyzer().analyze(InputAssembler().assemble(prepared_with_different_goal))
+
+    first_entry_point = structure.structure_snapshot.feature_slices[0].entry_points[0]
+    different_goal_entry_point = structure_with_different_goal.structure_snapshot.feature_slices[0].entry_points[0]
+
+    assert first_entry_point == "usecase:order_close_service"
+    assert different_goal_entry_point == first_entry_point
+    assert first_entry_point != "usecase:jsp"
 
 
 def test_feature_slice_extractor_separates_endpoint_handlers_in_same_asset():

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
+import shutil
 import uuid
 from copy import deepcopy
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -61,6 +64,8 @@ from mellow_link.services.refactoring_support_engine.surface_access import (
 from mellow_link.services.scope_notice import PROJECT_SCOPE_NOTICE
 
 router = APIRouter(tags=["Projects"])
+logger = logging.getLogger(__name__)
+_PROJECT_RESULT_ARCHIVE_ROOT = Path(__file__).resolve().parents[3] / "data" / "outputs" / "final" / "project_results"
 
 
 def _static_file(name: str) -> str:
@@ -1729,6 +1734,25 @@ async def _result_package_docx_response(
     *,
     surface_mode: str = "internal",
 ) -> FileResponse:
+    output_path, download_name = await _generate_result_package_docx(
+        project,
+        pkg,
+        surface_mode=surface_mode,
+    )
+    return FileResponse(
+        path=output_path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=download_name,
+        headers={"Content-Disposition": _download_disposition(download_name, "project_result.docx")},
+    )
+
+
+async def _generate_result_package_docx(
+    project: ModernizationProject,
+    pkg: dict[str, Any],
+    *,
+    surface_mode: str = "internal",
+) -> tuple[Path, str]:
     if not app_state.doc_service or not app_state.doc_service.is_available():
         raise HTTPException(status_code=503, detail="Document Service unavailable")
 
@@ -1750,12 +1774,7 @@ async def _result_package_docx_response(
             },
         )
     )
-    return FileResponse(
-        path=result.output_path,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        filename=download_name,
-        headers={"Content-Disposition": _download_disposition(download_name, "project_result.docx")},
-    )
+    return Path(result.output_path).resolve(), download_name
 
 
 async def _result_package_pptx_response(
@@ -1791,6 +1810,76 @@ async def _result_package_pptx_response(
         filename=download_name,
         headers={"Content-Disposition": _download_disposition(download_name, "project_result.pptx")},
     )
+
+
+def _project_result_archive_paths(project_id: str, run_id: str) -> dict[str, Path]:
+    archive_dir = _PROJECT_RESULT_ARCHIVE_ROOT / (project_id or "unknown_project") / (run_id or "unknown_run")
+    return {
+        "dir": archive_dir,
+        "markdown": archive_dir / "result.md",
+        "docx": archive_dir / "result.docx",
+    }
+
+
+async def _persist_project_result_archive(
+    project: ModernizationProject,
+    *,
+    run_id: str,
+    db: Session,
+    assets: list[dict[str, Any]] | None = None,
+    app_version: str | None = None,
+    result_package: dict[str, Any] | None = None,
+    docx_source_path: Path | None = None,
+) -> dict[str, str]:
+    normalized_run_id = str(run_id or "").strip()
+    if not normalized_run_id:
+        return {}
+
+    snapshot = get_run_snapshot(normalized_run_id, db=db)
+    events = get_run_events(normalized_run_id, db=db)
+    structured = _extract_structured_result(events)
+    if structured is None:
+        return {}
+
+    archive_paths = _project_result_archive_paths(project.id, normalized_run_id)
+    archive_paths["dir"].mkdir(parents=True, exist_ok=True)
+
+    if result_package is None:
+        resolved_assets = assets if assets is not None else _build_assets_payload(project, db)
+        result_package = build_result_package(
+            project,
+            snapshot,
+            structured,
+            assets=resolved_assets,
+            polish_bundle=_extract_polish_bundle(events, structured),
+            app_version=app_version,
+        )
+
+    markdown_content = _result_package_markdown(result_package, surface_mode="internal")
+    archive_paths["markdown"].write_text(markdown_content, encoding="utf-8")
+
+    try:
+        if docx_source_path is not None:
+            shutil.copy2(str(docx_source_path), str(archive_paths["docx"]))
+        elif not archive_paths["docx"].exists():
+            generated_docx_path, _ = await _generate_result_package_docx(
+                project,
+                result_package,
+                surface_mode="internal",
+            )
+            shutil.copy2(str(generated_docx_path), str(archive_paths["docx"]))
+    except Exception as exc:
+        logger.warning(
+            "[Projects] Failed to persist DOCX archive for project=%s run=%s: %s",
+            project.id,
+            normalized_run_id,
+            exc,
+        )
+
+    return {
+        "markdown_path": str(archive_paths["markdown"]),
+        "docx_path": str(archive_paths["docx"]),
+    }
 
 
 def _mark_run_failed(run_id: str, message: str, db: Session) -> None:
@@ -2014,6 +2103,15 @@ async def reanalyze_project(
 ) -> ProjectReanalysisResponse:
     project = _project_or_404(project_id, user, db)
     _ensure_initial_history(project, db)
+    try:
+        await _persist_project_result_archive(project, run_id=project.run_id, db=db)
+    except Exception as exc:
+        logger.warning(
+            "[Projects] Failed to archive previous run before reanalysis for project=%s run=%s: %s",
+            project.id,
+            project.run_id,
+            exc,
+        )
     staged_resources = _validate_reanalysis_assets(project, payload, user, db)
 
     promoted_asset_ids: list[str] = []
@@ -2132,6 +2230,15 @@ async def run_project_analysis(
 ) -> ProjectReanalysisResponse:
     project = _project_or_404(project_id, user, db)
     _ensure_initial_history(project, db)
+    try:
+        await _persist_project_result_archive(project, run_id=project.run_id, db=db)
+    except Exception as exc:
+        logger.warning(
+            "[Projects] Failed to archive previous run before manual rerun for project=%s run=%s: %s",
+            project.id,
+            project.run_id,
+            exc,
+        )
     _rebuild_project_temp_context(project, db)
 
     new_run_id, new_session_id = create_project_wrapped_run(db=db, user=user)
@@ -2240,21 +2347,70 @@ async def project_result(
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     project = _project_or_404(project_id, user, db)
-    context = _load_project_result_context(project, db=db, app_version=getattr(request.app, "version", None))
-    result_package = _surface_filtered_result_package(context["result_package"], surface_mode=surface_mode)
+    app_version = getattr(request.app, "version", None)
+    context = _load_project_result_context(project, db=db, app_version=app_version)
+    full_result_package = context["result_package"]
+    normalized_surface_mode = normalize_surface_mode(surface_mode)
+    result_package = _surface_filtered_result_package(full_result_package, surface_mode=normalized_surface_mode)
+    if normalized_surface_mode == "internal":
+        if format == "docx":
+            output_path, download_name = await _generate_result_package_docx(
+                project,
+                result_package,
+                surface_mode=normalized_surface_mode,
+            )
+            try:
+                await _persist_project_result_archive(
+                    project,
+                    run_id=project.run_id,
+                    db=db,
+                    assets=context["assets"],
+                    app_version=app_version,
+                    result_package=full_result_package,
+                    docx_source_path=output_path,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[Projects] Failed to archive current run during DOCX export for project=%s run=%s: %s",
+                    project.id,
+                    project.run_id,
+                    exc,
+                )
+            return FileResponse(
+                path=output_path,
+                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                filename=download_name,
+                headers={"Content-Disposition": _download_disposition(download_name, "project_result.docx")},
+            )
+        try:
+            await _persist_project_result_archive(
+                project,
+                run_id=project.run_id,
+                db=db,
+                assets=context["assets"],
+                app_version=app_version,
+                result_package=full_result_package,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[Projects] Failed to archive current run on result view for project=%s run=%s: %s",
+                project.id,
+                project.run_id,
+                exc,
+            )
     if format == "md":
-        download_name = _safe_download_name(project.project_name, "external_result.md" if surface_mode == "external" else "result.md")
+        download_name = _safe_download_name(project.project_name, "external_result.md" if normalized_surface_mode == "external" else "result.md")
         return Response(
-            content=_result_package_markdown(result_package, surface_mode=surface_mode),
+            content=_result_package_markdown(result_package, surface_mode=normalized_surface_mode),
             media_type="text/markdown; charset=utf-8",
             headers={
                 "Content-Disposition": _download_disposition(download_name, "project_result.md")
             },
         )
     if format == "docx":
-        return await _result_package_docx_response(project, result_package, surface_mode=surface_mode)
+        return await _result_package_docx_response(project, result_package, surface_mode=normalized_surface_mode)
     if format == "pptx":
-        return await _result_package_pptx_response(project, result_package, surface_mode=surface_mode)
+        return await _result_package_pptx_response(project, result_package, surface_mode=normalized_surface_mode)
     if format == "json":
         return result_package
     return result_package
