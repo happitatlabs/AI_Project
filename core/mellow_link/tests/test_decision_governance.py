@@ -107,6 +107,7 @@ def test_legitimate_migration_is_preserved_when_asset_and_issue_support_exist():
             {
                 "name": "order_service.py",
                 "content": """
+# migration target: spring boot rest api + react admin
 class OrderService:
     def submit(self, order):
         if order.status == "READY" and order.amount > 1000:
@@ -123,10 +124,16 @@ class ApprovalService:
                 """,
             },
             {
-                "name": "migration_plan.md",
+                "name": "pom.xml",
                 "content": """
-레거시 승인 화면을 Spring Boot REST API와 React Admin으로 분리한다.
-서비스 분리와 단계적 마이그레이션을 고려한다.
+<project>
+  <artifactId>legacy-order</artifactId>
+  <dependencies>
+    <dependency>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+  </dependencies>
+</project>
                 """,
             },
         ],

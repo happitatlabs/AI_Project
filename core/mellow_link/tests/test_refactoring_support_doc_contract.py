@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
@@ -61,6 +62,11 @@ class OrderService:
         }
     assert result.extensions["narrative"]["source"] == "deterministic_fallback"
     assert result.extensions["narrative"]["axis"]
+    governance = result.extensions["decision_governance"]
+    assert governance["intent_usage_policy"]["engine_definition"] == "레거시 시스템을 해석하여 구조와 의존성을 진단하고, 신규 환경으로 이전 가능한 구조 초안과 의사결정 근거를 생성하는 엔진"
+    assert governance["confidence_policy"]["evidence_only"] is True
+    assert governance["ordered_sections"] == ["recommended_strategy", "rationale", "evidence", "risk", "next_step"]
+    assert list(governance["document_outline"].keys()) == ["recommended_strategy", "rationale", "evidence", "risk", "next_step"]
 
 
 def test_doc_contract_decision_branching_uses_detector_id_not_category():
@@ -162,3 +168,17 @@ def approve_order(order_id):
     assert "api:POST /orders" in entry_points
     assert "api:POST /orders/{order_id}/approve" in entry_points
     assert len(entry_points) >= 2
+
+
+def test_doc_contract_governance_doc_locks_engine_definition_and_grounding_policy():
+    path = Path(r"C:\Users\Hyein\ClaudeAI\AI_Project\core\mellow_link\docs\REFACTORING_SUPPORT_ENGINE_DECISION_GOVERNANCE.md")
+    text = path.read_text(encoding="utf-8")
+
+    assert "레거시 시스템을 해석하여 구조와 의존성을 진단하고, 신규 환경으로 이전 가능한 구조 초안과 의사결정 근거를 생성하는 엔진" in text
+    assert "Intent Usage Policy" in text
+    assert "Insufficient Grounding Policy" in text
+    assert "Confidence Policy" in text
+    assert "recommended_strategy -> rationale -> evidence -> risk -> next_step" in text
+    assert "executive_summary_v2" in text
+    assert "문제" in text and "영향" in text and "조치" in text and "다음 단계" in text
+    assert "grounded" in text and "limited" in text and "insufficient" in text

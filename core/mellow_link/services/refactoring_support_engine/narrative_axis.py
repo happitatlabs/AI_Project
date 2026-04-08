@@ -134,13 +134,6 @@ class NarrativeAxisResolver:
         if mapped_axis:
             scores[mapped_axis] += 2
 
-        goal_text = " ".join(
-            [
-                str(getattr(prepared, "goal", "") or ""),
-                " ".join(str(item) for item in list(getattr(prepared, "constraints", []) or [])),
-            ]
-        )
-        self._apply_text_scores(scores, goal_text, weight=1)
         for item in grounded_rules[:5]:
             self._apply_text_scores(scores, f"{item.title} {item.description} {' '.join(item.design_targets)}", weight=2)
         for item in retained_contracts[:5]:

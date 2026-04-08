@@ -37,6 +37,7 @@ class DeterministicNarrativeBuilder:
         extensions: dict[str, Any],
     ) -> DeterministicNarrativeBundle:
         accounting = extensions.get("accounting") if isinstance(extensions, dict) else None
+        governance = extensions.get("decision_governance") if isinstance(extensions, dict) else None
         narrative_axis = self.axis_resolver.select_axis(
             prepared,
             diagnosis.grounded_business_rules,
@@ -69,6 +70,7 @@ class DeterministicNarrativeBuilder:
             narrative_axis=narrative_axis,
             core_business_rules=core_business_rules,
             retained_contracts=retained_contracts,
+            governance=governance if isinstance(governance, dict) else {},
         )
 
     def _build_general_bundle(
@@ -81,57 +83,90 @@ class DeterministicNarrativeBuilder:
         narrative_axis: str,
         core_business_rules: list[str],
         retained_contracts: list[RetainedContract],
+        governance: dict[str, Any],
     ) -> DeterministicNarrativeBundle:
         report_purpose, report_scope, report_questions = self._general_report_metadata(narrative_axis)
         concept = self._primary_concept(prepared)
         concept_label = self._concept_label(concept, narrative_axis)
+        subject = self._subject_phrase(concept_label)
+        subject_topic = self._attach_topic_particle(subject)
         lead_rule = self._normalize_conclusion_rule_anchor(core_business_rules[0] if core_business_rules else "")
         if any(token in lead_rule for token in ("필요합니다", "해야", "분리", "유지")) or len(lead_rule) > 28:
             lead_rule = ""
         option_text = self._option_label(improvement.recommended_option)
         axis_phrase = self._axis_phrase(narrative_axis) or lead_rule
         top_decision = decisions.decision_summary.decisions[0] if decisions.decision_summary.decisions else None
-        if top_decision is None and narrative_axis == "query_filter":
+        grounding = governance.get("recommendation_grounding") if isinstance(governance, dict) else {}
+        grounding_level = str((grounding or {}).get("level") or "")
+        insufficient_grounding = bool((grounding or {}).get("insufficient_grounding"))
+        document_outline = governance.get("document_outline") if isinstance(governance, dict) else {}
+        next_step = str((document_outline or {}).get("next_step") or "").strip()
+
+        if insufficient_grounding:
+            primary_reason = "직접 확인된 구조 근거가 부족해 현재 결과는 검토용 판단 문서 초안으로 유지합니다."
+        elif top_decision is None and narrative_axis == "query_filter":
             primary_reason = "직접 확인된 강한 구조 결정은 없지만 조회 조건과 필터 조합 신호가 가장 뚜렷하게 확인됐습니다."
         else:
             primary_reason = self._primary_reason(decisions, top_decision)
 
-        if getattr(prepared, "scope_limited", False):
-            one_line = f"{concept_label} 기능을 단일 범위로 제한해 정책, 화면, 데이터 계약을 단계적으로 분리하는 것이 필요합니다."
+        if insufficient_grounding:
+            one_line = (
+                f"{subject_topic} 직접 확인된 구조 근거가 부족하므로 현재 단계에서는 구조 이전 전략을 확정하지 않고 "
+                "관련 코드, 화면, 데이터 근거를 먼저 확인해야 합니다."
+            )
+        elif getattr(prepared, "scope_limited", False):
+            one_line = f"{subject_topic} 단일 범위로 제한해 정책, 화면, 데이터 계약을 단계적으로 분리해야 합니다."
         elif top_decision is None and narrative_axis == "query_filter":
             one_line = "조회/필터 기능은 현재 자산 기준으로 조회 조건, 필터 조합, 결과 목록 구성을 한곳에서 정리하는 방향을 우선 검토하는 편이 적절합니다."
-        elif narrative_axis == "validation":
-            one_line = f"{concept_label} 기능은 {lead_rule or '직접 확인된 차단 조건'}을 기준으로 차단 조건, 검증 순서, 저장 전 검증을 분리해 재구성하는 것이 필요합니다."
-        elif narrative_axis == "workflow":
-            one_line = f"{concept_label} 기능은 승인 트리거와 승인 단계 구조를 기준으로 승인 흐름, 의사결정 게이트, 예외 처리 경로를 분리하는 것이 필요합니다."
-        elif narrative_axis == "state_transition":
-            one_line = f"{concept_label} 기능은 {lead_rule or '직접 확인된 상태 전이 규칙'}을 기준으로 상태 전이, 처리 가능 상태, 전이 조건을 분리하는 것이 필요합니다."
-        elif narrative_axis == "access_control":
-            one_line = f"{concept_label} 기능은 {lead_rule or '직접 확인된 권한 규칙'}을 기준으로 승인 권한, 부서, 승인 주체 규칙을 정책 계층으로 분리하는 것이 필요합니다."
-        elif narrative_axis == "query_filter":
-            one_line = f"{concept_label} 기능은 {lead_rule or '직접 확인된 조회 조건 규칙'}을 기준으로 조회 조건, 필터 조합, 결과 목록 구성을 조회 모델로 분리하는 것이 필요합니다."
-        elif narrative_axis == "amount_threshold":
-            one_line = f"{concept_label} 기능은 {lead_rule or '직접 확인된 금액 한도 규칙'}을 기준으로 금액 구간, 한도 정책, 고액 처리 경계를 분리하는 것이 필요합니다."
         else:
-            one_line = self._fallback_conclusion(concept_label, confidence)
+            anchor = lead_rule or axis_phrase or "직접 확인된 핵심 규칙"
+            action_plan = self._action_plan_phrase(narrative_axis)
+            if grounding_level == "limited":
+                one_line = f"{subject_topic} 현재 확인된 {anchor}를 기준으로 {action_plan}하는 안을 우선 검토해야 합니다."
+            elif narrative_axis in {
+                "validation",
+                "workflow",
+                "state_transition",
+                "access_control",
+                "query_filter",
+                "amount_threshold",
+            }:
+                one_line = f"{subject_topic} {anchor}를 기준으로 {action_plan}해야 합니다."
+            else:
+                one_line = self._fallback_conclusion(subject, confidence)
 
-        if top_decision is None and narrative_axis == "query_filter":
+        if insufficient_grounding:
+            executive_summary = [
+                f"문제: {subject}의 구조와 의존성을 직접 판단할 근거가 부족합니다.",
+                "영향: 현재 단계에서 전략을 단정하면 잘못된 책임 경계를 기준안으로 고정할 수 있습니다.",
+                f"조치: 현재 결과는 {option_text or '추천안'}을 포함하더라도 검토용 초안으로만 유지하고 전략 확정은 보류해야 합니다.",
+                f"다음 단계: {self._ensure_period(next_step or '누락된 레거시 코드와 운영 근거를 먼저 확보합니다.')}",
+            ]
+        elif top_decision is None and narrative_axis == "query_filter":
             executive_summary = [
                 "조회/필터 기능은 현재 자산 기준으로 조회 조건, 필터 조합, 정렬 및 결과 목록 구성을 한 모델로 정리하는 방향을 우선 검토하는 편이 적절합니다.",
                 "구조 재설계가 필요하다는 강한 신호는 직접 확인되지 않았습니다.",
                 f"따라서 {option_text}을 파일럿 기준안으로 검토하는 수준이 적절합니다.",
             ]
         else:
+            problem = self._problem_summary(subject, narrative_axis, top_decision)
+            impact = self._impact_summary(narrative_axis, top_decision)
+            action = self._summary_action_sentence(
+                grounding_level=grounding_level,
+                option_text=option_text,
+                narrative_axis=narrative_axis,
+            )
             executive_summary = [
-                f"{concept_label} 기능은 핵심 규칙을 유지한 상태에서 단계적으로 분리하는 것이 필요합니다.",
-                f"현재 자산 기준으로 우선 보존해야 할 판단 축은 {axis_phrase or lead_rule or '핵심 업무 규칙'}입니다.",
-                f"이번 회의에서는 {self._attach_object_particle(option_text)} 기준안으로 확정하는 것이 필요합니다.",
+                f"문제: {problem}",
+                f"영향: {impact}",
+                f"조치: {action}",
             ]
-        if getattr(prepared, "missing_context", None):
-            if top_decision is None and narrative_axis == "query_filter":
-                executive_summary.append("입력 자산이 제한적이므로 제안은 파일럿 검토용 초안으로 해석하는 편이 안전합니다.")
-            else:
-                executive_summary.append("추가 운영 확인이 필요한 항목은 별도 확인 필요 항목으로 분리해 후속 확인 대상으로 두는 것이 필요합니다.")
+            if next_step:
+                executive_summary.append(f"다음 단계: {self._ensure_period(next_step)}")
+            elif grounding_level == "limited":
+                executive_summary.append("다음 단계: 누락된 구조 근거를 보강한 뒤 검토안을 실행 후보로 승격할지 다시 판단합니다.")
+            elif getattr(prepared, "missing_context", None):
+                executive_summary.append("다음 단계: 추가 운영 확인이 필요한 항목을 별도 확인 목록으로 분리해 후속 검증합니다.")
 
         return DeterministicNarrativeBundle(
             narrative_axis=narrative_axis,
@@ -270,6 +305,97 @@ class DeterministicNarrativeBuilder:
             return "조회/필터"
         return stripped or "이"
 
+    def _subject_phrase(self, concept_label: str) -> str:
+        stripped = (concept_label or "").strip()
+        if not stripped or stripped == "이":
+            return "이 기능"
+        if stripped == "조회/필터":
+            return "조회/필터 기능"
+        if stripped.endswith(("기능", "구조", "흐름", "화면", "영역", "정책", "모듈")):
+            return stripped
+        return f"{stripped} 기능"
+
+    def _action_plan_phrase(self, narrative_axis: str) -> str:
+        mapping = {
+            "validation": "차단 조건, 검증 순서, 저장 전 검증을 검증 계층과 처리 흐름으로 분리",
+            "workflow": "승인 트리거, 승인 단계, 예외 처리 경로를 워크플로우 계층으로 분리",
+            "state_transition": "상태 전이, 처리 가능 상태, 전이 조건을 정책 계층으로 분리",
+            "access_control": "승인 권한, 승인 주체, 부서 책임을 권한 정책 계층으로 분리",
+            "query_filter": "조회 조건, 필터 조합, 결과 목록 구성을 조회 모델로 분리",
+            "amount_threshold": "금액 구간, 한도 정책, 고액 처리 경계를 정책 계층으로 분리",
+        }
+        return mapping.get(narrative_axis, "정책, 화면, 데이터 계약을 책임 경계에 맞춰 분리")
+
+    def _problem_summary(self, subject: str, narrative_axis: str, top_decision) -> str:
+        if narrative_axis == "validation":
+            return f"현재 자산에서는 {subject}의 차단 조건과 저장 전 검증이 한 흐름에 묶여 있습니다."
+        if narrative_axis == "workflow":
+            return f"현재 자산에서는 {subject}의 승인 흐름과 예외 처리 경계가 한 경로에 얽혀 있습니다."
+        if narrative_axis == "state_transition":
+            return f"현재 자산에서는 {subject}의 상태 전이 판단과 처리 흐름이 같은 경로에 섞여 있습니다."
+        if narrative_axis == "access_control":
+            return f"현재 자산에서는 {subject}의 권한 판단과 처리 경로가 같은 흐름에 얽혀 있습니다."
+        if narrative_axis == "query_filter":
+            return f"현재 자산에서는 {subject}의 조회 조건, 필터 조합, 결과 구성이 한 경로에 묶여 있습니다."
+        if narrative_axis == "amount_threshold":
+            return f"현재 자산에서는 {subject}의 금액 기준과 후속 처리 경계가 같은 흐름에 섞여 있습니다."
+        if top_decision is not None and top_decision.decision_type == "redesign":
+            return f"현재 자산에서는 {subject}의 책임 경계가 섞여 있어 구조 재정의가 필요합니다."
+        return f"현재 자산에서는 {subject}의 핵심 규칙과 처리 흐름 경계가 충분히 분리되지 않았습니다."
+
+    def _impact_summary(self, narrative_axis: str, top_decision) -> str:
+        if narrative_axis == "validation":
+            return "이 상태가 유지되면 예외 누락과 저장 경로 재작업 위험이 커집니다."
+        if narrative_axis == "workflow":
+            return "이 상태가 유지되면 승인 단계 누락과 예외 경로 불일치 위험이 커집니다."
+        if narrative_axis == "state_transition":
+            return "이 상태가 유지되면 예외 전이 누락과 상태 정합성 오류가 발생할 수 있습니다."
+        if narrative_axis == "access_control":
+            return "이 상태가 유지되면 승인 주체와 부서 책임이 다시 섞여 운영 혼선이 커질 수 있습니다."
+        if narrative_axis == "query_filter":
+            return "이 상태가 유지되면 조회 결과 정합성과 필터 조합 일관성이 흔들릴 수 있습니다."
+        if narrative_axis == "amount_threshold":
+            return "이 상태가 유지되면 한도 초과 처리와 고액 처리 경계가 일관되지 않게 적용될 수 있습니다."
+        if top_decision is not None and top_decision.decision_type == "redesign":
+            return "이 상태가 유지되면 경계 충돌이 계속 누적되어 후속 분리 비용이 커질 수 있습니다."
+        return "이 상태가 유지되면 핵심 규칙이 여러 계층에 흩어져 후속 분리 비용이 커질 수 있습니다."
+
+    def _summary_action_sentence(
+        self,
+        *,
+        grounding_level: str,
+        option_text: str,
+        narrative_axis: str,
+    ) -> str:
+        action_plan = self._action_plan_phrase(narrative_axis)
+        if grounding_level == "limited":
+            action_tail = self._limited_action_tail(narrative_axis)
+            if option_text:
+                return f"{self._attach_object_particle(option_text)} 우선 검토안으로 두고 {action_plan}{action_tail}"
+            return f"{action_plan}하는 안을 우선 검토해야 합니다."
+        if option_text:
+            return f"{self._attach_object_particle(option_text)} 우선안으로 두고 {action_plan}해야 합니다."
+        return f"{action_plan}해야 합니다."
+
+    def _limited_action_tail(self, narrative_axis: str) -> str:
+        mapping = {
+            "validation": "하는 방향을 먼저 검증해야 합니다.",
+            "workflow": "하는 구조를 우선 구체화해야 합니다.",
+            "state_transition": "하는 구조를 우선 구체화해야 합니다.",
+            "access_control": "하는 구조를 우선 정리해야 합니다.",
+            "query_filter": "하는 구조를 우선 점검해야 합니다.",
+            "amount_threshold": "하는 구조를 우선 정리해야 합니다.",
+        }
+        return mapping.get(narrative_axis, "하는 구조를 우선 정리해야 합니다.")
+
+    def _ensure_period(self, text: str) -> str:
+        stripped = (text or "").strip()
+        if not stripped:
+            return ""
+        if stripped[-1] in ".!?":
+            return stripped
+        return stripped + "."
+
     def _option_label(self, recommended_option: RecommendedOption | None) -> str:
         if recommended_option is None or not (recommended_option.name or "").strip():
             return "정책 중심 분리안"
@@ -282,6 +408,17 @@ class DeterministicNarrativeBuilder:
         if re.search(r"[0-9A-Za-z]$", stripped):
             return f"{stripped}을"
         return f"{stripped}을"
+
+    def _attach_topic_particle(self, text: str) -> str:
+        stripped = (text or "").strip()
+        if not stripped:
+            return stripped
+        last = stripped[-1]
+        code = ord(last)
+        if 0xAC00 <= code <= 0xD7A3:
+            has_batchim = (code - 0xAC00) % 28 != 0
+            return stripped + ("은" if has_batchim else "는")
+        return stripped + "는"
 
     def _fallback_conclusion(self, concept: str, confidence: float) -> str:
         if confidence < 0.45:

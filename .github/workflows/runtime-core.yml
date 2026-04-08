@@ -27,5 +27,5 @@ jobs:
       - name: Run runtime-core regression suite
         run: |
           python -m pytest -q \
-            mellow_chat_runtime/tests/test_runtime_api_contract.py \
-            mellow_chat_runtime/tests/test_runtime_state_and_status.py
+            core/mellow_chat_runtime/tests/test_runtime_api_contract.py \
+            core/mellow_chat_runtime/tests/test_runtime_state_and_status.py

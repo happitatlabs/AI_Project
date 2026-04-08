@@ -187,7 +187,7 @@ class PlanningSynthesizer:
             contract_key = self.helper._normalize_key(spec["item"])
             if contract_key in retained_keys:
                 continue
-            evidence = self.helper._collect_evidence_refs(prepared, tuple(spec["keywords"]), ("source", "ui", "sql", "schema", "constraint"))
+            evidence = self.helper._collect_evidence_refs(prepared, tuple(spec["keywords"]), ("source", "ui", "sql", "schema"))
             if evidence:
                 continue
             output.append(

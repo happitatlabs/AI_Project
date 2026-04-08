@@ -47,6 +47,21 @@ class DecisionEngine:
         "서비스 분리",
         "서비스 분해",
     )
+    MIGRATION_BLOCK_KEYWORDS = (
+        "migration 금지",
+        "no migration",
+        "without migration",
+        "마이그레이션 금지",
+        "마이그레이션 제외",
+        "전환 금지",
+        "전환 제외",
+        "재플랫폼 금지",
+        "재플랫폼 제외",
+        "rewrite 금지",
+        "rewrite 제외",
+        "재작성 금지",
+        "재작성 제외",
+    )
 
     def __init__(self, policy_bundle=None) -> None:
         self.policy_bundle = policy_bundle or load_engine_policy_bundle()
@@ -84,6 +99,7 @@ class DecisionEngine:
             applied_templates,
             decision_count_hint=len(diagnosis.diagnosis_report.issues),
         )
+        setattr(prepared, "decision_constraint_filters", self._blocked_recommendation_types(prepared))
         decisions, synthetic_signal_detected = self._build_decisions(prepared, structure, diagnosis, decision_items)
         decision_summary = self._build_summary(prepared, decisions)
         structural_judgment = self._structural_judgment(decision_summary)
@@ -114,10 +130,12 @@ class DecisionEngine:
         rationale_fallback = decision_items[0].rationale if decision_items else "구조적 문제를 우선 분리하는 편이 적절합니다."
         hotspot_scores = {item.component_id: item.score for item in structure.structure_snapshot.hotspots}
         scoring_policy = self.policy_bundle.scoring_policy
+        goal_prefers_migration = self._goal_prefers_migration(prepared)
+        asset_migration_support = self._has_asset_migration_support(prepared)
         decision_breakdowns: dict[str, dict[str, int]] = {}
         decision_explainability: dict[str, DecisionExplainability] = {}
         for issue in diagnosis.diagnosis_report.issues:
-            decision_type = self._decision_type_for_issue(prepared, issue)
+            decision_type = self._decision_type_for_issue(prepared, issue, asset_migration_support=asset_migration_support)
             score_breakdown = self._score_breakdown(issue, decision_type, hotspot_scores, scoring_policy)
             priority_score = score_breakdown["final_score"]
             rationale = self._rationale_for_issue(issue, decision_type, rationale_fallback)
@@ -137,38 +155,22 @@ class DecisionEngine:
                     evidence_ids=list(issue.evidence_ids),
                 )
             )
-        migration_signal = self._has_migration_signal(prepared)
-        asset_migration_support = self._has_asset_migration_support(prepared)
-        migration_supporting_issues = [item for item in diagnosis.diagnosis_report.issues if self._issue_supports_migration(item)]
-        has_explicit_migration_decision = any(item.decision_type == "migration_consideration" for item in decisions)
-        if migration_signal and not has_explicit_migration_decision:
-            if diagnosis.diagnosis_report.issues and (asset_migration_support or migration_supporting_issues):
-                source_issues = list(migration_supporting_issues[:2] or diagnosis.diagnosis_report.issues[:2])
-                top_issue_ids = [item.issue_id for item in source_issues]
-                evidence_ids = [evidence_id for item in source_issues for evidence_id in item.evidence_ids]
-                decisions.append(
-                    DecisionRecord(
-                        decision_id=make_stable_id("DEC", prepared.goal, "migration_consideration"),
-                        issue_ids=top_issue_ids,
-                        decision_type="migration_consideration",
-                        target_component_ids=[component.component_id for component in structure.structure_snapshot.components if component.layer in {"api", "service"}][:3],
-                        priority_score=max([item.priority_score for item in decisions], default=7),
-                        score_breakdown=self._migration_score_breakdown(top_issue_ids, decision_breakdowns, max([item.priority_score for item in decisions], default=7)),
-                        explainability=self._migration_explainability(top_issue_ids, decision_explainability, max([item.priority_score for item in decisions], default=7)),
-                        rationale="스택 또는 전환 요구가 명시되어 있고 구조 이슈가 함께 확인되어 후속 마이그레이션 가능성을 검토하는 편이 적절합니다.",
-                        confidence=0.72,
-                        evidence_ids=list(dict.fromkeys(evidence_ids)),
-                    )
-                )
-            else:
-                synthetic_signal_detected = True
+        if goal_prefers_migration and not asset_migration_support:
+            synthetic_signal_detected = True
         decisions, guard_triggered = self._apply_migration_hard_guard(decisions, diagnosis)
         synthetic_signal_detected = synthetic_signal_detected or guard_triggered
-        decisions.sort(key=lambda item: (-item.priority_score, -item.confidence, item.decision_id))
+        decisions.sort(
+            key=lambda item: (
+                -(item.priority_score + self._goal_sort_bias(item, goal_prefers_migration)),
+                -item.confidence,
+                item.decision_id,
+            )
+        )
         return decisions, synthetic_signal_detected
 
-    def _decision_type_for_issue(self, prepared: Any, issue) -> str:
-        if self._has_migration_signal(prepared) and self._issue_supports_migration(issue):
+    def _decision_type_for_issue(self, prepared: Any, issue, *, asset_migration_support: bool | None = None) -> str:
+        del prepared
+        if (asset_migration_support if asset_migration_support is not None else False) and self._issue_supports_migration(issue):
             return "migration_consideration"
         if issue.detector_id == "boundary_mismatch":
             return "redesign"
@@ -274,9 +276,9 @@ class DecisionEngine:
             affected_slice_count=0,
         )
 
-    def _has_migration_signal(self, prepared: Any) -> bool:
-        combined = " ".join([str(getattr(prepared, "goal", "") or "")] + list(getattr(prepared, "constraints", []) or [])).lower()
-        return any(keyword in combined for keyword in self.MIGRATION_SIGNAL_KEYWORDS)
+    def _goal_prefers_migration(self, prepared: Any) -> bool:
+        goal = str(getattr(getattr(prepared, "intent", None), "goal", "") or getattr(prepared, "goal", "") or "").lower()
+        return any(keyword in goal for keyword in self.MIGRATION_SIGNAL_KEYWORDS)
 
     def _has_asset_migration_support(self, prepared: Any) -> bool:
         assets = getattr(prepared, "assets", None)
@@ -288,10 +290,29 @@ class DecisionEngine:
                 getattr(assets, "sql_queries", ""),
                 getattr(assets, "ui_template", ""),
                 getattr(assets, "framework_info", ""),
-                getattr(prepared, "temp_context", ""),
             )
         ).lower()
         return any(keyword in combined for keyword in self.MIGRATION_ASSET_KEYWORDS)
+
+    def _blocked_recommendation_types(self, prepared: Any) -> list[str]:
+        constraints = list(getattr(getattr(prepared, "intent", None), "constraints", []) or getattr(prepared, "constraints", []) or [])
+        blocked: list[str] = []
+        lowered = [str(item or "").lower() for item in constraints]
+        if any(
+            any(keyword in text for keyword in self.MIGRATION_BLOCK_KEYWORDS)
+            or (
+                ("migration" in text or "마이그레이션" in text or "전환" in text or "재플랫폼" in text or "rewrite" in text)
+                and any(token in text for token in ("금지", "제외", "without", "no ", "exclude"))
+            )
+            for text in lowered
+        ):
+            blocked.append("migration_consideration")
+        return blocked
+
+    def _goal_sort_bias(self, item: DecisionRecord, goal_prefers_migration: bool) -> float:
+        if goal_prefers_migration and item.decision_type == "migration_consideration":
+            return 0.25
+        return 0.0
 
     def _issue_supports_migration(self, issue) -> bool:
         return issue.detector_id in {"boundary_mismatch", "ui_data_access_coupling"} and issue.severity >= 4
@@ -339,7 +360,7 @@ class DecisionEngine:
 
     def _decision_rule_text(self, issue, decision_type: str) -> str:
         if decision_type == "migration_consideration":
-            return f"detector_id={issue.detector_id}와 전환 신호를 함께 확인해 migration_consideration으로 분기했습니다."
+            return f"detector_id={issue.detector_id}와 asset-derived migration support를 함께 확인해 migration_consideration으로 분기했습니다."
         if issue.detector_id == "boundary_mismatch":
             return "detector_id=boundary_mismatch 기준으로 redesign으로 분기했습니다."
         if issue.detector_id in {"rule_scatter", "state_transition_leak", "validation_guard_leak"} and (
