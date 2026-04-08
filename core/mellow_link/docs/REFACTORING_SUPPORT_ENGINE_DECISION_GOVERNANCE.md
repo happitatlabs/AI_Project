@@ -9,6 +9,10 @@
 이 문서는 `refactoring_support_engine`의 판단 통제 기준을 고정하는 운영 표준이다.  
 목적은 `migration_consideration` 같은 구조 판단이 자산 기반 근거 없이 wrapper 문구나 보조 입력만으로 생성되지 않도록 막는 것이다.
 
+엔진 정의는 아래 문장으로 고정한다.
+
+- `레거시 시스템을 해석하여 구조와 의존성을 진단하고, 신규 환경으로 이전 가능한 구조 초안과 의사결정 근거를 생성하는 엔진`
+
 현재 확인된 대표 오염 사례는 다음과 같다.
 
 - `judgment hierarchy violation`
@@ -211,3 +215,106 @@ QA에는 아래 항목을 추가한다.
 - `DecisionEngine`는 contamination이 decision으로 승격되기 전에 1차 차단한다.
 - `ResultPackager`는 persisted 결과 surface에 synthetic migration이 남지 않도록 2차 확인한다.
 - validation은 실행 후 증적을 남기는 마지막 통제 계층이다.
+
+## Section 10. Intent Usage Policy
+
+intent channel은 아래 3개로 고정한다.
+
+- `goal`
+- `constraints`
+- `scenario`
+
+evidence channel은 아래 5개로 고정한다.
+
+- `source_code`
+- `ui`
+- `sql`
+- `schema`
+- `framework/runtime`
+
+단계별 허용 범위는 아래로 고정한다.
+
+- `StructureAnalyzer`: intent 사용 금지
+- `DiagnosisEngine`: intent 사용 금지
+- `DecisionEngine.goal`: 우선순위/추천 정렬 보조만 허용
+- `DecisionEngine.constraints`: 금지 조건/배제 조건 필터 정의만 허용
+- `DecisionEngine.scenario`: 설명 보강용으로만 허용
+- `ImprovementPlanner.goal`: recommendation wording 또는 sort 보조만 허용
+- `ImprovementPlanner.constraints`: exclusion filter만 허용
+- `ImprovementPlanner.scenario`: explanation only
+
+아래 영향은 모든 단계에서 금지한다.
+
+- dependency 판정
+- `structure_snapshot` 변경
+- issue detection 변경
+- confidence 상승
+
+## Section 11. Insufficient Grounding Policy
+
+evidence 부족 상태에서 recommendation, strategy, narrative는 과신되면 안 된다.
+
+고정 규칙:
+
+- evidence-backed decision이 없으면 `insufficient_grounding = true`
+- direct structural evidence가 없으면 `insufficient_grounding = true`
+- low confidence 상태에서는 recommendation을 observation 수준으로 downgrade 한다
+- insufficient 상태에서는 recommended option을 확정안으로 표현하지 않는다
+- limited grounding 상태에서는 recommendation을 draft/검토안으로만 표현한다
+
+판단 문서는 아래 순서를 유지해야 한다.
+
+- `recommended_strategy -> rationale -> evidence -> risk -> next_step`
+
+## Section 12. Confidence Policy
+
+confidence는 evidence 기반으로만 계산한다.
+
+confidence 상승에 포함 가능한 신호:
+
+- source code
+- ui template
+- sql query
+- schema
+- framework/runtime evidence
+
+confidence 상승에 절대 포함되면 안 되는 신호:
+
+- goal
+- constraints
+- scenario
+- supporting docs
+- narrative fallback
+
+## Section 13. Output Polishing Policy
+
+이 엔진의 최종 결과 패키지는 단순 분석 나열이 아니라 사람이 검토 가능한 판단 문서로 읽혀야 한다.
+
+고정 규칙:
+
+- `executive_summary_v2`는 항상 아래 4문장 구조를 유지한다
+  - `문제`
+  - `영향`
+  - `조치`
+  - `다음 단계`
+- `one_line_conclusion`은 decision 문장처럼 읽혀야 하며 vague wording을 남용하면 안 된다
+- `recommended_strategy`와 `recommended_option` 문장은 설계 제안처럼 읽혀야 한다
+- `rationale` 문장은 반드시 근거 자산 또는 detector 판단을 암시해야 한다
+- `risk`는 실제 이전/개발 리스크를 설명해야 한다
+- `next_step`은 바로 실행 가능한 식별/분리/확인 행동이어야 한다
+
+grounding-aware wording 규칙:
+
+- `grounded`: 단정형 recommendation 허용
+- `limited`: 조건형 recommendation만 허용, `검토안` 또는 `우선 검토` 톤 유지
+- `insufficient`: recommendation 확정 금지, observation/근거 확보 문장만 허용
+
+표현 일관성 규칙:
+
+- 같은 narrative axis는 같은 문장 패턴을 유지해야 한다
+- `validation` 계열은 차단 조건, 검증 순서, 저장 전 검증 분리 패턴을 유지한다
+- `workflow` 계열은 승인 트리거, 승인 단계, 예외 처리 경계 분리 패턴을 유지한다
+- `state_transition` 계열은 상태 전이, 처리 가능 상태, 전이 조건 분리 패턴을 유지한다
+- `access_control` 계열은 승인 권한, 승인 주체, 부서 책임 분리 패턴을 유지한다
+- `query_filter` 계열은 조회 조건, 필터 조합, 결과 목록 분리 패턴을 유지한다
+- `amount_threshold` 계열은 금액 구간, 한도 정책, 고액 처리 경계 분리 패턴을 유지한다

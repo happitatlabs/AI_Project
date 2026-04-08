@@ -1,6 +1,7 @@
 # Refactoring Support Engine MVP 보강안
 
 **Summary**
+- 엔진 정의는 아래 문장으로 고정한다: `레거시 시스템을 해석하여 구조와 의존성을 진단하고, 신규 환경으로 이전 가능한 구조 초안과 의사결정 근거를 생성하는 엔진`.
 - MVP 분석 단위는 `feature_slice`로 고정한다.
 - 공개 실행선은 유지한다: `project -> anonymization -> SafeAnalysisBundle -> rebuild_assistant -> result package`.
 - 현재의 거대 단일 조립기인 [service.py](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/modules/rebuild_assistant/service.py)는 얇은 어댑터로 축소하고, 실제 엔진은 `services/refactoring_support_engine`로 분리한다.
@@ -315,6 +316,27 @@ EvidenceLink:
   - `scope`
 - Q&A는 새 판단을 만들지 않는다. 기존 판단, 근거, 실행 단계를 설명만 한다.
 - grounding이 부족하면 `insufficient_grounding=true`로 응답하고 억지로 답을 만들지 않는다.
+
+**Judgment Document Output Contract**
+- 결과 패키지는 `분석 결과 목록`이 아니라 `판단 문서`처럼 읽혀야 한다.
+- top narrative는 아래 구조를 고정한다.
+  - `executive_summary_v2`: `문제 -> 영향 -> 조치 -> 다음 단계`
+  - `one_line_conclusion`: 최종 결정 문장
+  - `document_outline`: `recommended_strategy -> rationale -> evidence -> risk -> next_step`
+- wording level은 grounding에 따라 고정한다.
+  - `grounded`: 단정형 recommendation
+  - `limited`: 조건형 recommendation, `검토안` 또는 `우선 검토` 톤 유지
+  - `insufficient`: recommendation 확정 금지, observation + 근거 확보 우선
+- `rationale`은 detector summary만 반복하지 않고 evidence asset 또는 직접 확인된 구조 흔적과 연결되어야 한다.
+- `risk`는 실제 이전/개발 시 발생 가능한 실패 양상을 설명해야 한다.
+- `next_step`은 `식별`, `분리`, `정리`, `확보`, `검증` 같은 실행 동사로 시작하는 concrete action이어야 한다.
+- 같은 narrative axis는 같은 표현 패턴을 유지한다.
+  - `validation`: 차단 조건, 검증 순서, 저장 전 검증 분리
+  - `workflow`: 승인 트리거, 승인 단계, 예외 처리 경계 분리
+  - `state_transition`: 상태 전이, 처리 가능 상태, 전이 조건 분리
+  - `access_control`: 승인 권한, 승인 주체, 부서 책임 분리
+  - `query_filter`: 조회 조건, 필터 조합, 결과 목록 분리
+  - `amount_threshold`: 금액 구간, 한도 정책, 고액 처리 경계 분리
 
 **Execution Flow**
 1. `[routers/projects.py](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/routers/projects.py)`와 anonymization 흐름은 그대로 유지한다.

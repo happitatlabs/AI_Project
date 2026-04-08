@@ -617,7 +617,7 @@ repository.save(entity);
     assert any("저장 검증 규칙" in item for item in result.analysis_summary)
     assert any("검증" in item or "중복" in item or "정책" in item for item in result.rebuild_strategy)
     assert any("커맨드" in item or "검증" in item or "정책" in item for item in result.recomposition_draft.backend)
-    assert "재구성하는 것이 필요합니다" in result.one_line_conclusion
+    assert "우선 검토해야 합니다" in result.one_line_conclusion or "분리해야 합니다" in result.one_line_conclusion
     rules = result.extracted_rules.save_validation.model_dump()
     assert set(rules.keys()) == {
         "entities",
