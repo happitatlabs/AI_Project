@@ -76,8 +76,6 @@ class TemplateSupport:
                 strategy.append("보조 신호로 저장 검증 규칙이 감지되어 저장 전 차단 규칙과 중복 체크도 함께 반영합니다.")
             if prepared.scope_limited:
                 strategy.insert(0, "요청 범위가 V0 한계를 넘으므로 전체 마이그레이션 대신 단일 기능 재구성 전략으로 축소합니다.")
-            if prepared.constraints:
-                strategy.append(f"제약 조건 반영: {prepared.constraints[0]}")
             return strategy[:6]
     
     def build_layer_reconstruction(self, prepared: PreparedRebuildInput) -> LayeredListResult:
@@ -602,8 +600,6 @@ class TemplateSupport:
     def _resolve_domain_anchor(self, prepared: PreparedRebuildInput) -> str | None:
             text = " ".join(
                 [
-                    prepared.goal,
-                    " ".join(prepared.constraints),
                     " ".join(prepared.asset_presence.source_asset_names),
                     " ".join(prepared.asset_presence.ui_asset_names),
                     " ".join(prepared.asset_presence.schema_asset_names),
@@ -710,8 +706,6 @@ class TemplateSupport:
         ) -> bool:
             bundle = " ".join(
                 [
-                    prepared.goal,
-                    " ".join(prepared.constraints),
                     prepared.assets.source_code,
                     prepared.assets.ui_template,
                     prepared.assets.sql_queries,
@@ -1096,9 +1090,11 @@ class TemplateSupport:
             if rule_phrases:
                 joined_rules = ", ".join(rule_phrases[:2])
                 lines.append(f"이 샘플에서는 {joined_rules} 규칙이 직접 확인되었습니다.")
-            lines.append(f"따라서 {axis_phrase}를 기준으로 {self._option_label(recommended.name)}를 우선 적용해야 합니다.")
+            lines.append(
+                f"따라서 {self._attach_object_particle(self._option_label(recommended.name))} 우선안으로 두고 {axis_phrase}를 먼저 고정해야 합니다."
+            )
             if contract_phrases:
-                lines.append(f"이 방식은 {', '.join(contract_phrases[:2])} 계약을 유지하면서도 구현 범위를 통제해야 하는 현재 조건과 충돌하지 않습니다.")
+                lines.append(f"이 안은 {', '.join(contract_phrases[:2])} 계약을 유지하면서도 분리 범위를 통제하기 쉽습니다.")
             lines.append(option_phrase)
             return " ".join(lines)
     
@@ -1253,20 +1249,20 @@ class TemplateSupport:
             ids = [item.template_id for item in applied_templates[:2]]
             option_label = self._option_label(option_name)
             if ids[:2] == ["state_transition", "access_control"]:
-                return f"다른 옵션보다 상태 전이와 권한 규칙을 하나의 정책 계층에서 함께 다뤄야 하므로 {option_label}를 우선 적용해야 합니다."
+                return f"상태 전이와 권한 규칙을 하나의 정책 계층에서 함께 다뤄야 하므로 {self._attach_object_particle(option_label)} 우선 적용해야 합니다."
             if ids and ids[0] == "workflow":
-                return f"다른 옵션보다 승인 트리거, 승인 주체, 단계별 의사결정 게이트를 같은 워크플로우 계층으로 고정해야 하므로 {option_label}를 우선 적용해야 합니다."
+                return f"승인 트리거, 승인 주체, 단계별 의사결정 게이트를 같은 워크플로우 계층으로 묶어야 하므로 {self._attach_object_particle(option_label)} 우선 적용해야 합니다."
             if ids[:2] in (["validation", "access_control"], ["access_control", "validation"]):
-                return f"다른 옵션보다 금액 한도와 승인 권한을 함께 분리해야 하므로 {option_label}를 우선 적용해야 합니다."
+                return f"금액 한도와 승인 권한을 함께 분리해야 하므로 {self._attach_object_particle(option_label)} 우선 적용해야 합니다."
             if ids and ids[0] == "access_control":
-                return f"다른 옵션보다 승인 주체, 부서 책임, 처리 경로를 같은 권한 정책으로 고정해야 하므로 {option_label}를 우선 적용해야 합니다."
+                return f"승인 주체, 부서 책임, 처리 경로를 같은 권한 정책으로 묶어야 하므로 {self._attach_object_particle(option_label)} 우선 적용해야 합니다."
             if ids and ids[0] == "validation":
-                return f"다른 옵션보다 선행 차단 조건과 저장 전 검증 순서를 함께 고정해야 하므로 {option_label}를 우선 적용해야 합니다."
+                return f"선행 차단 조건과 저장 전 검증 순서를 함께 정리해야 하므로 {self._attach_object_particle(option_label)} 우선 적용해야 합니다."
             if ids and ids[0] == "query_filter":
-                return f"다른 옵션보다 조회 조건, 정렬, 페이징 규칙을 같은 조회 모델로 고정해야 하므로 {option_label}를 우선 적용해야 합니다."
+                return f"조회 조건, 정렬, 페이징 규칙을 같은 조회 모델로 묶어야 하므로 {self._attach_object_particle(option_label)} 우선 적용해야 합니다."
             if ids and ids[0] == "amount_threshold":
-                return f"다른 옵션보다 금액 구간과 한도 정책을 같은 정책 계층으로 고정해야 하므로 {option_label}를 우선 적용해야 합니다."
-            return f"다른 옵션보다 핵심 규칙과 유지 계약을 함께 반영해야 하므로 {option_label}를 우선 적용해야 합니다."
+                return f"금액 구간과 한도 정책을 같은 정책 계층으로 묶어야 하므로 {self._attach_object_particle(option_label)} 우선 적용해야 합니다."
+            return f"핵심 규칙과 유지 계약을 함께 반영해야 하므로 {self._attach_object_particle(option_label)} 우선 적용해야 합니다."
     
     def _build_non_recommended_selection_reason(self, option_name: str, applied_templates: list[AppliedJudgmentTemplate]) -> str:
             label = self._option_label(option_name)
@@ -2629,8 +2625,6 @@ class TemplateSupport:
     def _combined_evidence_text(self, prepared: PreparedRebuildInput) -> str:
             return " ".join(
                 [
-                    prepared.goal,
-                    " ".join(prepared.constraints),
                     prepared.assets.source_code,
                     prepared.assets.ui_template,
                     prepared.assets.sql_queries,
@@ -2709,17 +2703,17 @@ class TemplateSupport:
     def _rule_templates_for_concept(self, concept: str) -> list[dict]:
             if concept == "주문 마감":
                 return [
-                    {"title": "VIP 야간 마감 제한", "statement": "VIP 고객은 야간 시간대에 주문 마감을 수행할 수 없습니다.", "keywords": ("vip", "22", "23", "00", "야간", "마감"), "preferred_types": ("source", "ui", "constraint"), "design_targets": ("정책 서비스", "상태 전이", "검증 흐름")},
-                    {"title": "대리점 고액 주문 본사 전용", "statement": "대리점 채널의 고액 주문은 본사 권한으로만 마감할 수 있습니다.", "keywords": ("agency", "대리점", "hq", "고액", "5000000"), "preferred_types": ("source", "constraint"), "design_targets": ("정책 서비스", "권한 모델", "API")},
-                    {"title": "배송보류 해제 선행", "statement": "배송보류 상태가 해제되기 전에는 주문 마감을 진행할 수 없습니다.", "keywords": ("delivery", "hold", "배송보류"), "preferred_types": ("source", "constraint"), "design_targets": ("검증 흐름", "API", "상태 전이")},
+                    {"title": "VIP 야간 마감 제한", "statement": "VIP 고객은 야간 시간대에 주문 마감을 수행할 수 없습니다.", "keywords": ("vip", "22", "23", "00", "야간", "마감"), "preferred_types": ("source", "ui"), "design_targets": ("정책 서비스", "상태 전이", "검증 흐름")},
+                    {"title": "대리점 고액 주문 본사 전용", "statement": "대리점 채널의 고액 주문은 본사 권한으로만 마감할 수 있습니다.", "keywords": ("agency", "대리점", "hq", "고액", "5000000"), "preferred_types": ("source",), "design_targets": ("정책 서비스", "권한 모델", "API")},
+                    {"title": "배송보류 해제 선행", "statement": "배송보류 상태가 해제되기 전에는 주문 마감을 진행할 수 없습니다.", "keywords": ("delivery", "hold", "배송보류"), "preferred_types": ("source",), "design_targets": ("검증 흐름", "API", "상태 전이")},
                     {"title": "수출 주문 고액건 REVIEW_REQUIRED", "statement": "수출 주문의 고액 건은 즉시 마감하지 않고 REVIEW_REQUIRED 상태로 전환해야 합니다.", "keywords": ("export", "수출", "review_required", "7000000"), "preferred_types": ("source", "sql"), "design_targets": ("상태 전이", "정책 서비스", "API")},
                 ]
             if concept == "청구 조정":
                 return [
-                    {"title": "FRAUD 본사 심사 전용", "statement": "FRAUD 사고건은 HQ_REVIEWER 권한으로만 청구 조정을 수행할 수 있습니다.", "keywords": ("fraud", "hq_reviewer"), "preferred_types": ("source", "constraint"), "design_targets": ("정책 서비스", "권한 모델", "API")},
-                    {"title": "지점장 300만원 한도", "statement": "지점장은 300만원 이상 청구건을 조정할 수 없습니다.", "keywords": ("branch_manager", "지점장", "3000000", "300만원"), "preferred_types": ("source", "constraint"), "design_targets": ("정책 서비스", "검증 흐름")},
-                    {"title": "1천만원 이상 전담 부서 처리", "statement": "1천만원 이상 청구건은 CLAIM_AUDIT 부서만 조정할 수 있습니다.", "keywords": ("10000000", "1천만원", "claim_audit"), "preferred_types": ("source", "constraint"), "design_targets": ("정책 서비스", "권한 모델", "API")},
-                    {"title": "B99 긴급건 본사 선승인", "statement": "B99 지점의 긴급 청구건은 본사 선승인 없이 조정할 수 없습니다.", "keywords": ("b99", "urgent", "긴급", "선승인"), "preferred_types": ("source", "constraint"), "design_targets": ("예외 승인 흐름", "정책 서비스", "API")},
+                    {"title": "FRAUD 본사 심사 전용", "statement": "FRAUD 사고건은 HQ_REVIEWER 권한으로만 청구 조정을 수행할 수 있습니다.", "keywords": ("fraud", "hq_reviewer"), "preferred_types": ("source",), "design_targets": ("정책 서비스", "권한 모델", "API")},
+                    {"title": "지점장 300만원 한도", "statement": "지점장은 300만원 이상 청구건을 조정할 수 없습니다.", "keywords": ("branch_manager", "지점장", "3000000", "300만원"), "preferred_types": ("source",), "design_targets": ("정책 서비스", "검증 흐름")},
+                    {"title": "1천만원 이상 전담 부서 처리", "statement": "1천만원 이상 청구건은 CLAIM_AUDIT 부서만 조정할 수 있습니다.", "keywords": ("10000000", "1천만원", "claim_audit"), "preferred_types": ("source",), "design_targets": ("정책 서비스", "권한 모델", "API")},
+                    {"title": "B99 긴급건 본사 선승인", "statement": "B99 지점의 긴급 청구건은 본사 선승인 없이 조정할 수 없습니다.", "keywords": ("b99", "urgent", "긴급", "선승인"), "preferred_types": ("source",), "design_targets": ("예외 승인 흐름", "정책 서비스", "API")},
                     {"title": "마감/취소 상태 조정 금지", "statement": "CLOSED 또는 CANCELLED 상태의 청구건은 조정할 수 없습니다.", "keywords": ("closed", "cancelled", "조정", "adjust"), "preferred_types": ("source", "schema", "sql"), "design_targets": ("상태 전이", "검증 흐름", "API")},
                 ]
             return []
@@ -2794,8 +2788,6 @@ class TemplateSupport:
                 ("ui", prepared.asset_presence.ui_asset_names, prepared.assets.ui_template),
                 ("schema", prepared.asset_presence.schema_asset_names, prepared.assets.database_schema),
                 ("sql", prepared.asset_presence.sql_asset_names, prepared.assets.sql_queries),
-                ("constraint", ["constraints.txt"], "\n".join(prepared.constraints)),
-                ("goal", ["goal.txt"], prepared.goal),
             ]
     
     def _extract_excerpt(self, text: str, keywords: tuple[str, ...] | list[str]) -> str:
@@ -2819,8 +2811,6 @@ class TemplateSupport:
             kinds = {item.evidence_kind for item in evidence}
             if kinds & {"source", "ui", "sql", "schema"}:
                 return "확정", "현재 자산의 코드, 화면, SQL 또는 스키마에서 직접 확인되었습니다."
-            if kinds & {"constraint", "goal"}:
-                return "조건부", "제약조건 또는 목표 문장에서 확인되었으며 추가 운영 자산 확인이 필요합니다."
             return "가정", "직접 근거가 부족해 가정 수준으로 분류했습니다."
     
     def _dedupe_by_normalized_text(self, items: list, *, attr: str) -> list:

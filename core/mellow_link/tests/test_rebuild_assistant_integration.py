@@ -18,6 +18,54 @@ from mellow_link.services.refactoring_support_engine.template_support import Tem
 from .refactoring_support_test_utils import build_safe_bundle
 
 
+def _build_validation_bundle_result(*, grounded: bool = False):
+    service = RebuildAssistantService()
+    if grounded:
+        prepared = service.prepare_input(
+            goal="modernize order flow",
+            assets=RebuildAssetsPayload(
+                source_code="""
+class OrderService:
+    def submit(self, order, repo):
+        if not order.amount:
+            raise ValueError("required")
+        if order.status == "READY" and order.amount > 1000:
+            repo.save(order)
+            return approve(order)
+                """,
+                ui_template='<button onclick="submitOrder()">submit</button>',
+                sql_queries="SELECT * FROM orders WHERE status = ? AND amount > ? ORDER BY created_at DESC",
+                database_schema="CREATE TABLE orders (id bigint primary key, status varchar(20), amount numeric(12,2));",
+                framework_info="JSP + Spring MVC + MyBatis",
+            ),
+            constraints=[],
+        )
+    else:
+        prepared = service.prepare_safe_bundle_input(
+            goal="modernize order flow",
+            safe_bundle=build_safe_bundle(
+                [
+                    {
+                        "name": "order_service.py",
+                        "content": """
+class OrderService:
+    def submit(self, order, repo):
+        if not order.amount:
+            raise ValueError("required")
+        if order.status == "READY" and order.amount > 1000:
+            repo.save(order)
+            return approve(order)
+                        """,
+                    },
+                    {"name": "order_page.jsp", "content": '<button onclick="submitOrder()">submit</button>'},
+                    {"name": "order_query.sql", "content": "SELECT * FROM orders WHERE status = 'READY' AND amount > 1000"},
+                ]
+            ),
+            constraints=[],
+        )
+    return service.build_result(prepared)
+
+
 def test_rebuild_assistant_safe_bundle_readme_only_keeps_source_and_framework_missing_context():
     bundle = build_safe_bundle(
         [
@@ -179,6 +227,8 @@ class OrderService:
     assembled_with_intent = InputAssembler().assemble(prepared_with_intent)
     structure_without_intent = StructureAnalyzer().analyze(InputAssembler().assemble(prepared_without_intent))
     structure_with_intent = StructureAnalyzer().analyze(assembled_with_intent)
+    diagnosis_without_intent = DiagnosisEngine().run(prepared_without_intent, structure_without_intent, service)
+    diagnosis_with_intent = DiagnosisEngine().run(prepared_with_intent, structure_with_intent, service)
 
     assert prepared_with_intent.intent.goal == "주문 저장 흐름을 점검한다."
     assert prepared_with_intent.intent.constraints == ["기존 DB 계약 유지"]
@@ -186,6 +236,201 @@ class OrderService:
     assert [item.name for item in assembled_with_intent.asset_inventory] == ["order_service.py", "order_page.html"]
     assert [item.asset_name for item in assembled_with_intent.source_blocks] == ["order_service.py", "order_page.html"]
     assert structure_without_intent.structure_snapshot.model_dump() == structure_with_intent.structure_snapshot.model_dump()
+    assert diagnosis_without_intent.diagnosis_report.model_dump() == diagnosis_with_intent.diagnosis_report.model_dump()
+
+
+def test_rebuild_assistant_strong_scenario_keeps_recommendation_as_insufficient_grounding():
+    service = RebuildAssistantService()
+    prepared = service.prepare_input(
+        goal="",
+        assets=RebuildAssetsPayload(),
+        constraints=[],
+        temp_context="반드시 React와 Spring Boot로 전면 전환해야 하고 승인 구조도 새로 설계해야 한다.",
+    )
+
+    result = service.build_result(prepared)
+    grounding = result.extensions["decision_governance"]["recommendation_grounding"]
+
+    assert grounding["insufficient_grounding"] is True
+    assert grounding["level"] == "insufficient"
+    assert result.recommended_option is None
+    assert result.confidence == 0.0
+    assert "구조 근거가 부족" in result.one_line_conclusion
+    assert [line.split(":", 1)[0] for line in result.executive_summary_v2[:4]] == ["문제", "영향", "조치", "다음 단계"]
+    assert "검토용 초안" in result.executive_summary_v2[2]
+    assert result.extensions["decision_governance"]["document_outline"]["rationale"].startswith("직접 연결된 코드")
+    assert "런타임 근거" in result.extensions["decision_governance"]["document_outline"]["next_step"]
+
+
+def test_rebuild_assistant_constraints_affect_recommendation_filter_metadata_only():
+    bundle = build_safe_bundle(
+        [
+            {
+                "name": "legacy_order_page.jsp",
+                "content": """
+<% String sql = "SELECT * FROM orders WHERE status = 'READY'"; %>
+<button onclick="submitOrder()">submit</button>
+                """,
+            },
+            {
+                "name": "order_service.py",
+                "content": """
+# migration target: react + spring boot
+class OrderService:
+    def submit(self, order):
+        if order.status == "READY" and order.amount > 1000:
+            return repo.save(order)
+                """,
+            },
+            {
+                "name": "approval_service.py",
+                "content": """
+class ApprovalService:
+    def approve(self, order):
+        if order.status == "READY" and order.amount > 1000:
+            return repo.save(order)
+                """,
+            },
+        ]
+    )
+    service = RebuildAssistantService()
+
+    result_without_constraint = service.build_result(
+        service.prepare_safe_bundle_input(
+            goal="legacy order approval flow migration plan",
+            safe_bundle=bundle,
+            constraints=[],
+        )
+    )
+    result_with_constraint = service.build_result(
+        service.prepare_safe_bundle_input(
+            goal="legacy order approval flow migration plan",
+            safe_bundle=bundle,
+            constraints=["마이그레이션은 이번 범위에서 제외"],
+        )
+    )
+
+    assert result_without_constraint.structure_snapshot == result_with_constraint.structure_snapshot
+    assert result_without_constraint.diagnosis_report == result_with_constraint.diagnosis_report
+    assert result_without_constraint.extensions["decision_governance"]["constraint_filters_applied"] == []
+    assert result_with_constraint.extensions["decision_governance"]["constraint_filters_applied"] == [
+        {
+            "decision_type": "migration_consideration",
+            "effect": "exclude_from_recommendation",
+            "source_constraint": "마이그레이션은 이번 범위에서 제외",
+        }
+    ]
+
+
+def test_rebuild_assistant_confidence_does_not_increase_with_strong_intent_inputs():
+    service = RebuildAssistantService()
+    base_assets = RebuildAssetsPayload(
+        source_code="class OrderService:\n    pass",
+        ui_template="<button>submit</button>",
+    )
+    plain = service.prepare_input(goal="", assets=base_assets, constraints=[])
+    intent_heavy = service.prepare_input(
+        goal="반드시 React와 Spring Boot로 전환한다.",
+        assets=base_assets,
+        constraints=["마이그레이션 계획은 별도 문서로 만든다."],
+        temp_context="업무 시나리오: 구조를 전면 재설계해야 한다.",
+    )
+
+    assert service.estimate_confidence(plain) == service.estimate_confidence(intent_heavy)
+
+
+def test_rebuild_assistant_same_input_keeps_polished_narrative_deterministic():
+    first = _build_validation_bundle_result(grounded=False)
+    second = _build_validation_bundle_result(grounded=False)
+
+    assert first.one_line_conclusion == second.one_line_conclusion
+    assert first.executive_summary_v2 == second.executive_summary_v2
+    assert first.recommended_option.model_dump() == second.recommended_option.model_dump()
+    assert first.extensions["decision_governance"]["document_outline"] == second.extensions["decision_governance"]["document_outline"]
+
+
+def test_rebuild_assistant_limited_grounding_uses_conditional_recommendation_wording():
+    result = _build_validation_bundle_result(grounded=False)
+    outline = result.extensions["decision_governance"]["document_outline"]
+    grounding = result.extensions["decision_governance"]["recommendation_grounding"]
+
+    assert grounding["level"] == "limited"
+    assert result.one_line_conclusion.endswith("우선 검토해야 합니다.")
+    assert [line.split(":", 1)[0] for line in result.executive_summary_v2[:4]] == ["문제", "영향", "조치", "다음 단계"]
+    assert "우선 검토안" in result.executive_summary_v2[2]
+    assert result.recommended_option is not None
+    assert "우선 검토안" in result.recommended_option.selection_reason
+    assert "판단 근거는" in outline["rationale"]
+    assert outline["risk"] == "차단 조건과 저장 전 검증이 다시 섞이면 예외 누락과 저장 경로 재작업 위험이 커집니다."
+
+
+def test_rebuild_assistant_grounded_recommendation_stays_assertive_and_evidence_linked():
+    result = _build_validation_bundle_result(grounded=True)
+    outline = result.extensions["decision_governance"]["document_outline"]
+    grounding = result.extensions["decision_governance"]["recommendation_grounding"]
+
+    assert grounding["level"] == "grounded"
+    assert result.one_line_conclusion.endswith("분리해야 합니다.")
+    assert "우선안" in result.executive_summary_v2[2]
+    assert result.recommended_option is not None
+    assert "검토안" not in result.recommended_option.selection_reason
+    assert "초안" not in result.recommended_option.selection_reason
+    assert "판단 근거는" in outline["rationale"]
+    assert "screen.html" in outline["rationale"] or "order_page" in outline["rationale"]
+
+
+def test_rebuild_assistant_same_validation_pattern_uses_consistent_risk_and_conclusion_shape():
+    service = RebuildAssistantService()
+    first = service.build_result(
+        service.prepare_safe_bundle_input(
+            goal="modernize order validation flow",
+            safe_bundle=build_safe_bundle(
+                [
+                    {
+                        "name": "order_service.py",
+                        "content": """
+class OrderService:
+    def submit(self, order, repo):
+        if not order.amount:
+            raise ValueError("required")
+        if order.status == "READY":
+            repo.save(order)
+                        """,
+                    },
+                    {"name": "order_page.jsp", "content": '<button onclick="submitOrder()">submit</button>'},
+                    {"name": "order_query.sql", "content": "SELECT * FROM orders WHERE status = 'READY'"},
+                ]
+            ),
+            constraints=[],
+        )
+    )
+    second = service.build_result(
+        service.prepare_safe_bundle_input(
+            goal="modernize claim validation flow",
+            safe_bundle=build_safe_bundle(
+                [
+                    {
+                        "name": "claim_service.py",
+                        "content": """
+class ClaimService:
+    def submit(self, claim, repo):
+        if not claim.amount:
+            raise ValueError("required")
+        if claim.status == "READY":
+            repo.save(claim)
+                        """,
+                    },
+                    {"name": "claim_page.jsp", "content": '<button onclick="submitClaim()">submit</button>'},
+                    {"name": "claim_query.sql", "content": "SELECT * FROM claims WHERE status = 'READY'"},
+                ]
+            ),
+            constraints=[],
+        )
+    )
+
+    assert "차단 조건, 검증 순서, 저장 전 검증을 검증 계층과 처리 흐름으로" in first.one_line_conclusion
+    assert "차단 조건, 검증 순서, 저장 전 검증을 검증 계층과 처리 흐름으로" in second.one_line_conclusion
+    assert first.extensions["decision_governance"]["document_outline"]["risk"] == second.extensions["decision_governance"]["document_outline"]["risk"]
 
 
 def test_rebuild_assistant_result_contains_authoritative_blocks():
