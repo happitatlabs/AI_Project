@@ -246,6 +246,52 @@ class DependencyResolver:
 
 
 class FeatureSliceExtractor:
+    _USECASE_SEED_ASSET_TYPE_PRIORITY = {"source": 0, "ui": 1, "sql": 2, "schema": 3}
+    _USECASE_SEED_GENERIC_TOKENS = {
+        "app",
+        "cs",
+        "data",
+        "db",
+        "default",
+        "dto",
+        "feature",
+        "flow",
+        "go",
+        "handler",
+        "html",
+        "index",
+        "java",
+        "js",
+        "jsp",
+        "jsx",
+        "kt",
+        "legacy",
+        "main",
+        "mapper",
+        "md",
+        "model",
+        "page",
+        "php",
+        "py",
+        "query",
+        "rb",
+        "repo",
+        "repository",
+        "sample",
+        "scala",
+        "schema",
+        "screen",
+        "service",
+        "sql",
+        "table",
+        "temp",
+        "template",
+        "tmp",
+        "ts",
+        "tsx",
+        "ui",
+        "view",
+    }
     _API_PATTERNS = (
         re.compile(r"@router\.(get|post|put|delete|patch)\(\s*[\"']([^\"']+)[\"']"),
         re.compile(r"@app\.(get|post|put|delete|patch)\(\s*[\"']([^\"']+)[\"']"),
@@ -424,8 +470,9 @@ class FeatureSliceExtractor:
         return deduped
 
     def _usecase_seed(self, assets) -> dict[str, str]:
-        usecase = self._normalize_usecase(self._usecase_seed_text(assets))
-        asset_id = self._usecase_seed_asset_id(assets)
+        asset = self._preferred_usecase_seed_asset(assets)
+        usecase = self._normalize_usecase(self._usecase_seed_text(asset))
+        asset_id = self._usecase_seed_asset_id(asset)
         return {
             "name": f"usecase:{usecase}",
             "entry_point": f"usecase:{usecase}",
@@ -435,18 +482,35 @@ class FeatureSliceExtractor:
             "priority": 3,
         }
 
-    def _usecase_seed_text(self, assets) -> str:
-        for asset in assets or []:
+    def _preferred_usecase_seed_asset(self, assets):
+        candidates = []
+        for index, asset in enumerate(assets or []):
             asset_type = str(getattr(asset, "asset_type", "") or "").strip().lower()
-            if asset_type in {"source", "ui", "sql", "schema"}:
-                return str(getattr(asset, "name", "") or "").strip()
+            if asset_type not in self._USECASE_SEED_ASSET_TYPE_PRIORITY:
+                continue
+            descriptive_count = self._descriptive_usecase_token_count(str(getattr(asset, "name", "") or ""))
+            candidates.append(
+                (
+                    -descriptive_count,
+                    self._USECASE_SEED_ASSET_TYPE_PRIORITY.get(asset_type, 99),
+                    index,
+                    asset,
+                )
+            )
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item[:3])
+        return candidates[0][3]
+
+    def _usecase_seed_text(self, asset) -> str:
+        if asset is not None:
+            asset_name = str(getattr(asset, "name", "") or "").strip()
+            return self._usecase_seed_label(asset_name) or asset_name
         return "legacy_flow"
 
-    def _usecase_seed_asset_id(self, assets) -> str:
-        for asset in assets or []:
-            asset_type = str(getattr(asset, "asset_type", "") or "").strip().lower()
-            if asset_type in {"source", "ui", "sql", "schema"}:
-                return str(getattr(asset, "asset_id", "") or "").strip() or "legacy"
+    def _usecase_seed_asset_id(self, asset) -> str:
+        if asset is not None:
+            return str(getattr(asset, "asset_id", "") or "").strip() or "legacy"
         return "legacy"
 
     def _normalize_usecase(self, text: str) -> str:
@@ -455,6 +519,19 @@ class FeatureSliceExtractor:
         if not tokens:
             return "legacy_flow"
         return "_".join(tokens[:3])
+
+    def _usecase_seed_label(self, asset_name: str) -> str:
+        stem = os.path.splitext(os.path.basename(asset_name or ""))[0]
+        if not stem:
+            return ""
+        return re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", stem).replace("_", " ").replace("-", " ").strip()
+
+    def _descriptive_usecase_token_count(self, asset_name: str) -> int:
+        label = self._usecase_seed_label(asset_name)
+        if not label:
+            return 0
+        tokens = [token.lower() for token in re.split(r"[^A-Za-z0-9가-힣]+", label) if token]
+        return len([token for token in tokens if token not in self._USECASE_SEED_GENERIC_TOKENS])
 
     def _seed_key(self, seed: dict[str, str]) -> str:
         return f"{seed['asset_id']}::{seed['entry_point']}"

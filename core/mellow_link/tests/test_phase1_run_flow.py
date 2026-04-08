@@ -1,4 +1,5 @@
 import json
+import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -229,6 +230,10 @@ def _project_run_history_rows(project_id: str):
             .order_by(ProjectRunHistory.sequence_no.asc())
             .all()
         )
+
+
+def _project_result_archive_dir(project_id: str, run_id: str) -> Path:
+    return MELLOW_LINK_ROOT.parents[1] / "data" / "outputs" / "final" / "project_results" / project_id / run_id
 
 
 
@@ -1295,6 +1300,146 @@ def test_project_result_endpoint_keeps_polish_bundle_sections_after_truncate(cli
     assert isinstance(payload["polish_bundle"]["polished_sections"], list)
     assert isinstance(payload["polish_bundle"]["preserved_facts"], list)
     assert isinstance(payload["polish_bundle"]["warnings"], list)
+
+
+def test_project_result_json_persists_md_and_docx_archive(client, monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from mellow_link import app_state
+    from mellow_link.infra import ModernizationProject
+    from mellow_link.infra.database import SessionLocal
+    from mellow_link.infra.run_events import EVENT_TYPE_RUN_FINISHED, emit_event
+
+    user = _register(client, username_prefix="phase1_result_archive")
+    project_id, _ = _create_persisted_project(
+        client,
+        user,
+        monkeypatch,
+        upload_session_id=f"phase1-result-archive-{uuid.uuid4().hex[:8]}",
+        filename="legacy.jsp",
+        content=b"<% String sql = \"SELECT * FROM orders\"; %>",
+        project_name="결과 저장 프로젝트",
+        client_name="OO아카이브",
+    )
+    structured_result, polish_bundle = _build_large_rebuild_result_with_polish_bundle()
+
+    with SessionLocal() as db:
+        project = db.query(ModernizationProject).filter(ModernizationProject.id == project_id).first()
+        run_id = project.run_id
+        emit_event(
+            run_id,
+            EVENT_TYPE_RUN_FINISHED,
+            {
+                "success": True,
+                "summary": "completed",
+                "structured_result": structured_result,
+                "polish_bundle": polish_bundle,
+                "primary_feature_mode": "save_validation",
+                "module_id": "rebuild_assistant",
+                "run_kind": "rebuild_plan",
+            },
+            db=db,
+        )
+
+    archive_dir = _project_result_archive_dir(project_id, run_id)
+    if archive_dir.exists():
+        shutil.rmtree(archive_dir)
+
+    generated_docx_path = tmp_path / "generated_archive.docx"
+    generated_docx_path.write_bytes(b"fake-archive-docx")
+
+    class FakeDocService:
+        def is_available(self):
+            return True
+
+        async def generate(self, request):
+            assert request.output_type.value == "docx"
+            assert request.filename == "결과_저장_프로젝트_result.docx"
+            return SimpleNamespace(output_path=generated_docx_path)
+
+    monkeypatch.setattr(app_state, "doc_service", FakeDocService(), raising=False)
+
+    response = client.get(
+        f"/projects/{project_id}/result",
+        params={"format": "json", "surface_mode": "internal"},
+        headers=user["headers"],
+    )
+    assert response.status_code == 200, response.text
+
+    markdown_path = archive_dir / "result.md"
+    docx_path = archive_dir / "result.docx"
+    assert markdown_path.exists()
+    assert docx_path.exists()
+    assert "# 결과 패키지 - 결과 저장 프로젝트" in markdown_path.read_text(encoding="utf-8")
+    assert docx_path.read_bytes() == b"fake-archive-docx"
+
+
+def test_manual_project_run_archives_previous_completed_result(client, monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from mellow_link import app_state
+    from mellow_link.infra import ModernizationProject
+    from mellow_link.infra.database import SessionLocal
+    from mellow_link.infra.run_events import EVENT_TYPE_RUN_FINISHED, emit_event
+
+    user = _register(client, username_prefix="phase1_rerun_archive")
+    project_id, _ = _create_persisted_project(
+        client,
+        user,
+        monkeypatch,
+        upload_session_id=f"phase1-rerun-archive-{uuid.uuid4().hex[:8]}",
+        filename="legacy.sql",
+        content=b"SELECT * FROM orders;",
+        project_name="재실행 이전 결과 저장",
+        client_name="OO리런",
+    )
+    structured_result, polish_bundle = _build_large_rebuild_result_with_polish_bundle()
+
+    with SessionLocal() as db:
+        project = db.query(ModernizationProject).filter(ModernizationProject.id == project_id).first()
+        previous_run_id = project.run_id
+        emit_event(
+            previous_run_id,
+            EVENT_TYPE_RUN_FINISHED,
+            {
+                "success": True,
+                "summary": "completed",
+                "structured_result": structured_result,
+                "polish_bundle": polish_bundle,
+                "primary_feature_mode": "save_validation",
+                "module_id": "rebuild_assistant",
+                "run_kind": "rebuild_plan",
+            },
+            db=db,
+        )
+
+    archive_dir = _project_result_archive_dir(project_id, previous_run_id)
+    if archive_dir.exists():
+        shutil.rmtree(archive_dir)
+
+    generated_docx_path = tmp_path / "generated_rerun_archive.docx"
+    generated_docx_path.write_bytes(b"fake-rerun-docx")
+
+    class FakeDocService:
+        def is_available(self):
+            return True
+
+        async def generate(self, request):
+            assert request.output_type.value == "docx"
+            assert request.filename == "재실행_이전_결과_저장_result.docx"
+            return SimpleNamespace(output_path=generated_docx_path)
+
+    monkeypatch.setattr(app_state, "doc_service", FakeDocService(), raising=False)
+
+    response = client.post(f"/projects/{project_id}/run", headers=user["headers"])
+    assert response.status_code == 200, response.text
+
+    markdown_path = archive_dir / "result.md"
+    docx_path = archive_dir / "result.docx"
+    assert markdown_path.exists()
+    assert docx_path.exists()
+    assert "# 결과 패키지 - 재실행 이전 결과 저장" in markdown_path.read_text(encoding="utf-8")
+    assert docx_path.read_bytes() == b"fake-rerun-docx"
 
 
 def test_document_service_strips_duplicate_title_heading_from_markdown():
