@@ -26,6 +26,6 @@ class RefactoringSupportEngineFacade:
         analysis_input = self.input_assembler.assemble(prepared)
         structure = self.structure_analyzer.analyze(analysis_input)
         diagnosis = self.diagnosis_engine.run(prepared, structure, self.legacy_service)
-        decisions = self.decision_engine.run(prepared, structure, diagnosis, self.legacy_service)
-        improvement = self.improvement_planner.run(prepared, structure, diagnosis, decisions, self.legacy_service)
+        decisions = self.decision_engine.run(prepared, structure, diagnosis)
+        improvement = self.improvement_planner.run(prepared, structure, diagnosis, decisions)
         return self.result_packager.package(prepared, structure, diagnosis, decisions, improvement, self.legacy_service)

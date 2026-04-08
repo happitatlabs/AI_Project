@@ -162,6 +162,62 @@ def _create_fallback_project(user: dict, *, project_name: str = "Fallback 프로
         return project.id
 
 
+def _build_large_rebuild_result_with_polish_bundle() -> tuple[dict, dict]:
+    from mellow_link.modules.rebuild_assistant.schemas import RebuildAssetsPayload
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+
+    service = RebuildAssistantService()
+    prepared = service.prepare_input(
+        goal="주문 조회와 저장 검증 흐름을 React + REST API 기준으로 재구성해줘",
+        assets=RebuildAssetsPayload(
+            source_code="""
+class OrderService:
+    def submit(self, order, repo):
+        if not order.amount:
+            raise ValueError("required")
+        if order.status == "READY":
+            repo.save(order)
+            return approve(order)
+
+class OrderQueryService:
+    def search(self, keyword, status, page, repo):
+        return repo.find(keyword=keyword, status=status, page=page)
+            """,
+            database_schema="""
+CREATE TABLE orders (
+    id bigint primary key,
+    status varchar(20),
+    amount numeric(18, 2),
+    created_at timestamp
+);
+CREATE INDEX idx_orders_status ON orders(status);
+            """,
+            sql_queries="""
+SELECT id, status, amount, created_at
+FROM orders
+WHERE status = :status
+  AND (:keyword IS NULL OR id::text LIKE :keyword)
+ORDER BY created_at DESC
+LIMIT :limit OFFSET :offset;
+            """,
+            ui_template="""
+<form>
+  <input name="keyword" />
+  <select name="status"></select>
+  <button onclick="submitOrder()">submit</button>
+</form>
+            """,
+            framework_info="JSP + Spring MVC + MyBatis",
+        ),
+        constraints=["기존 DB 계약 유지", "승인 상태 규칙 유지"],
+    )
+    result = service.build_result(prepared)
+    polish_bundle = service.build_polish_bundle(result, audience="manager", delivery_mode="client_report").model_dump()
+    payload = {"structured_result": result.model_dump(), "polish_bundle": polish_bundle}
+    assert len(json.dumps(payload, ensure_ascii=False)) > 8192
+    return result.model_dump(), polish_bundle
+
+
 def _project_run_history_rows(project_id: str):
     from mellow_link.infra import ProjectRunHistory
     from mellow_link.infra.database import SessionLocal
@@ -1126,6 +1182,119 @@ def test_run_finished_preserves_large_structured_result_and_result_package_becom
         pkg = build_result_package(project, {"status": "completed", "run_id": run_id}, extracted, assets=[], app_version="0.1.0")
         assert pkg["executive_summary"]["state"] == "ready"
         assert pkg["core_conclusion"] == result.one_line_conclusion
+
+
+def test_run_finished_storage_preserves_polish_bundle_dict_without_emit_mock(client):
+    from mellow_link.infra import User
+    from mellow_link.infra.database import SessionLocal
+    from mellow_link.infra.run_events import EVENT_TYPE_RUN_FINISHED, create_run, emit_event, get_run_events
+    from mellow_link.routers.projects import _extract_polish_bundle, _extract_structured_result
+    from mellow_link.routers.runs import _resolve_run_session_id
+
+    user = _register(client, username_prefix="phase1_polish_storage")
+    structured_result, polish_bundle = _build_large_rebuild_result_with_polish_bundle()
+
+    with SessionLocal() as db:
+        db_user = db.query(User).filter(User.username == user["username"]).first()
+        session_id = _resolve_run_session_id(db, db_user, None)
+        run_id = create_run(session_id=session_id, db=db, module_id="rebuild_assistant", run_kind="rebuild_plan")
+        emit_event(
+            run_id,
+            EVENT_TYPE_RUN_FINISHED,
+            {
+                "success": True,
+                "summary": "completed",
+                "structured_result": structured_result,
+                "polish_bundle": polish_bundle,
+                "primary_feature_mode": "save_validation",
+                "module_id": "rebuild_assistant",
+                "run_kind": "rebuild_plan",
+            },
+            db=db,
+        )
+        events = get_run_events(run_id, db=db)
+
+    run_finished = next(event for event in events if event["type"] == EVENT_TYPE_RUN_FINISHED)
+    assert isinstance(run_finished["payload"]["polish_bundle"], dict)
+    assert isinstance(run_finished["payload"]["polish_bundle"]["polished_sections"], list)
+    assert run_finished["payload"]["polish_bundle"]["original_result"]["primary_judgment"] == structured_result["primary_judgment"]
+
+    extracted = _extract_structured_result(events)
+    polish = _extract_polish_bundle(events, extracted)
+
+    assert extracted is not None
+    assert isinstance(polish, dict)
+    assert isinstance(polish["warnings"], list)
+
+
+def test_extract_polish_bundle_rebuilds_when_event_payload_is_not_dict():
+    from mellow_link.routers.projects import _extract_polish_bundle
+
+    structured_result, _ = _build_large_rebuild_result_with_polish_bundle()
+    events = [
+        {
+            "type": "run_finished",
+            "payload": {
+                "structured_result": structured_result,
+                "polish_bundle": "[TRUNCATED_OBJECT]",
+            },
+        }
+    ]
+
+    bundle = _extract_polish_bundle(events)
+
+    assert isinstance(bundle, dict)
+    assert bundle["primary_judgment"] == structured_result["primary_judgment"]
+    assert isinstance(bundle["polished_sections"], list)
+
+
+def test_project_result_endpoint_keeps_polish_bundle_sections_after_truncate(client, monkeypatch):
+    from mellow_link.infra import ModernizationProject
+    from mellow_link.infra.database import SessionLocal
+    from mellow_link.infra.run_events import EVENT_TYPE_RUN_FINISHED, emit_event
+
+    user = _register(client, username_prefix="phase1_polish_result")
+    project_id, _ = _create_persisted_project(
+        client,
+        user,
+        monkeypatch,
+        upload_session_id=f"phase1-polish-{uuid.uuid4().hex[:8]}",
+        filename="legacy.jsp",
+        content=b"<% String sql = \"SELECT * FROM orders\"; %>",
+        project_name="Polish Result Project",
+        client_name="OO",
+    )
+    structured_result, polish_bundle = _build_large_rebuild_result_with_polish_bundle()
+
+    with SessionLocal() as db:
+        project = db.query(ModernizationProject).filter(ModernizationProject.id == project_id).first()
+        emit_event(
+            project.run_id,
+            EVENT_TYPE_RUN_FINISHED,
+            {
+                "success": True,
+                "summary": "completed",
+                "structured_result": structured_result,
+                "polish_bundle": polish_bundle,
+                "primary_feature_mode": "save_validation",
+                "module_id": "rebuild_assistant",
+                "run_kind": "rebuild_plan",
+            },
+            db=db,
+        )
+
+    response = client.get(
+        f"/projects/{project_id}/result",
+        params={"format": "json", "surface_mode": "internal"},
+        headers=user["headers"],
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert isinstance(payload["polish_bundle"], dict)
+    assert isinstance(payload["polish_bundle"]["polished_sections"], list)
+    assert isinstance(payload["polish_bundle"]["preserved_facts"], list)
+    assert isinstance(payload["polish_bundle"]["warnings"], list)
 
 
 def test_document_service_strips_duplicate_title_heading_from_markdown():

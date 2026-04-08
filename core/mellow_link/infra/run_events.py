@@ -81,10 +81,33 @@ def redact_sensitive_data(text: str) -> str:
     return result
 
 
+def _compact_polish_bundle(bundle: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(bundle, dict):
+        return bundle
+    original_result = bundle.get("original_result")
+    compact_original: Dict[str, Any] = {}
+    if isinstance(original_result, dict):
+        for key in ("primary_judgment", "template_judgment", "structural_judgment", "narrative_axis", "feature_signal_mode"):
+            value = original_result.get(key)
+            if value not in (None, "", [], {}):
+                compact_original[key] = value
+        extensions = original_result.get("extensions")
+        if isinstance(extensions, dict):
+            narrative = extensions.get("narrative")
+            if isinstance(narrative, dict):
+                compact_original["extensions"] = {"narrative": narrative}
+    compact_bundle = dict(bundle)
+    compact_bundle["original_result"] = compact_original
+    return compact_bundle
+
+
 def truncate_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     페이로드 크기를 제한하고 긴 필드는 잘라냄.
     """
+    if isinstance(payload.get("polish_bundle"), dict):
+        payload = dict(payload)
+        payload["polish_bundle"] = _compact_polish_bundle(payload["polish_bundle"])
     payload_str = json.dumps(payload, ensure_ascii=False)
     
     if len(payload_str) <= MAX_PAYLOAD_SIZE:
@@ -94,10 +117,13 @@ def truncate_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     truncated = payload.copy()
     preserve_structured_result = isinstance(truncated.get("structured_result"), dict)
     preserve_authoritative_payload = isinstance(truncated.get("authoritative_payload"), dict)
+    preserve_polish_bundle = isinstance(truncated.get("polish_bundle"), dict)
     for key, value in truncated.items():
         if key == "structured_result" and preserve_structured_result:
             continue
         if key == "authoritative_payload" and preserve_authoritative_payload:
+            continue
+        if key == "polish_bundle" and preserve_polish_bundle:
             continue
         if isinstance(value, str) and len(value) > 500:
             truncated[key] = value[:500] + "[TRUNCATED]"
@@ -115,6 +141,8 @@ def truncate_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
                 if key == "structured_result":
                     compact[key] = value
                 elif key == "authoritative_payload" and preserve_authoritative_payload:
+                    compact[key] = value
+                elif key == "polish_bundle" and preserve_polish_bundle:
                     compact[key] = value
                 elif key in {"success", "module_id", "run_kind", "primary_feature_mode", "secondary_feature_mode", "confidence", "needs_more_input", "scope_limited"}:
                     compact[key] = value

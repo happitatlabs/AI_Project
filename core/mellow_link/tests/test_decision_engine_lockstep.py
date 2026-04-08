@@ -86,3 +86,34 @@ class OrderRepository:
 
     assert decisions.primary_judgment
     assert decisions.decision_summary.decisions
+
+
+def test_decision_engine_runs_without_legacy_service():
+    bundle = build_safe_bundle(
+        [
+            {
+                "name": "order_repository.py",
+                "content": """
+class OrderRepository:
+    def approve_order(self, order):
+        if order.status == "READY":
+            return "approved"
+                """,
+            },
+            {"name": "order_page.html", "content": "<button onclick=\"approveOrder()\">approve</button>"},
+        ]
+    )
+    service = RebuildAssistantService()
+    prepared = service.prepare_safe_bundle_input(goal="modernize order approval flow", safe_bundle=bundle, constraints=[])
+
+    from mellow_link.services.refactoring_support_engine.decision_engine import DecisionEngine
+    from mellow_link.services.refactoring_support_engine.diagnosis_engine import DiagnosisEngine
+    from mellow_link.services.refactoring_support_engine.input_assembler import InputAssembler
+    from mellow_link.services.refactoring_support_engine.structure_analyzer import StructureAnalyzer
+
+    structure = StructureAnalyzer().analyze(InputAssembler().assemble(prepared))
+    diagnosis = DiagnosisEngine().run(prepared, structure, service)
+    decisions = DecisionEngine().run(prepared, structure, diagnosis, None)
+
+    assert decisions.primary_judgment
+    assert decisions.decision_summary.decisions

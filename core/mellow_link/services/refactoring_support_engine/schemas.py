@@ -3,12 +3,14 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 from mellow_link.modules.rebuild_assistant.schemas import (
     AppliedJudgmentTemplate,
+    AssetPresenceSummary,
     DesignOption,
     DecisionItem,
     ExtractedRulesEnvelope,
@@ -18,6 +20,7 @@ from mellow_link.modules.rebuild_assistant.schemas import (
     MissingContextItem,
     PatternCandidate,
     PrioritySplitItem,
+    RebuildAssetsPayload,
     RecommendedOption,
     RetainedContract,
     VerificationItem,
@@ -42,6 +45,62 @@ def normalize_fingerprint_text(text: str) -> str:
     normalized = re.sub(r"\s*([=!<>]+|\(|\)|,|\+|-|\*|/)\s*", r" \1 ", normalized)
     normalized = re.sub(r"\s+", " ", normalized)
     return normalized.strip()
+
+
+@dataclass
+class FeatureSignals:
+    concepts: list[str] = field(default_factory=list)
+    status_permissions: list[str] = field(default_factory=list)
+    search_filters: list[str] = field(default_factory=list)
+    save_validation: list[str] = field(default_factory=list)
+    technical: list[str] = field(default_factory=list)
+    scores: dict[str, float] = field(default_factory=dict)
+    primary_feature_mode: str = "general"
+    secondary_feature_mode: str | None = None
+
+
+class IntentInput(BaseModel):
+    goal: str
+    constraints: list[str] = Field(default_factory=list)
+    scenario: str = ""
+    sources: dict[str, str] = Field(default_factory=dict)
+
+
+@dataclass
+class PreparedRebuildInput:
+    goal: str
+    assets: RebuildAssetsPayload
+    constraints: list[str]
+    intent: IntentInput = field(default_factory=lambda: IntentInput(goal=""))
+    asset_presence: AssetPresenceSummary = field(default_factory=AssetPresenceSummary)
+    safe_bundle: SafeAnalysisBundle | None = None
+    temp_context: str = ""
+    supporting_docs: str = ""
+    legacy_bundle: str = ""
+    scope_limited: bool = False
+    missing_context: list[str] | None = None
+    signals: FeatureSignals = field(default_factory=FeatureSignals)
+    selected_primary_judgment: str = ""
+    selected_primary_judgment_reason: str = ""
+    selected_narrative_judgment: str = ""
+    pattern_candidates: list[PatternCandidate] = field(default_factory=list)
+    accounting_input: Any | None = None
+    accounting_asset_name: str = ""
+    accounting_input_error: str = ""
+
+    def __post_init__(self) -> None:
+        if not (self.intent.goal or self.intent.constraints or self.intent.scenario):
+            self.intent = IntentInput(
+                goal=self.goal,
+                constraints=list(self.constraints or []),
+                scenario=self.temp_context,
+            )
+        else:
+            self.goal = self.intent.goal
+            self.constraints = list(self.intent.constraints)
+            self.temp_context = self.intent.scenario
+        if self.missing_context is None:
+            self.missing_context = []
 
 
 class AssetInventoryItem(BaseModel):
@@ -76,6 +135,7 @@ class RefactoringAnalysisInput(BaseModel):
     analysis_scope: Literal["feature_slice"] = "feature_slice"
     goal: str
     constraints: list[str] = Field(default_factory=list)
+    intent: IntentInput = Field(default_factory=lambda: IntentInput(goal=""))
     safe_bundle_id: str = ""
     safe_bundle: SafeAnalysisBundle | None = None
     asset_inventory: list[AssetInventoryItem] = Field(default_factory=list)
@@ -92,8 +152,6 @@ class RefactoringAnalysisInput(BaseModel):
         if not isinstance(info.data, dict):
             return ""
         return stable_hash(
-            info.data.get("goal", ""),
-            info.data.get("constraints", []),
             [
                 {
                     "asset_id": item.asset_id,
