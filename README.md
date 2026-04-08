@@ -55,6 +55,12 @@ AI_Project/
 `node_modules`는 원칙상 `infra` 대상이지만, 현재 루트 기반 Node/Playwright 해석을 깨뜨리지 않기 위해 이번 정리에서는 보류했다.
 `mellow_link/`, `mellow_chat_runtime/`는 기존 루트 import/실행 습관을 유지하기 위한 얇은 shim이며, 실제 프로젝트 본체는 모두 `core/` 아래에 있다.
 
+## 호환/잔존 경로 메모
+
+- 루트에 `outputs/`, `models/`, `templates/`, `pattern_extraction_pipeline/` 같은 과거 기준 경로가 일부 남아 있을 수 있다.
+- 현재 기준 경로는 각각 [`data/outputs`](/C:/Users/Hyein/ClaudeAI/AI_Project/data/outputs), [`infra/models`](/C:/Users/Hyein/ClaudeAI/AI_Project/infra/models), [`infra/templates`](/C:/Users/Hyein/ClaudeAI/AI_Project/infra/templates), [`pipelines/pattern_extraction_pipeline`](/C:/Users/Hyein/ClaudeAI/AI_Project/pipelines/pattern_extraction_pipeline)이다.
+- 새 자산 추가, 문서 갱신, 운영 기준은 항상 현재 기준 경로를 우선한다.
+
 ## 현재 프로젝트 해석
 
 - [`mellow_link`](/C:/Users/Hyein/ClaudeAI/AI_Project/core/mellow_link)
