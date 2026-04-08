@@ -63,7 +63,7 @@ def load_sample_asset_specs(sample_name: str) -> list[dict[str, str]]:
     return [
         {"name": path.name, "content": path.read_text(encoding="utf-8")}
         for path in sample_dir.iterdir()
-        if path.is_file() and path.name.lower() not in {"readme.md", "goal.txt", "constraints.txt"}
+        if path.is_file() and path.name.lower() not in {"readme.md", "goal.txt", "constraints.txt", "scenario.md"}
     ]
 
 

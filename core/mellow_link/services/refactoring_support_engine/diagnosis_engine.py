@@ -5,6 +5,13 @@ import re
 from collections import defaultdict
 from typing import Any
 
+from mellow_link.modules.rebuild_assistant.schemas import (
+    ExtractedRulesEnvelope,
+    SaveValidationRules,
+    SearchFilterRules,
+    StatusPermissionsRules,
+)
+
 from .policies import get_detector_policy, load_engine_policy_bundle
 from .schemas import (
     CoverageSummary,
@@ -116,12 +123,12 @@ class DiagnosisEngine:
             detector_stats=detector_stats,
         )
 
-        extracted_rules = legacy_service.extract_rules(prepared)
+        extracted_rules = self.build_extracted_rules(prepared)
         missing_context_details = legacy_service.build_missing_context_details(prepared)
         core_business_rules = legacy_service.extract_core_business_rules(prepared)
         grounded_business_rules = legacy_service.build_grounded_business_rules(prepared, core_business_rules)
         retained_contracts = legacy_service.build_retained_contracts(prepared, grounded_business_rules)
-        analysis_summary = legacy_service.analyze_assets(prepared)
+        analysis_summary = self.build_analysis_summary(prepared)
         return DiagnosisArtifacts(
             diagnosis_report=diagnosis_report,
             evidence_index=evidence_store.items,
@@ -132,6 +139,62 @@ class DiagnosisEngine:
             retained_contracts=retained_contracts,
             analysis_summary=analysis_summary,
         )
+
+    def build_analysis_summary(self, prepared: Any) -> list[str]:
+        findings: list[str] = []
+        primary_label = self._feature_mode_label(str(getattr(getattr(prepared, "signals", None), "primary_feature_mode", "") or ""))
+        if self._looks_like_jsp(prepared):
+            findings.append("JSP/서버 템플릿 기반 UI로 추정되며 프레젠테이션과 서버 책임이 섞여 있습니다.")
+        if self._contains_sql_in_ui(prepared):
+            findings.append("SQL 또는 데이터 접근 로직이 UI/템플릿과 가깝게 결합되어 있습니다.")
+        findings.append(f"대표 도메인 범위는 {self._primary_concept(prepared)} 중심으로 정리하는 편이 적절합니다.")
+        status_permissions = list(getattr(getattr(prepared, "signals", None), "status_permissions", []) or [])
+        search_filters = list(getattr(getattr(prepared, "signals", None), "search_filters", []) or [])
+        save_validation = list(getattr(getattr(prepared, "signals", None), "save_validation", []) or [])
+        if status_permissions:
+            findings.append(
+                "권한 및 상태 규칙 신호가 보여 역할/상태/가능 액션 표시가 화면 분기와 섞여 있으며 정책 추출이 필요합니다: "
+                + ", ".join(status_permissions[:3])
+            )
+        if search_filters:
+            findings.append(
+                "조회 조건 규칙 신호가 보여 조회 조건, 검색 파라미터, 동적 쿼리 조합이 한 흐름에 묶여 있습니다: "
+                + ", ".join(search_filters[:3])
+            )
+        if save_validation:
+            findings.append(
+                "저장 검증 규칙 신호가 보여 저장 전 검증, 중복 체크, 저장 가드가 화면/서비스 경계 없이 퍼져 있습니다: "
+                + ", ".join(save_validation[:3])
+            )
+        asset_presence = getattr(prepared, "asset_presence", None)
+        assets = getattr(prepared, "assets", None)
+        has_schema = bool(getattr(asset_presence, "has_schema_asset", False)) or bool(getattr(assets, "database_schema", ""))
+        if has_schema:
+            findings.append("기존 스키마 호환성을 유지해야 하므로 API/백엔드 분리 시 DB 계약을 우선 보존해야 합니다.")
+        if primary_label != "일반 기능":
+            findings.append(f"우선 분해 대상은 {primary_label}이며, 나머지 규칙은 보조 흐름으로 정리하는 편이 적절합니다.")
+        if not findings:
+            findings.append("제공된 자산 범위에서는 단일 기능 수준의 레거시 웹 화면과 데이터 접근 계층이 함께 얽혀 있는 것으로 보입니다.")
+        return findings[:6]
+
+    def build_extracted_rules(self, prepared: Any) -> ExtractedRulesEnvelope:
+        primary = str(getattr(getattr(prepared, "signals", None), "primary_feature_mode", "") or "")
+        secondary = getattr(getattr(prepared, "signals", None), "secondary_feature_mode", None)
+        envelope = ExtractedRulesEnvelope()
+        if primary == "status_permissions":
+            envelope.status_permissions = self._extract_status_permissions_rules(prepared)
+        elif primary == "search_filters":
+            envelope.search_filters = self._extract_search_filter_rules(prepared)
+        elif primary == "save_validation":
+            envelope.save_validation = self._extract_save_validation_rules(prepared)
+
+        if secondary == "status_permissions" and primary != "status_permissions":
+            envelope.status_permissions = self._extract_status_permissions_rules(prepared, supplemental=True)
+        elif secondary == "search_filters" and primary != "search_filters":
+            envelope.search_filters = self._extract_search_filter_rules(prepared, supplemental=True)
+        elif secondary == "save_validation" and primary != "save_validation":
+            envelope.save_validation = self._extract_save_validation_rules(prepared, supplemental=True)
+        return envelope
 
     def _run_scope_detectors(
         self,
@@ -523,6 +586,374 @@ class DiagnosisEngine:
             evidence_ids=sorted(dict.fromkeys(evidence_ids)),
             confidence=confidence,
         )
+
+    def _extract_status_permissions_rules(
+        self,
+        prepared: Any,
+        supplemental: bool = False,
+    ) -> StatusPermissionsRules:
+        text = str(getattr(prepared, "legacy_bundle", "") or "")
+        roles = [role.upper() for role in self._extract_unique_matches(text, r"\b(admin|manager|user|operator|guest|owner|reviewer|approver)\b")]
+        statuses = [status.upper() for status in self._extract_unique_matches(text, r"\b(pending|approved|rejected|draft|submitted|active|inactive|closed|cancelled)\b")]
+        actions = self._extract_unique_matches(text, r"\b(approve|reject|resubmit|cancel|submit|close|reopen)\b")
+        entities = self._rule_entities(prepared)
+
+        role_action_matrix: list[dict] = []
+        for role in roles:
+            allowed_actions = [action for action in actions if re.search(rf"{role}.*{action}|{action}.*{role}", text, flags=re.IGNORECASE)]
+            if allowed_actions:
+                role_action_matrix.append({"role": role, "allowed_actions": self._dedupe_list(allowed_actions)})
+
+        status_action_matrix: list[dict] = []
+        for status in statuses:
+            visible_actions = [action for action in actions if re.search(rf"{status}.*{action}|{action}.*{status}", text, flags=re.IGNORECASE)]
+            if visible_actions:
+                status_action_matrix.append({"status": status, "visible_actions": self._dedupe_list(visible_actions)})
+
+        transition_rules: list[dict] = []
+        for status in statuses:
+            for action in actions:
+                if not re.search(rf"{status}.*{action}|{action}.*{status}", text, flags=re.IGNORECASE):
+                    continue
+                transition_rules.append(
+                    {
+                        "from_status": status,
+                        "action": action,
+                        "to_status": self._infer_target_status(action, statuses),
+                        "condition": self._transition_condition_hint(text, roles, status, action),
+                    }
+                )
+
+        ui_visibility_rules: list[str] = []
+        if actions and statuses:
+            for action in actions[:3]:
+                related_statuses = [
+                    status for status in statuses if re.search(rf"{status}.*{action}|{action}.*{status}", text, flags=re.IGNORECASE)
+                ]
+                related_roles = [
+                    role for role in roles if re.search(rf"{role}.*{action}|{action}.*{role}", text, flags=re.IGNORECASE)
+                ]
+                if related_statuses or related_roles:
+                    role_fragment = f" and role is {' or '.join(related_roles)}" if related_roles else ""
+                    status_fragment = f"when status is {' or '.join(related_statuses)}" if related_statuses else "when action state is satisfied"
+                    ui_visibility_rules.append(f"show {action} button only {status_fragment}{role_fragment}".strip())
+        if not ui_visibility_rules and re.search(r"<c:if|<c:choose|if\s*\(", text, flags=re.IGNORECASE):
+            ui_visibility_rules.append("conditional action visibility is embedded in JSP or server-side branches")
+
+        policy_hints: list[str] = []
+        if roles or actions or statuses:
+            policy_hints.append("extract role/action visibility into policy service")
+        if transition_rules:
+            policy_hints.append("extract state transition checks into transition policy")
+        if re.search(r"<c:if|<c:choose|if\s*\(", text, flags=re.IGNORECASE):
+            policy_hints.append("move conditional button rendering rules out of the view layer")
+
+        if supplemental:
+            role_action_matrix = role_action_matrix[:1]
+            status_action_matrix = status_action_matrix[:1]
+            transition_rules = transition_rules[:1]
+            ui_visibility_rules = ui_visibility_rules[:1]
+            policy_hints = policy_hints[:1]
+
+        return StatusPermissionsRules(
+            entities=entities,
+            roles=roles,
+            statuses=statuses,
+            actions=actions,
+            role_action_matrix=role_action_matrix,
+            status_action_matrix=status_action_matrix,
+            transition_rules=self._dedupe_dicts(transition_rules),
+            ui_visibility_rules=self._dedupe_list(ui_visibility_rules),
+            policy_hints=self._dedupe_list(policy_hints),
+        )
+
+    def _extract_search_filter_rules(
+        self,
+        prepared: Any,
+        supplemental: bool = False,
+    ) -> SearchFilterRules:
+        text = str(getattr(prepared, "legacy_bundle", "") or "")
+        entities = self._rule_entities(prepared)
+        query_params = self._extract_unique_matches(
+            text,
+            r"request\.getParameter\(\"([^\"]+)\"\)|@RequestParam\(\"([^\"]+)\"\)|\b(keyword|status|page|sort|dateFrom|dateTo|category|region|includeClosed|filter)\b",
+        )
+
+        filter_fields: list[dict] = []
+        for name in query_params:
+            filter_fields.append({"name": name, "type": self._infer_filter_field_type(name), "required": False})
+
+        sort_rules: list[dict] = []
+        assets = getattr(prepared, "assets", None)
+        sql_text = str(getattr(assets, "sql_queries", "") or text)
+        order_match = re.search(r"order\s+by\s+([a-z0-9_\.]+)(?:\s+(asc|desc))?", sql_text, flags=re.IGNORECASE)
+        if order_match:
+            sort_rules.append(
+                {
+                    "field": order_match.group(1).split(".")[-1],
+                    "direction": (order_match.group(2) or "asc").lower(),
+                    "default": True,
+                }
+            )
+
+        paging_rules: list[dict] = []
+        if re.search(r"\blimit\b", sql_text, flags=re.IGNORECASE):
+            paging_rules.append({"param": "limit", "style": "limit", "default": False})
+        if re.search(r"\boffset\b", sql_text, flags=re.IGNORECASE):
+            paging_rules.append({"param": "offset", "style": "offset", "default": False})
+        if any(param.lower() == "page" for param in query_params):
+            paging_rules.append({"param": "page", "style": "page", "default": False})
+
+        query_binding_rules: list[str] = []
+        if query_params:
+            query_binding_rules.append(f"use bound params for {', '.join(query_params[:4])} filters")
+        if re.search(r"\bwhere\b", sql_text, flags=re.IGNORECASE):
+            query_binding_rules.append("avoid string concatenation in WHERE clause")
+        if re.search(r"\blike\b", sql_text, flags=re.IGNORECASE):
+            query_binding_rules.append("parameterize LIKE predicates instead of inline SQL composition")
+
+        default_filters: list[str] = []
+        if any(param.lower() == "status" for param in query_params):
+            default_filters.append("preserve default status filter behavior from the legacy search form")
+        if re.search(r"includeClosed|closed", text, flags=re.IGNORECASE):
+            default_filters.append("exclude CLOSED unless includeClosed is explicitly enabled")
+
+        result_shape_hints: list[str] = []
+        columns = self._extract_select_columns(sql_text)
+        if columns:
+            result_shape_hints.append(f"list result with {', '.join(columns[:4])}")
+        elif re.search(r"\b(table|grid|list|results?)\b", text, flags=re.IGNORECASE):
+            result_shape_hints.append("list result shape is rendered as a table/grid in the legacy view")
+
+        if supplemental:
+            filter_fields = filter_fields[:2]
+            sort_rules = sort_rules[:1]
+            paging_rules = paging_rules[:1]
+            query_binding_rules = query_binding_rules[:1]
+            default_filters = default_filters[:1]
+            result_shape_hints = result_shape_hints[:1]
+
+        return SearchFilterRules(
+            entities=entities,
+            filter_fields=filter_fields,
+            query_params=query_params,
+            sort_rules=sort_rules,
+            paging_rules=paging_rules,
+            query_binding_rules=self._dedupe_list(query_binding_rules),
+            default_filters=self._dedupe_list(default_filters),
+            result_shape_hints=self._dedupe_list(result_shape_hints),
+        )
+
+    def _extract_save_validation_rules(
+        self,
+        prepared: Any,
+        supplemental: bool = False,
+    ) -> SaveValidationRules:
+        text = str(getattr(prepared, "legacy_bundle", "") or "")
+        entities = self._rule_entities(prepared)
+        required_fields = self._extract_unique_matches(
+            text,
+            r"if\s*\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*==\s*null|([a-zA-Z_][a-zA-Z0-9_]*)\.isBlank\(\)|required\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+        )
+        field_validation_rules: list[str] = []
+        for field in required_fields:
+            field_validation_rules.append(f"{field} must not be empty")
+        if re.search(r"validate|validator", text, flags=re.IGNORECASE):
+            field_validation_rules.append("legacy save flow includes validator-style checks before persistence")
+
+        duplicate_check_rules: list[str] = []
+        duplicate_fields = self._extract_unique_matches(text, r"existsBy([A-Z][a-zA-Z0-9_]*)|duplicate\s+([a-zA-Z_][a-zA-Z0-9_]*)")
+        for field in duplicate_fields:
+            normalized = re.sub(r"([a-z])([A-Z])", r"\1 \2", field).replace("_", " ").lower()
+            duplicate_check_rules.append(f"prevent duplicate records by {normalized}")
+        if not duplicate_check_rules and re.search(r"\b(duplicate|exists|already exists|unique|중복)\b", text, flags=re.IGNORECASE):
+            duplicate_check_rules.append("prevent duplicate records before save")
+
+        save_guard_rules: list[str] = []
+        if re.search(r"\b(forbidden|cannot save|blocked|guard)\b", text, flags=re.IGNORECASE):
+            save_guard_rules.append("apply pre-save guard before persistence")
+        if re.search(r"\b(save|insert|update|submit|persist)\b", text, flags=re.IGNORECASE) and (
+            required_fields or duplicate_check_rules or re.search(r"throw\s+new", text, flags=re.IGNORECASE)
+        ):
+            save_guard_rules.append("run validation and duplicate guards before persistence")
+        if re.search(r"\b(role|admin|manager)\b", text, flags=re.IGNORECASE) and re.search(r"\b(save|insert|update|submit)\b", text, flags=re.IGNORECASE):
+            save_guard_rules.append("enforce role-based save restrictions before save")
+        if re.search(r"\b(status|state|pending|approved|closed|draft)\b", text, flags=re.IGNORECASE) and re.search(r"\b(save|update|submit)\b", text, flags=re.IGNORECASE):
+            save_guard_rules.append("enforce status-change restrictions before save")
+
+        exception_rules = self._extract_unique_matches(
+            text,
+            r"throw\s+new\s+([A-Za-z]+Exception)|\b(IllegalStateException|ValidationException|SecurityException|IllegalArgumentException)\b",
+        )
+        exception_rules = [f"raise {rule}" for rule in exception_rules]
+
+        command_boundary_hints: list[str] = []
+        if required_fields or duplicate_check_rules or save_guard_rules:
+            command_boundary_hints.append("split validation from persistence")
+            command_boundary_hints.append("use command DTO and validator")
+        if exception_rules:
+            command_boundary_hints.append("normalize save-time exceptions into explicit validation results")
+
+        if supplemental:
+            field_validation_rules = field_validation_rules[:2]
+            duplicate_check_rules = duplicate_check_rules[:1]
+            save_guard_rules = save_guard_rules[:1]
+            exception_rules = exception_rules[:1]
+            command_boundary_hints = command_boundary_hints[:1]
+
+        return SaveValidationRules(
+            entities=entities,
+            required_fields=required_fields,
+            field_validation_rules=self._dedupe_list(field_validation_rules),
+            duplicate_check_rules=self._dedupe_list(duplicate_check_rules),
+            save_guard_rules=self._dedupe_list(save_guard_rules),
+            exception_rules=self._dedupe_list(exception_rules),
+            command_boundary_hints=self._dedupe_list(command_boundary_hints),
+        )
+
+    def _primary_concept(self, prepared: Any) -> str:
+        concepts = list(getattr(getattr(prepared, "signals", None), "concepts", []) or [])
+        if concepts:
+            return str(concepts[0] or "").strip() or "legacy"
+        assets = getattr(prepared, "assets", None)
+        asset_presence = getattr(prepared, "asset_presence", None)
+        evidence_text = " ".join(
+            [
+                " ".join(list(getattr(asset_presence, "source_asset_names", []) or [])),
+                " ".join(list(getattr(asset_presence, "ui_asset_names", []) or [])),
+                " ".join(list(getattr(asset_presence, "schema_asset_names", []) or [])),
+                " ".join(list(getattr(asset_presence, "sql_asset_names", []) or [])),
+                str(getattr(assets, "source_code", "") or ""),
+                str(getattr(assets, "ui_template", "") or ""),
+                str(getattr(assets, "sql_queries", "") or ""),
+                str(getattr(assets, "database_schema", "") or ""),
+                str(getattr(prepared, "supporting_docs", "") or ""),
+            ]
+        )
+        normalized = re.sub(r"[^A-Za-z0-9가-힣\s]+", " ", evidence_text).strip()
+        tokens = [token for token in normalized.split() if token.lower() not in {"modernize", "legacy", "flow", "feature", "현대화"}]
+        return " ".join(tokens[:2]) or "legacy"
+
+    def _rule_entities(self, prepared: Any) -> list[str]:
+        concept = self._primary_concept(prepared)
+        normalized = re.sub(r"[^a-z0-9]+", "_", concept.lower()).strip("_")
+        return [normalized or "legacy_feature"]
+
+    def _feature_mode_label(self, mode: str) -> str:
+        mapping = {
+            "status_permissions": "권한/상태 규칙",
+            "search_filters": "조회/필터 규칙",
+            "save_validation": "저장/검증 규칙",
+        }
+        return mapping.get((mode or "").strip(), "일반 기능")
+
+    def _transition_condition_hint(self, text: str, roles: list[str], status: str, action: str) -> str:
+        matched_roles = [role for role in roles if re.search(rf"{role}.*{action}|{action}.*{role}", text, flags=re.IGNORECASE)]
+        if matched_roles:
+            return " or ".join(role.lower() for role in matched_roles)
+        if re.search(r"<c:if|<c:choose|if\s*\(", text, flags=re.IGNORECASE):
+            return "legacy conditional branch"
+        return f"status is {status}"
+
+    def _infer_target_status(self, action: str, statuses: list[str]) -> str:
+        mapping = {
+            "approve": "APPROVED",
+            "reject": "REJECTED",
+            "resubmit": "PENDING",
+            "submit": "SUBMITTED",
+            "close": "CLOSED",
+            "reopen": "PENDING",
+            "cancel": "CANCELLED",
+        }
+        candidate = mapping.get(action.lower())
+        if candidate and candidate in statuses:
+            return candidate
+        return candidate or "UNKNOWN"
+
+    def _infer_filter_field_type(self, name: str) -> str:
+        lowered = name.lower()
+        if lowered in {"includeclosed", "enabled", "active", "visible"}:
+            return "checkbox"
+        if "date" in lowered:
+            return "date"
+        if lowered in {"page", "limit", "offset"}:
+            return "number"
+        return "text"
+
+    def _extract_select_columns(self, sql_text: str) -> list[str]:
+        if not sql_text:
+            return []
+        match = re.search(r"select\s+(.*?)\s+from\s", sql_text, flags=re.IGNORECASE | re.DOTALL)
+        if not match:
+            return []
+        segment = match.group(1)
+        if "*" in segment:
+            return []
+        columns: list[str] = []
+        for raw in segment.split(","):
+            token = raw.strip().split()[-1].split(".")[-1]
+            token = token.strip("`\"")
+            if token:
+                columns.append(token.lower())
+        return self._dedupe_list(columns)
+
+    def _looks_like_jsp(self, prepared: Any) -> bool:
+        assets = getattr(prepared, "assets", None)
+        text = "\n".join(
+            [
+                str(getattr(assets, "source_code", "") or ""),
+                str(getattr(assets, "ui_template", "") or ""),
+            ]
+        ).lower()
+        return "<%" in text or "<jsp:" in text or "c:foreach" in text or "c:if" in text
+
+    def _contains_sql_in_ui(self, prepared: Any) -> bool:
+        assets = getattr(prepared, "assets", None)
+        text = "\n".join(
+            [
+                str(getattr(assets, "source_code", "") or ""),
+                str(getattr(assets, "ui_template", "") or ""),
+            ]
+        ).lower()
+        return bool(re.search(r"\b(select|insert|update|delete)\b", text))
+
+    def _extract_unique_matches(self, text: str, pattern: str) -> list[str]:
+        matches = re.findall(pattern, text, flags=re.IGNORECASE)
+        results: list[str] = []
+        for match in matches:
+            if isinstance(match, tuple):
+                for item in match:
+                    cleaned = (item or "").strip()
+                    if cleaned:
+                        results.append(cleaned)
+                        break
+            else:
+                cleaned = (match or "").strip()
+                if cleaned:
+                    results.append(cleaned)
+        return self._dedupe_list(results)
+
+    def _dedupe_list(self, items: list[str]) -> list[str]:
+        seen: set[str] = set()
+        output: list[str] = []
+        for item in items:
+            key = item.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            output.append(item)
+        return output
+
+    def _dedupe_dicts(self, items: list[dict]) -> list[dict]:
+        seen: set[str] = set()
+        output: list[dict] = []
+        for item in items:
+            key = repr(sorted(item.items()))
+            if key in seen:
+                continue
+            seen.add(key)
+            output.append(item)
+        return output
 
     def _policy_for(self, detector_id: str):
         return get_detector_policy(detector_id, self.policy_bundle)

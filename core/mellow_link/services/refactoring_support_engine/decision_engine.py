@@ -58,9 +58,9 @@ class DecisionEngine:
         prepared: Any,
         structure: StructureAnalysisResult,
         diagnosis: DiagnosisArtifacts,
-        legacy_service: Any,
+        legacy_service: Any | None = None,
     ) -> DecisionArtifacts:
-        judgment_synthesizer = self.judgment_synthesizer or JudgmentSynthesizer(legacy_service)
+        judgment_synthesizer = self.judgment_synthesizer or JudgmentSynthesizer()
         applied_templates = judgment_synthesizer.build_applied_templates(
             prepared,
             diagnosis.grounded_business_rules,

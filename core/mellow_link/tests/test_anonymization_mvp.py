@@ -60,7 +60,10 @@ def test_rebuild_assistant_safe_bundle_path_uses_safe_bundle_only():
         safe_bundle=bundle,
         constraints=["safe_bundle_only"],
     )
-    assert "safe_bundle_id=" in prepared.constraints[1]
+    assert prepared.constraints == ["safe_bundle_only"]
+    assert prepared.intent.goal == "legacy modernized screen"
+    assert prepared.intent.constraints == ["safe_bundle_only"]
+    assert prepared.safe_bundle is bundle
     assert "CLS_001" in (prepared.assets.source_code + prepared.assets.ui_template)
     assert prepared.temp_context == ""
 

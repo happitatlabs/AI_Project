@@ -131,7 +131,7 @@ class DeterministicNarrativeBuilder:
             if top_decision is None and narrative_axis == "query_filter":
                 executive_summary.append("입력 자산이 제한적이므로 제안은 파일럿 검토용 초안으로 해석하는 편이 안전합니다.")
             else:
-                executive_summary.append("추가 운영 확인이 필요한 항목은 별도 확인 필요 항목으로 분리해 후속 검증하는 것이 필요합니다.")
+                executive_summary.append("추가 운영 확인이 필요한 항목은 별도 확인 필요 항목으로 분리해 후속 확인 대상으로 두는 것이 필요합니다.")
 
         return DeterministicNarrativeBundle(
             narrative_axis=narrative_axis,

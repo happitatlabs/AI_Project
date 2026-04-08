@@ -34,6 +34,7 @@ class AssetPresenceSummary(BaseModel):
     has_sql_asset: bool = False
     has_framework_hint: bool = False
     has_docs: bool = False
+    framework_runtime_hints: list[str] = Field(default_factory=list)
     source_asset_names: list[str] = Field(default_factory=list)
     ui_asset_names: list[str] = Field(default_factory=list)
     schema_asset_names: list[str] = Field(default_factory=list)

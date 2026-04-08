@@ -1,0 +1,221 @@
+{
+  "main": {
+    "id": "23dfe7cd74b7c437",
+    "type": "split",
+    "children": [
+      {
+        "id": "616a50f604c6d123",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "16f2ca12d6f4fc70",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "80_Catalogs/Mellow_Link_Doc_Coverage_Status.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "Mellow_Link_Doc_Coverage_Status"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "7832f1d86aa56486",
+    "type": "split",
+    "children": [
+      {
+        "id": "1d5571c204b8ce04",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "27b06560b130caf5",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "파일 탐색기"
+            }
+          },
+          {
+            "id": "510f839a08e9e186",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "검색"
+            }
+          },
+          {
+            "id": "d81af4db5eca38b3",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "북마크"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 200
+  },
+  "right": {
+    "id": "1029d3678a468930",
+    "type": "split",
+    "children": [
+      {
+        "id": "f8867ce675c75357",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "26539d1b70a26acc",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "80_Catalogs/Mellow_Link_Doc_Coverage_Status.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Mellow_Link_Doc_Coverage_Status 의 백링크"
+            }
+          },
+          {
+            "id": "100cc50409d28fb3",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "80_Catalogs/Mellow_Link_Source_Doc_Catalog.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Mellow_Link_Source_Doc_Catalog 의 나가는 링크"
+            }
+          },
+          {
+            "id": "01aac4e12e929bc8",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "태그"
+            }
+          },
+          {
+            "id": "6ace24996b1cffab",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "모든 속성"
+            }
+          },
+          {
+            "id": "0d4e8d987b89734e",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "80_Catalogs/Mellow_Link_Source_Doc_Catalog.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Mellow_Link_Source_Doc_Catalog 의 개요"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:빠른 전환기 열기": false,
+      "graph:그래프 뷰 열기": false,
+      "canvas:새 캔버스 만들기": false,
+      "daily-notes:오늘의 일일 노트 열기": false,
+      "templates:템플릿 삽입": false,
+      "command-palette:명령어 팔레트 열기": false,
+      "bases:새 베이스 생성하기": false
+    }
+  },
+  "active": "16f2ca12d6f4fc70",
+  "lastOpenFiles": [
+    "80_Catalogs/Catalog_Index.md",
+    "무제.base",
+    "80_Catalogs/Mellow_Link_Source_Doc_Catalog.md",
+    "README.md",
+    "80_Catalogs/Mellow_Link_Doc_Coverage_Status.md",
+    "80_Catalogs",
+    "40_Docs/Mellow_Link_Runtime_Performance_and_Integration_References.md",
+    "40_Docs/Mellow_Link_Flow_Maps_and_Specs.md",
+    "70_Validation/Validation_Governance_and_Checklists.md",
+    "70_Validation/Validation_Index.md",
+    "70_Validation/Real_Project_Validation_Runs.md",
+    "70_Validation/Golden_Samples_and_Expansion.md",
+    "70_Validation",
+    "60_Contracts/Rebuild_Assistant_Workflow_Contract.md",
+    "60_Contracts/Rebuild_Assistant_Report_and_Refinement_Contract.md",
+    "60_Contracts/Rebuild_Assistant_Polish_and_Rendering_Contract.md",
+    "60_Contracts/Rebuild_Assistant_Judgment_and_Selection_Contract.md",
+    "60_Contracts/Rebuild_Assistant_Accounting_Contract.md",
+    "60_Contracts/Contracts_Index.md",
+    "60_Contracts",
+    "50_Policies/Policy_Index.md",
+    "50_Policies/Output_and_Response_Policies.md",
+    "50_Policies/Document_Driven_Execution_Policy.md",
+    "50_Policies/AI_Augmentation_Policy.md",
+    "50_Policies",
+    "20_Projects/Pattern_Extraction_Pipeline_Detail.md",
+    "40_Docs/Mellow_Link_Validation_and_Golden_Samples.md",
+    "40_Docs/Mellow_Link_Product_and_Roadmap.md",
+    "40_Docs/Mellow_Link_Operations_and_Known_Issues.md",
+    "40_Docs/Mellow_Link_Engine_Governance_and_QA.md",
+    "40_Docs",
+    "무제.canvas"
+  ]
+}

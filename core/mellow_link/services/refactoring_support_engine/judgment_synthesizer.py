@@ -11,11 +11,12 @@ from mellow_link.modules.rebuild_assistant.schemas import (
 )
 
 from .decision_catalog import get_judgment_template_specs
+from .template_support import TemplateSupport
 
 
 class JudgmentSynthesizer:
-    def __init__(self, helper: Any) -> None:
-        self.helper = helper
+    def __init__(self, helper: Any | None = None) -> None:
+        self.helper = helper or TemplateSupport()
 
     def build_applied_templates(
         self,

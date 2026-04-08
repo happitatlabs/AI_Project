@@ -15,11 +15,12 @@ from mellow_link.modules.rebuild_assistant.schemas import (
 
 from .decision_catalog import get_judgment_template_spec
 from .schemas import DecisionArtifacts
+from .template_support import TemplateSupport
 
 
 class PlanningSynthesizer:
-    def __init__(self, helper: Any) -> None:
-        self.helper = helper
+    def __init__(self, helper: Any | None = None) -> None:
+        self.helper = helper or TemplateSupport()
 
     def _require_decisions(self, decisions: DecisionArtifacts | None) -> DecisionArtifacts:
         if decisions is None:

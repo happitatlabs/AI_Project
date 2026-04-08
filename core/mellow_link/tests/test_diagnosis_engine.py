@@ -92,3 +92,42 @@ class ApprovalService:
     detector_ids = {item.detector_id for item in diagnosis.diagnosis_report.issues}
 
     assert "rule_scatter" not in detector_ids
+
+
+def test_diagnosis_engine_run_no_longer_depends_on_service_analysis_helpers(monkeypatch):
+    bundle = build_safe_bundle(
+        [
+            {
+                "name": "order_page.html",
+                "content": """
+<% String sql = "SELECT * FROM orders WHERE status = 'READY'"; %>
+<button onclick="submitOrder()">submit</button>
+                """,
+            },
+            {
+                "name": "order_service.py",
+                "content": """
+class OrderService:
+    def submit(self, order, repo):
+        if not order.amount:
+            raise ValueError("required")
+        repo.save(order)
+        return approve(order)
+                """,
+            },
+        ]
+    )
+    service = RebuildAssistantService()
+    prepared = service.prepare_safe_bundle_input(goal="modernize order creation flow", safe_bundle=bundle, constraints=[])
+    structure = StructureAnalyzer().analyze(InputAssembler().assemble(prepared))
+
+    def fail_analysis(*args, **kwargs):
+        raise AssertionError("legacy analysis helper should not be called")
+
+    monkeypatch.setattr(service, "analyze_assets", fail_analysis)
+    monkeypatch.setattr(service, "extract_rules", fail_analysis)
+
+    diagnosis = DiagnosisEngine().run(prepared, structure, service)
+
+    assert diagnosis.analysis_summary
+    assert diagnosis.extracted_rules.model_dump()

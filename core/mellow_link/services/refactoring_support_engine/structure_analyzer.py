@@ -272,7 +272,7 @@ class FeatureSliceExtractor:
     ) -> tuple[list[FunctionSlice], dict[str, list[str]]]:
         seeds = self._seed_entries(analysis_input)
         if not seeds:
-            seeds = [self._usecase_seed(analysis_input.goal, analysis_input.asset_inventory)]
+            seeds = [self._usecase_seed(analysis_input.asset_inventory)]
         seeds = sorted(seeds, key=lambda item: (item["priority"], item["asset_id"], item["entry_point"]))
         components_by_asset: dict[str, list[str]] = defaultdict(list)
         layer_by_component = {component.component_id: component.layer for component in components}
@@ -341,7 +341,6 @@ class FeatureSliceExtractor:
                 for edge in dependencies
                 if edge.from_component in related_components and edge.to_component in related_components
             ]
-            business_rules = [constraint for constraint in analysis_input.constraints[:2]]
             slices.append(
                 FunctionSlice(
                     slice_id=make_stable_id("SLICE", seed["name"], seed["asset_id"]),
@@ -349,7 +348,7 @@ class FeatureSliceExtractor:
                     entry_points=[seed["entry_point"]],
                     related_components=related_components,
                     related_tables=related_tables,
-                    business_rules=business_rules,
+                    business_rules=[],
                     dependencies=list(dict.fromkeys(dependencies_view)),
                 )
             )
@@ -424,9 +423,9 @@ class FeatureSliceExtractor:
             deduped.append(item)
         return deduped
 
-    def _usecase_seed(self, goal: str, assets) -> dict[str, str]:
-        usecase = self._normalize_usecase(goal or (assets[0].name if assets else "legacy_flow"))
-        asset_id = assets[0].asset_id if assets else "legacy"
+    def _usecase_seed(self, assets) -> dict[str, str]:
+        usecase = self._normalize_usecase(self._usecase_seed_text(assets))
+        asset_id = self._usecase_seed_asset_id(assets)
         return {
             "name": f"usecase:{usecase}",
             "entry_point": f"usecase:{usecase}",
@@ -435,6 +434,20 @@ class FeatureSliceExtractor:
             "kind": "usecase",
             "priority": 3,
         }
+
+    def _usecase_seed_text(self, assets) -> str:
+        for asset in assets or []:
+            asset_type = str(getattr(asset, "asset_type", "") or "").strip().lower()
+            if asset_type in {"source", "ui", "sql", "schema"}:
+                return str(getattr(asset, "name", "") or "").strip()
+        return "legacy_flow"
+
+    def _usecase_seed_asset_id(self, assets) -> str:
+        for asset in assets or []:
+            asset_type = str(getattr(asset, "asset_type", "") or "").strip().lower()
+            if asset_type in {"source", "ui", "sql", "schema"}:
+                return str(getattr(asset, "asset_id", "") or "").strip() or "legacy"
+        return "legacy"
 
     def _normalize_usecase(self, text: str) -> str:
         lowered = re.sub(r"[^A-Za-z0-9가-힣]+", " ", text or "").strip().lower()

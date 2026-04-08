@@ -25,9 +25,9 @@ class ImprovementPlanner:
         structure: StructureAnalysisResult,
         diagnosis: DiagnosisArtifacts,
         decisions: DecisionArtifacts,
-        legacy_service: Any,
+        legacy_service: Any | None = None,
     ) -> ImprovementArtifacts:
-        planning_synthesizer = self.planning_synthesizer or PlanningSynthesizer(legacy_service)
+        planning_synthesizer = self.planning_synthesizer or PlanningSynthesizer()
         if decisions is None:
             raise ValueError("DecisionArtifacts are required for planning.")
         priority_split_items = planning_synthesizer.build_priority_split_items(

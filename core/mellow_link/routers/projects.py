@@ -196,7 +196,10 @@ def _extract_structured_result(events: list[dict[str, Any]]) -> StructuredRebuil
     return None
 
 
-def _extract_polish_bundle(events: list[dict[str, Any]]) -> dict[str, Any] | None:
+def _extract_polish_bundle(
+    events: list[dict[str, Any]],
+    structured: StructuredRebuildResult | None = None,
+) -> dict[str, Any] | None:
     for event in reversed(events):
         if event.get("type") != "run_finished":
             continue
@@ -204,7 +207,30 @@ def _extract_polish_bundle(events: list[dict[str, Any]]) -> dict[str, Any] | Non
         polish_bundle = payload.get("polish_bundle")
         if isinstance(polish_bundle, dict):
             return polish_bundle
-        return None
+        if isinstance(polish_bundle, str):
+            try:
+                decoded = json.loads(polish_bundle)
+            except Exception:
+                decoded = None
+            if isinstance(decoded, dict):
+                return decoded
+        fallback_result = structured
+        if fallback_result is None:
+            structured_payload = payload.get("structured_result")
+            if isinstance(structured_payload, dict):
+                try:
+                    fallback_result = StructuredRebuildResult.model_validate(structured_payload)
+                except Exception:
+                    fallback_result = None
+        if fallback_result is None:
+            return None
+        from mellow_link.modules.rebuild_assistant.postprocess.service import StructuredResultPolishService
+
+        return StructuredResultPolishService().polish_result(
+            fallback_result,
+            audience="manager",
+            delivery_mode="client_report",
+        ).model_dump()
     return None
 
 
@@ -1213,7 +1239,7 @@ def _load_project_result_context(
     _sync_project_status(project, snapshot, db)
     events = get_run_events(project.run_id, db=db)
     structured = _extract_structured_result(events)
-    polish_bundle = _extract_polish_bundle(events)
+    polish_bundle = _extract_polish_bundle(events, structured)
     assets = _build_assets_payload(project, db)
     result_package = build_result_package(
         project,

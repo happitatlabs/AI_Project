@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
 from typing import Any
 
 from mellow_link.services.anonymization.schemas import SafeAnalysisBundle
@@ -12,6 +11,9 @@ from mellow_link.services.refactoring_support_engine.decision_catalog import (
     get_judgment_template_spec,
     get_judgment_template_specs,
 )
+from mellow_link.services.refactoring_support_engine.input_assembler import InputAssembler
+from mellow_link.services.refactoring_support_engine.schemas import FeatureSignals, PreparedRebuildInput
+from mellow_link.services.refactoring_support_engine.template_support import TemplateSupport
 
 from .schemas import (
     AppliedJudgmentTemplate,
@@ -35,43 +37,6 @@ from .schemas import (
     StructuredRebuildResult,
     VerificationItem,
 )
-
-
-@dataclass
-class FeatureSignals:
-    concepts: list[str] = field(default_factory=list)
-    status_permissions: list[str] = field(default_factory=list)
-    search_filters: list[str] = field(default_factory=list)
-    save_validation: list[str] = field(default_factory=list)
-    technical: list[str] = field(default_factory=list)
-    scores: dict[str, float] = field(default_factory=dict)
-    primary_feature_mode: str = "general"
-    secondary_feature_mode: str | None = None
-
-
-@dataclass
-class PreparedRebuildInput:
-    goal: str
-    assets: RebuildAssetsPayload
-    constraints: list[str]
-    asset_presence: AssetPresenceSummary = field(default_factory=AssetPresenceSummary)
-    safe_bundle: SafeAnalysisBundle | None = None
-    temp_context: str = ""
-    legacy_bundle: str = ""
-    scope_limited: bool = False
-    missing_context: list[str] | None = None
-    signals: FeatureSignals = field(default_factory=FeatureSignals)
-    selected_primary_judgment: str = ""
-    selected_primary_judgment_reason: str = ""
-    selected_narrative_judgment: str = ""
-    pattern_candidates: list[PatternCandidate] = field(default_factory=list)
-    accounting_input: Any | None = None
-    accounting_asset_name: str = ""
-    accounting_input_error: str = ""
-
-    def __post_init__(self) -> None:
-        if self.missing_context is None:
-            self.missing_context = []
 
 
 class RebuildAssistantService:
@@ -105,6 +70,7 @@ class RebuildAssistantService:
         "게시판", "댓글", "보고서", "예약", "직원", "권한", "상태", "정책", "감사", "검색",
         "필터", "조회", "저장", "등록", "검증",
     )
+    SOURCE_ASSET_EXTENSIONS = (".java", ".py", ".js", ".jsx", ".ts", ".tsx", ".cs", ".kt", ".rb", ".php", ".go", ".scala")
 
     def prepare_input(
         self,
@@ -114,35 +80,13 @@ class RebuildAssistantService:
         constraints: list[str] | None = None,
         temp_context: str = "",
     ) -> PreparedRebuildInput:
-        constraints = [(item or "").strip() for item in (constraints or []) if (item or "").strip()]
-        cleaned_assets = RebuildAssetsPayload(
-            source_code=(assets.source_code or "").strip(),
-            database_schema=(assets.database_schema or "").strip(),
-            sql_queries=(assets.sql_queries or "").strip(),
-            ui_template=(assets.ui_template or "").strip(),
-            framework_info=(assets.framework_info or "").strip(),
-        )
-        parts = [
-            self._section("Source Code", cleaned_assets.source_code),
-            self._section("Database Schema", cleaned_assets.database_schema),
-            self._section("SQL Queries", cleaned_assets.sql_queries),
-            self._section("UI Template", cleaned_assets.ui_template),
-            self._section("Framework Info", cleaned_assets.framework_info),
-            self._section("Uploaded Context", (temp_context or "").strip()),
-        ]
-        prepared = PreparedRebuildInput(
-            goal=(goal or "").strip(),
-            assets=cleaned_assets,
+        return InputAssembler().prepare_input(
+            self,
+            goal=goal,
+            assets=assets,
             constraints=constraints,
-            asset_presence=self._build_asset_presence_from_payload(cleaned_assets),
-            safe_bundle=None,
-            temp_context=(temp_context or "").strip(),
-            legacy_bundle="\n\n".join(part for part in parts if part),
-            scope_limited=self.is_scope_limited(goal),
+            temp_context=temp_context,
         )
-        prepared.signals = self.extract_feature_signals(prepared)
-        prepared.missing_context = self.detect_missing_context(prepared)
-        return prepared
 
     def prepare_safe_bundle_input(
         self,
@@ -151,63 +95,12 @@ class RebuildAssistantService:
         safe_bundle: SafeAnalysisBundle,
         constraints: list[str] | None = None,
     ) -> PreparedRebuildInput:
-        asset_presence = self._build_asset_presence_from_safe_bundle(safe_bundle)
-        asset_name_by_id = {asset.asset_id: asset.name for asset in safe_bundle.asset_summary}
-        source_code_blocks: list[str] = []
-        schema_blocks: list[str] = []
-        sql_blocks: list[str] = []
-        ui_blocks: list[str] = []
-        accounting_input = None
-        accounting_asset_name = ""
-        accounting_input_error = ""
-        for source in safe_bundle.sources:
-            content = (source.content or "").strip()
-            if not content:
-                continue
-            asset_name = asset_name_by_id.get(source.asset_id, "")
-            if self._looks_like_accounting_payload_asset(asset_name, content):
-                if accounting_input is not None or accounting_input_error:
-                    accounting_input_error = "multiple accounting payload assets found"
-                    accounting_asset_name = asset_name or accounting_asset_name
-                    continue
-                accounting_input, accounting_input_error = self._parse_accounting_payload(content)
-                accounting_asset_name = asset_name
-                continue
-            block = f"[SAFE SOURCE: {source.asset_id} | {asset_name or '-'}]\n{content}"
-            if self._is_schema_asset_name(asset_name):
-                schema_blocks.append(block)
-            elif self._is_sql_asset_name(asset_name):
-                sql_blocks.append(block)
-            elif self._is_ui_asset_name(asset_name):
-                ui_blocks.append(block)
-            else:
-                source_code_blocks.append(block)
-        structures = "\n\n".join(
-            self._render_structure_block(structure)
-            for structure in safe_bundle.structures
-            if structure.nodes or structure.edges
+        return InputAssembler().prepare_safe_bundle_input(
+            self,
+            goal=goal,
+            safe_bundle=safe_bundle,
+            constraints=constraints,
         )
-        assets = RebuildAssetsPayload(
-            source_code="\n\n".join(source_code_blocks),
-            database_schema="\n\n".join(schema_blocks),
-            sql_queries="\n\n".join(sql_blocks),
-            ui_template="\n\n".join(part for part in [structures, "\n\n".join(ui_blocks)] if part),
-            framework_info=self._build_framework_hint(safe_bundle, asset_presence),
-        )
-        normalized_constraints = list(constraints or []) + [
-            f"safe_bundle_id={safe_bundle.bundle_id}",
-            f"safe_bundle_level={safe_bundle.masking_level.value}",
-            "safe_bundle_only=true",
-        ]
-        prepared = self.prepare_input(goal=goal, assets=assets, constraints=normalized_constraints, temp_context="")
-        prepared.asset_presence = asset_presence
-        prepared.safe_bundle = safe_bundle
-        prepared.signals = self.extract_feature_signals(prepared)
-        prepared.missing_context = self.detect_missing_context(prepared)
-        prepared.accounting_input = accounting_input
-        prepared.accounting_asset_name = accounting_asset_name
-        prepared.accounting_input_error = accounting_input_error
-        return prepared
 
     def is_scope_limited(self, goal: str) -> bool:
         text = (goal or "").strip().lower()
@@ -218,12 +111,12 @@ class RebuildAssistantService:
 
     def build_missing_context_details(self, prepared: PreparedRebuildInput) -> list[MissingContextItem]:
         missing: list[MissingContextItem] = []
-        has_source = prepared.asset_presence.has_source_code or bool(prepared.assets.source_code)
-        has_ui = prepared.asset_presence.has_ui_asset or bool(prepared.assets.ui_template)
-        has_schema = prepared.asset_presence.has_schema_asset or bool(prepared.assets.database_schema)
-        has_sql = prepared.asset_presence.has_sql_asset or bool(prepared.assets.sql_queries)
-        has_framework = prepared.asset_presence.has_framework_hint or bool(prepared.assets.framework_info)
-        if not has_source and not has_ui and not prepared.temp_context:
+        has_source = self._has_source_code_evidence(prepared)
+        has_ui = self._has_ui_evidence(prepared)
+        has_schema = self._has_schema_evidence(prepared)
+        has_sql = self._has_sql_evidence(prepared)
+        has_framework = self._has_framework_evidence(prepared)
+        if not has_source and not has_ui:
             missing.append(
                 MissingContextItem(
                     required_material="레거시 화면 또는 서버 코드",
@@ -267,6 +160,31 @@ class RebuildAssistantService:
             )
         return missing
 
+    def _has_source_code_evidence(self, prepared: PreparedRebuildInput) -> bool:
+        if prepared.safe_bundle is not None:
+            return bool(prepared.asset_presence.has_source_code)
+        return bool(prepared.asset_presence.has_source_code or (prepared.assets.source_code or "").strip())
+
+    def _has_ui_evidence(self, prepared: PreparedRebuildInput) -> bool:
+        if prepared.safe_bundle is not None:
+            return bool(prepared.asset_presence.has_ui_asset)
+        return bool(prepared.asset_presence.has_ui_asset or (prepared.assets.ui_template or "").strip())
+
+    def _has_schema_evidence(self, prepared: PreparedRebuildInput) -> bool:
+        if prepared.safe_bundle is not None:
+            return bool(prepared.asset_presence.has_schema_asset)
+        return bool(prepared.asset_presence.has_schema_asset or (prepared.assets.database_schema or "").strip())
+
+    def _has_sql_evidence(self, prepared: PreparedRebuildInput) -> bool:
+        if prepared.safe_bundle is not None:
+            return bool(prepared.asset_presence.has_sql_asset)
+        return bool(prepared.asset_presence.has_sql_asset or (prepared.assets.sql_queries or "").strip())
+
+    def _has_framework_evidence(self, prepared: PreparedRebuildInput) -> bool:
+        if prepared.safe_bundle is not None:
+            return bool(prepared.asset_presence.has_framework_hint)
+        return bool(prepared.asset_presence.has_framework_hint or (prepared.assets.framework_info or "").strip())
+
     def extract_feature_signals(self, prepared: PreparedRebuildInput) -> FeatureSignals:
         bundle = prepared.legacy_bundle.lower()
         concepts = self._extract_concepts(prepared)
@@ -301,290 +219,22 @@ class RebuildAssistantService:
         )
 
     def analyze_assets(self, prepared: PreparedRebuildInput) -> list[str]:
-        findings: list[str] = []
-        primary_label = self._feature_mode_label(prepared.signals.primary_feature_mode)
-        if self._looks_like_jsp(prepared):
-            findings.append("JSP/서버 템플릿 기반 UI로 추정되며 프레젠테이션과 서버 책임이 섞여 있습니다.")
-        if self._contains_sql_in_ui(prepared):
-            findings.append("SQL 또는 데이터 접근 로직이 UI/템플릿과 가깝게 결합되어 있습니다.")
-        findings.append(f"대표 도메인 범위는 {self._primary_concept(prepared)} 중심으로 정리하는 편이 적절합니다.")
-        if prepared.signals.status_permissions:
-            findings.append(
-                "권한 및 상태 규칙 신호가 보여 역할/상태/가능 액션 표시가 화면 분기와 섞여 있으며 정책 추출이 필요합니다: "
-                + ", ".join(prepared.signals.status_permissions[:3])
-            )
-        if prepared.signals.search_filters:
-            findings.append(
-                "조회 조건 규칙 신호가 보여 조회 조건, 검색 파라미터, 동적 쿼리 조합이 한 흐름에 묶여 있습니다: "
-                + ", ".join(prepared.signals.search_filters[:3])
-            )
-        if prepared.signals.save_validation:
-            findings.append(
-                "저장 검증 규칙 신호가 보여 저장 전 검증, 중복 체크, 저장 가드가 화면/서비스 경계 없이 퍼져 있습니다: "
-                + ", ".join(prepared.signals.save_validation[:3])
-            )
-        if prepared.asset_presence.has_schema_asset or prepared.assets.database_schema:
-            findings.append("기존 스키마 호환성을 유지해야 하므로 API/백엔드 분리 시 DB 계약을 우선 보존해야 합니다.")
-        if primary_label != "일반 기능":
-            findings.append(f"우선 분해 대상은 {primary_label}이며, 나머지 규칙은 보조 흐름으로 정리하는 편이 적절합니다.")
-        if not findings:
-            findings.append("제공된 자산 범위에서는 단일 기능 수준의 레거시 웹 화면과 데이터 접근 계층이 함께 얽혀 있는 것으로 보입니다.")
-        return findings[:6]
+        from mellow_link.services.refactoring_support_engine.diagnosis_engine import DiagnosisEngine
+
+        return DiagnosisEngine().build_analysis_summary(prepared)
 
     def infer_target_architecture(self, prepared: PreparedRebuildInput) -> list[str]:
-        concept = self._primary_concept(prepared)
-        primary = prepared.signals.primary_feature_mode
-        secondary = prepared.signals.secondary_feature_mode
-        strategy = [
-            f"{concept} 기능을 단일 범위에서 화면, 업무 처리 API, 데이터 접근 책임으로 분리하는 구조로 재구성합니다.",
-            f"화면은 업무 흐름 중심으로 나누고, 상태 판단은 공통 규칙에 따라 일관되게 처리하도록 구성합니다.",
-            f"백엔드는 {concept} 전용 API, 업무 서비스, 데이터 접근 계층으로 나눠 기존 SQL 의존도를 단계적으로 축소합니다.",
-        ]
-        if primary == "status_permissions":
-            strategy.append("권한과 상태 전이 규칙을 핵심 흐름으로 보고, 처리 가능 여부 판단을 정책 계층으로 분리합니다.")
-        elif primary == "search_filters":
-            strategy[1] = "화면은 조회 조건 입력 영역과 결과 표시 영역으로 나누고 검색 상태를 별도로 관리하도록 구성합니다."
-            strategy[2] = f"백엔드는 {concept} 조회 API와 데이터 접근 규칙을 분리해 검색 조건과 SQL 조건 매핑을 명확히 합니다."
-            strategy.append("조회 조건 규칙을 핵심 흐름으로 보고 조회 파라미터, 필터 상태, 정렬 규칙을 별도 조회 모델로 분리합니다.")
-        elif primary == "save_validation":
-            strategy.append("저장 검증 규칙을 핵심 흐름으로 보고 입력 검증, 중복 체크, 저장 전 차단 규칙을 별도 검증 계층으로 분리합니다.")
-        if secondary == "status_permissions":
-            strategy.append("보조 신호로 권한 및 상태 규칙이 감지되어 액션 노출과 상태 전이 규칙도 함께 정리합니다.")
-        elif secondary == "search_filters":
-            strategy.append("보조 신호로 조회 조건 규칙이 감지되어 필터 상태와 조회 파라미터 정규화도 함께 반영합니다.")
-        elif secondary == "save_validation":
-            strategy.append("보조 신호로 저장 검증 규칙이 감지되어 저장 전 차단 규칙과 중복 체크도 함께 반영합니다.")
-        if prepared.scope_limited:
-            strategy.insert(0, "요청 범위가 V0 한계를 넘으므로 전체 마이그레이션 대신 단일 기능 재구성 전략으로 축소합니다.")
-        if prepared.constraints:
-            strategy.append(f"제약 조건 반영: {prepared.constraints[0]}")
-        return strategy[:6]
+        return self._engine_template_support().infer_target_architecture(prepared)
 
     def build_layer_reconstruction(self, prepared: PreparedRebuildInput) -> LayeredListResult:
-        concept = self._primary_concept(prepared)
-        resource = self._resource_name(prepared)
-        primary = prepared.signals.primary_feature_mode
-        secondary = prepared.signals.secondary_feature_mode
-        database = [
-            f"{concept} 관련 테이블과 컬럼 계약은 유지하되 조회와 저장 책임을 데이터 접근 계층으로 이동합니다.",
-        ]
-        if primary == "search_filters":
-            database.append("조회 조건과 필터 조합을 명시적 SQL 조건 매핑 규칙으로 정리하고 동적 문자열 결합을 제거합니다.")
-        elif primary == "save_validation":
-            database.append("중복 체크와 저장 전 선행 조회는 저장 커맨드와 분리된 제약 검사 쿼리로 정리합니다.")
-        elif primary == "status_permissions":
-            database.append("상태 전이와 권한 판정에 필요한 상태 기준 컬럼은 읽기 모델에서 명시적으로 조회합니다.")
-        else:
-            database.append("복잡한 조인과 조건식은 재사용 가능한 조회 규칙 또는 읽기 전용 조회 구조로 정리합니다.")
-        if secondary == "save_validation" and primary != "save_validation":
-            database.append("중복 체크와 저장 전 선행 조회는 저장 커맨드와 분리된 제약 검사 쿼리로 정리합니다.")
-        elif secondary == "search_filters" and primary != "search_filters":
-            database.append("보조 조회 신호를 반영해 주요 검색 조건은 파라미터 바인딩으로 고정합니다.")
-        if prepared.assets.database_schema or prepared.assets.sql_queries:
-            database.append("스키마 변경은 최소화하고 V0에서는 호환 레이어를 우선 설계합니다.")
-
-        backend = [
-            f"{concept} 기능 전용 API와 업무 서비스 계층을 분리합니다.",
-        ]
-        if primary == "status_permissions":
-            backend.append("역할별 처리 가능 여부 판단을 정책 서비스로 추출합니다.")
-            backend.append("상태 전이 허용 여부를 transition policy로 분리해 화면 분기와 저장 로직에서 공용 사용합니다.")
-        elif primary == "search_filters":
-            backend[0] = f"{concept} 검색 전용 API와 조회 서비스 계층을 분리합니다."
-            backend.append("검색 조건 입력은 정렬, 페이징, 필터 항목으로 나누어 명시적으로 매핑합니다.")
-            backend.append("동적 검색 조건은 조회 규칙 표에 따라 관리합니다.")
-        elif primary == "save_validation":
-            backend.append("저장 전 차단 규칙, 중복 체크, 입력 검증을 별도 검증 계층으로 분리합니다.")
-            backend.append("저장 전 제약 검사는 저장 처리와 분리해 선행 검증 단계에서 수행합니다.")
-        if secondary == "status_permissions" and primary != "status_permissions":
-            backend.append("보조 정책 신호를 반영해 주요 액션 노출 조건은 policy service에서 계산합니다.")
-        elif secondary == "search_filters" and primary != "search_filters":
-            backend.append("보조 조회 신호를 반영해 query DTO를 함께 둡니다.")
-        elif secondary == "save_validation" and primary != "save_validation":
-            backend.append("보조 저장 신호를 반영해 핵심 저장 경로에 validator를 둡니다.")
-        if primary == "general":
-            backend.append("서비스 계층에서 JSP 내 조건문과 분기 로직을 명시적 비즈니스 규칙으로 추출합니다.")
-
-        frontend = [
-            f"{concept} 화면을 기준으로 상위 화면과 하위 업무 구성 요소를 분리합니다.",
-        ]
-        if primary == "status_permissions":
-            frontend.append("사용자 역할과 엔티티 상태에 따른 버튼 노출/비활성화 규칙을 UI policy hook으로 분리합니다.")
-        elif primary == "search_filters":
-            frontend[0] = f"{concept} 화면을 기준으로 조회 조건 입력 영역과 결과 목록 영역을 분리합니다."
-            frontend.append("검색 필터 상태, 폼 값, 결과 목록 상태를 별도 query state 모델로 관리합니다.")
-        elif primary == "save_validation":
-            frontend.append("저장 폼 검증 메시지와 제출 가드를 view model 또는 form schema 기준으로 분리합니다.")
-        if secondary == "status_permissions" and primary != "status_permissions":
-            frontend.append("보조 정책 신호를 반영해 액션 버튼 가시성 계산을 분리합니다.")
-        elif secondary == "search_filters" and primary != "search_filters":
-            frontend.append("보조 조회 신호를 반영해 필터 상태를 별도 query state로 유지합니다.")
-        elif secondary == "save_validation" and primary != "save_validation":
-            frontend.append("보조 저장 신호를 반영해 제출 전 검증 메시지를 분리합니다.")
-        if not (prepared.assets.source_code or prepared.assets.ui_template):
-            frontend = ["화면 자산이 부족하므로 프론트엔드는 API 계약 기준의 최소 컴포넌트 분해만 제안합니다."]
-        return LayeredListResult(database=database[:4], backend=backend[:4], frontend=frontend[:4])
+        return self._engine_template_support().build_layer_reconstruction(prepared)
 
     def build_recomposition_draft(
         self,
         prepared: PreparedRebuildInput,
         applied_templates: list[AppliedJudgmentTemplate] | None = None,
     ) -> LayeredListResult:
-        concept = self._primary_concept(prepared)
-        primary = prepared.signals.primary_feature_mode
-        secondary = prepared.signals.secondary_feature_mode
-        primary_template = self._primary_template(prepared, applied_templates or [])
-        primary_template_id = primary_template.template_id if primary_template else ""
-        if self._should_force_amount_threshold_narrative(prepared, []):
-            primary_template_id = "amount_threshold"
-
-        if primary_template_id == "workflow":
-            database = [
-                f"예시: {concept} 승인 트리거, 승인 주체, 단계별 승인 상태를 워크플로우 기준 컬럼으로 분리합니다.",
-            ]
-        elif primary_template_id == "state_transition":
-            database = [
-                f"예시: {concept} 상태 컬럼, 처리 가능 상태, 전이 결과 반영 기준을 읽기/쓰기 경계로 분리합니다.",
-            ]
-        elif primary_template_id == "access_control":
-            database = [
-                f"예시: {concept} 승인 주체, 부서별 처리 권한, 예외 승인 경로를 정책 기준 컬럼으로 정리합니다.",
-            ]
-        elif primary_template_id == "query_filter":
-            database = [
-                f"예시: {self._compose_concept_goal(concept, '조회 조건, 정렬 기준, 페이징 규칙을 조회 모델 경계로 분리합니다.')}",
-            ]
-        elif primary_template_id == "amount_threshold":
-            database = [
-                f"예시: {concept} 금액 구간, 한도 임계값, 고액 처리 기준을 정책 기준 컬럼으로 정리합니다.",
-            ]
-        else:
-            database = [
-                f"예시: {concept} 조회 경로와 저장 경로를 분리해 데이터 접근 책임을 명확히 합니다.",
-            ]
-        if primary_template_id == "workflow":
-            database.append("예시: 승인 단계, 승인 주체, 예외 승인 경로를 워크플로우 기준 컬럼으로 명시해 조회합니다.")
-        elif primary == "search_filters":
-            database.append("예시: 조회 조건 매핑 규칙을 두고 WHERE 절은 바인딩 파라미터로만 조립합니다.")
-        elif primary_template_id == "validation":
-            database.append("예시: 저장 전 중복 여부와 상태 충돌을 확인하는 선행 검사 쿼리를 분리합니다.")
-        elif primary_template_id == "access_control":
-            database.append("예시: 승인 주체, 부서별 처리 권한, 예외 승인 경로를 정책 기준 컬럼으로 명시해 조회합니다.")
-        elif primary_template_id == "query_filter":
-            database.append("예시: 필터 조건과 정렬 기준은 조회 파라미터 규칙으로 명시해 조회합니다.")
-        elif primary_template_id == "amount_threshold":
-            database.append("예시: 금액 한도와 임계값 비교에 필요한 컬럼을 정책 기준으로 명시해 조회합니다.")
-        elif primary_template_id == "state_transition" or primary == "status_permissions":
-            database.append("예시: 상태 표시와 처리 가능 여부 계산에 필요한 컬럼을 읽기 전용 조회 구조로 묶어 관리합니다.")
-        if secondary == "search_filters" and primary != "search_filters":
-            database.append("예시: 보조 조회 신호를 반영해 조회 조건 매핑 규칙을 함께 둡니다.")
-        elif secondary == "save_validation" and primary_template_id not in {"state_transition", "access_control", "validation", "query_filter", "amount_threshold"} and primary != "save_validation":
-            database.append("예시: 보조 저장 신호를 반영해 중복 검사 쿼리를 추가합니다.")
-        if not prepared.assets.database_schema and not prepared.assets.sql_queries:
-            database = [f"DB 자산이 부족하므로 {concept} 데이터 접근 인터페이스와 파라미터 계약 초안만 제공합니다."]
-
-        if primary_template_id == "workflow":
-            backend = [
-                f"예시: {concept} 승인 요청 API와 승인 처리 API를 분리해 워크플로우 기본 구조를 정리합니다.",
-            ]
-        elif primary_template_id == "state_transition":
-            backend = [
-                f"예시: {concept} 상태 전이 API와 처리 가능 상태 판단 API를 분리해 기본 구조를 정리합니다.",
-            ]
-        elif primary_template_id == "access_control":
-            backend = [
-                f"예시: {concept} 승인 판단 API와 일반 처리 API를 분리해 기본 구조를 정리합니다.",
-            ]
-        elif primary_template_id == "query_filter":
-            backend = [
-                f"예시: {self._compose_concept_goal(concept, '조회 API와 결과 목록 API를 분리하고 조회 모델을 기준으로 기본 구조를 정리합니다.')}",
-            ]
-        elif primary_template_id == "amount_threshold":
-            backend = [
-                f"예시: {concept} 한도 판단 API와 일반 처리 API를 분리해 기본 구조를 정리합니다.",
-            ]
-        else:
-            backend = [
-                f"예시: {concept} 조회 API, 상세 API, 처리 API를 분리해 기본 구조를 정리합니다.",
-            ]
-        if primary_template_id == "workflow":
-            backend.append("예시: 승인 트리거와 승인 주체를 별도 워크플로우 서비스에서 계산합니다.")
-            backend.append("예시: 승인, 반려, 보류, 예외 승인 경로를 단계별 워크플로우로 분리합니다.")
-        elif primary_template_id == "access_control":
-            backend.append("예시: 승인 주체와 부서별 처리 권한을 정책 서비스에서 계산합니다.")
-            backend.append("예시: 일반 처리 경로와 예외 승인 경로를 별도 승인 흐름으로 분리합니다.")
-        elif primary_template_id == "state_transition" or primary == "status_permissions":
-            backend.append("예시: 역할과 상태에 따른 처리 가능 여부를 정책 서비스에서 계산합니다.")
-            backend.append("예시: 승인, 반려, 마감, 취소 같은 상태 전이 규칙을 별도 상태 전이 계층으로 분리합니다.")
-        elif primary_template_id == "query_filter":
-            backend.append("예시: 조회 조건 모델과 SQL 조건 매핑 규칙을 별도 조회 계층으로 분리합니다.")
-            backend.append("예시: 정렬과 페이징 기본값을 조회 정책으로 분리합니다.")
-        elif primary_template_id == "amount_threshold":
-            backend.append("예시: 금액 구간과 한도 비교를 별도 정책 서비스에서 계산합니다.")
-            backend.append("예시: 고액 처리와 한도 초과 결과를 정책 결과로 분리합니다.")
-        elif primary == "search_filters":
-            backend[0] = f"예시: {self._compose_concept_goal(concept, '검색 API와 상세 조회 API를 나눠 조회 구조를 정리합니다.')}"
-            backend.append("예시: 조회 파라미터, 검색 조건, 정렬 규칙을 별도 조회 모델로 수집합니다.")
-            backend.append("예시: SQL 조건 매핑 규칙과 조회 조건 해석을 분리합니다.")
-        elif primary_template_id == "validation":
-            backend.append("예시: 저장 전 차단 규칙, 중복 체크, 업무 규칙 검증을 별도 검증 계층으로 분리합니다.")
-            backend.append("예시: 저장 처리 계층은 검증 완료 후 실제 저장만 담당하도록 분리합니다.")
-        if secondary == "status_permissions" and primary_template_id not in {"state_transition", "access_control"} and primary != "status_permissions":
-            backend.append("예시: 보조 정책 신호를 반영해 처리 가능 여부 판단 계층을 함께 둡니다.")
-        elif secondary == "search_filters" and primary_template_id not in {"state_transition", "access_control", "validation", "query_filter", "amount_threshold"} and primary != "search_filters":
-            backend.append("예시: 보조 조회 신호를 반영해 조회 조건 모델을 함께 둡니다.")
-        elif secondary == "save_validation" and primary_template_id not in {"state_transition", "access_control", "validation", "query_filter", "amount_threshold"} and primary != "save_validation":
-            backend.append("예시: 보조 저장 신호를 반영해 입력 검증 계층을 함께 둡니다.")
-        if prepared.scope_limited:
-            backend.insert(0, "전체 코드 생성 대신 단일 기능 endpoint 초안만 제공합니다.")
-
-        if primary_template_id == "workflow":
-            frontend = [
-                f"예시: {concept} 화면을 승인 요청 영역, 승인 단계 안내 영역, 예외 처리 안내 영역으로 나눕니다.",
-            ]
-        elif primary_template_id == "state_transition":
-            frontend = [
-                f"예시: {concept} 화면을 상태 표시 영역, 처리 가능 상태 안내 영역, 전이 액션 영역으로 나눕니다.",
-            ]
-        elif primary_template_id == "access_control":
-            frontend = [
-                f"예시: {concept} 화면을 승인 주체 안내 영역, 처리 경로 안내 영역, 액션 영역으로 나눕니다.",
-            ]
-        elif primary_template_id == "query_filter":
-            frontend = [
-                f"예시: {self._compose_concept_goal(concept, '화면을 검색 조건 영역, 결과 목록 영역, 정렬/페이징 영역으로 나눕니다.')}",
-            ]
-        elif primary_template_id == "amount_threshold":
-            frontend = [
-                f"예시: {concept} 화면을 한도 안내 영역, 처리 결과 안내 영역, 액션 영역으로 나눕니다.",
-            ]
-        else:
-            frontend = [
-                f"예시: {concept} 화면을 목록 영역, 상세 영역, 처리 영역으로 나눠 화면 골격을 구성합니다.",
-            ]
-        if primary_template_id == "workflow":
-            frontend.append("예시: 승인 주체, 단계 상태, 예외 승인 안내를 워크플로우 결과에 따라 분리해 표시합니다.")
-        elif primary == "search_filters":
-            frontend[0] = f"예시: {self._compose_concept_goal(concept, '화면을 검색 조건 영역과 결과 목록 영역으로 나눕니다.')}"
-            frontend.append("예시: 검색 필터와 조회 조건은 별도 화면 상태로 관리합니다.")
-        elif primary_template_id == "access_control":
-            frontend.append("예시: 승인 주체, 부서 책임, 처리 경로 안내를 정책 결과에 따라 분리해 표시합니다.")
-        elif primary_template_id == "query_filter":
-            frontend.append("예시: 조회 조건과 정렬/페이징 상태를 별도 화면 상태로 관리합니다.")
-        elif primary_template_id == "amount_threshold":
-            frontend.append("예시: 금액 한도 안내와 한도 초과 메시지를 정책 결과에 따라 분리해 표시합니다.")
-        elif primary_template_id == "state_transition" or primary == "status_permissions":
-            frontend.append("예시: 액션 버튼 노출 여부는 역할과 상태 규칙에 따라 분리해 계산합니다.")
-        elif primary_template_id == "validation":
-            frontend.append("예시: 입력 검증, 중복 경고, 제출 차단 규칙을 화면에서 분리해 처리합니다.")
-        if secondary == "search_filters" and primary_template_id not in {"state_transition", "access_control", "validation", "query_filter", "amount_threshold"} and primary != "search_filters":
-            frontend.append("예시: 보조 조회 신호를 반영해 조회 조건 입력 영역을 함께 둡니다.")
-        elif secondary == "status_permissions" and primary_template_id not in {"state_transition", "access_control", "query_filter", "amount_threshold"} and primary != "status_permissions":
-            frontend.append("예시: 보조 정책 신호를 반영해 액션 노출 계산 영역을 함께 둡니다.")
-        elif secondary == "save_validation" and primary_template_id not in {"state_transition", "access_control", "validation", "query_filter", "amount_threshold"} and primary != "save_validation":
-            frontend.append("예시: 보조 저장 신호를 반영해 화면 입력 검증 로직을 함께 둡니다.")
-
-        return LayeredListResult(database=database[:4], backend=backend[:4], frontend=frontend[:4])
+        return self._engine_template_support().build_recomposition_draft(prepared, applied_templates)
 
     def build_risks(
         self,
@@ -593,26 +243,17 @@ class RebuildAssistantService:
         retained_contracts: list[RetainedContract],
         applied_templates: list[AppliedJudgmentTemplate],
     ) -> list[str]:
-        return self._build_template_risks(prepared, grounded_rules, retained_contracts, applied_templates)
+        return self._engine_template_support().build_risks(
+            prepared,
+            grounded_rules,
+            retained_contracts,
+            applied_templates,
+        )
 
     def extract_rules(self, prepared: PreparedRebuildInput) -> ExtractedRulesEnvelope:
-        primary = prepared.signals.primary_feature_mode
-        secondary = prepared.signals.secondary_feature_mode
-        envelope = ExtractedRulesEnvelope()
-        if primary == "status_permissions":
-            envelope.status_permissions = self.extract_status_permissions_rules(prepared)
-        elif primary == "search_filters":
-            envelope.search_filters = self.extract_search_filter_rules(prepared)
-        elif primary == "save_validation":
-            envelope.save_validation = self.extract_save_validation_rules(prepared)
+        from mellow_link.services.refactoring_support_engine.diagnosis_engine import DiagnosisEngine
 
-        if secondary == "status_permissions" and primary != "status_permissions":
-            envelope.status_permissions = self.extract_status_permissions_rules(prepared, supplemental=True)
-        elif secondary == "search_filters" and primary != "search_filters":
-            envelope.search_filters = self.extract_search_filter_rules(prepared, supplemental=True)
-        elif secondary == "save_validation" and primary != "save_validation":
-            envelope.save_validation = self.extract_save_validation_rules(prepared, supplemental=True)
-        return envelope
+        return DiagnosisEngine().build_extracted_rules(prepared)
 
     def extract_status_permissions_rules(
         self,
@@ -846,7 +487,6 @@ class RebuildAssistantService:
         score += min(0.16, len(prepared.assets.sql_queries) / 2500)
         score += min(0.14, len(prepared.assets.database_schema) / 2500)
         score += min(0.06, len(prepared.assets.framework_info) / 1000)
-        score += min(0.06, len(prepared.temp_context) / 4000)
         signal_groups = sum(
             1
             for group in (
@@ -871,6 +511,9 @@ class RebuildAssistantService:
         from mellow_link.services.refactoring_support_engine.facade import RefactoringSupportEngineFacade
 
         return RefactoringSupportEngineFacade(self).build_result(prepared)
+
+    def _engine_template_support(self) -> TemplateSupport:
+        return TemplateSupport()
 
     def _compat_decision_artifacts(
         self,
@@ -1994,7 +1637,7 @@ class RebuildAssistantService:
     def _primary_template(self, prepared: PreparedRebuildInput, applied_templates: list[AppliedJudgmentTemplate]) -> AppliedJudgmentTemplate | None:
         from mellow_link.services.refactoring_support_engine.judgment_synthesizer import JudgmentSynthesizer
 
-        return JudgmentSynthesizer(self).primary_template(prepared, applied_templates)
+        return JudgmentSynthesizer().primary_template(prepared, applied_templates)
 
     def collect_pattern_candidates(
         self,
@@ -2003,7 +1646,7 @@ class RebuildAssistantService:
     ) -> list[PatternCandidate]:
         from mellow_link.services.refactoring_support_engine.judgment_synthesizer import JudgmentSynthesizer
 
-        return JudgmentSynthesizer(self).collect_pattern_candidates(prepared, applied_templates)
+        return JudgmentSynthesizer().collect_pattern_candidates(prepared, applied_templates)
 
     def select_primary_judgment(
         self,
@@ -2012,7 +1655,7 @@ class RebuildAssistantService:
     ) -> tuple[str, str, list[PatternCandidate]]:
         from mellow_link.services.refactoring_support_engine.judgment_synthesizer import JudgmentSynthesizer
 
-        return JudgmentSynthesizer(self).select_primary_judgment(prepared, pattern_candidates)
+        return JudgmentSynthesizer().select_primary_judgment(prepared, pattern_candidates)
 
     def _has_amount_threshold_focus(self, prepared: PreparedRebuildInput) -> bool:
         lowered = self._combined_evidence_text(prepared).lower()
@@ -2162,7 +1805,7 @@ class RebuildAssistantService:
     ) -> list[AppliedJudgmentTemplate]:
         from mellow_link.services.refactoring_support_engine.judgment_synthesizer import JudgmentSynthesizer
 
-        return JudgmentSynthesizer(self).ordered_templates_for_generation(prepared, applied_templates, grounded_rules)
+        return JudgmentSynthesizer().ordered_templates_for_generation(prepared, applied_templates, grounded_rules)
 
     def _should_force_access_control_narrative(self, grounded_rules: list[GroundedBusinessRule]) -> bool:
         text = " ".join(f"{item.title} {item.description}" for item in grounded_rules)
@@ -2211,55 +1854,7 @@ class RebuildAssistantService:
         )
 
     def build_recommended_directions(self, prepared: PreparedRebuildInput) -> list[str]:
-        concept = self._primary_concept(prepared)
-        narrative = self._active_narrative_judgment(prepared)
-        if narrative == "workflow":
-            return [
-                f"{concept} 기능의 승인 트리거와 승인 단계를 먼저 확정하는 것이 필요합니다.",
-                "승인 주체와 예외 승인 경로를 같은 워크플로우 기준으로 정리하는 것이 필요합니다.",
-                "상태 전이와 승인 결과 연결 기준을 후속 단계에서 확정하는 것이 필요합니다.",
-            ]
-        if narrative == "access_control":
-            return [
-                f"{concept} 기능의 승인 주체와 부서별 처리 범위를 먼저 확정하는 것이 필요합니다.",
-                "예외 승인 경로와 조직별 심사 책임을 같은 권한 정책 기준으로 정리하는 것이 필요합니다.",
-                "권한 계약과 승인 경로를 유지한 상태에서 후속 구조를 정리하는 것이 필요합니다.",
-            ]
-        if narrative == "query_filter":
-            return [
-                f"{concept} 기능의 조회 조건과 필터 조합을 먼저 확정하는 것이 필요합니다.",
-                "정렬과 페이징 기준을 같은 조회 정책으로 정리하는 것이 필요합니다.",
-                "조회 파라미터와 SQL 조건 매핑을 후속 단계에서 고정하는 것이 필요합니다.",
-            ]
-        if narrative == "amount_threshold":
-            return [
-                f"{concept} 기능의 금액 구간과 한도 기준을 먼저 확정하는 것이 필요합니다.",
-                "승인 경계와 고액 처리 기준을 같은 금액 정책으로 정리하는 것이 필요합니다.",
-                "재계산 또는 후속 처리 기준을 후속 단계에서 고정하는 것이 필요합니다.",
-            ]
-        if narrative == "state_transition":
-            return [
-                f"{concept} 기능의 상태 전이와 처리 가능 상태를 먼저 확정하는 것이 필요합니다.",
-                "후속 처리 흐름과 상태별 차단 조건을 같은 전이 기준으로 정리하는 것이 필요합니다.",
-                "운영 메시지와 화면 상태 표시를 후속 단계에서 고정하는 것이 필요합니다.",
-            ]
-        if narrative == "validation":
-            return [
-                f"{concept} 기능의 차단 조건과 저장 전 검증 순서를 먼저 확정하는 것이 필요합니다.",
-                "선행 조건과 예외 처리 기준을 같은 검증 흐름으로 정리하는 것이 필요합니다.",
-                "운영 메시지와 재시도 기준을 후속 단계에서 고정하는 것이 필요합니다.",
-            ]
-        primary_label = self._feature_mode_label(prepared.signals.primary_feature_mode)
-        directions = [
-            f"{concept} 기능을 단일 현대화 범위로 고정하고 화면, 정책, 데이터 계약 기준으로 정리하는 것이 필요합니다.",
-            f"숨은 업무 규칙은 {primary_label}을 우선으로 분리하고 나머지 규칙은 검증 가능한 표준 규칙으로 정리하는 것이 필요합니다.",
-            "고객사 표준을 기준으로 화면, API, 정책 서비스, 데이터 계약의 분리 경계를 먼저 확정하는 것이 필요합니다.",
-        ]
-        if prepared.missing_context:
-            directions[0] = f"{concept} 기능 범위를 유지하되 추가 자료를 먼저 보강한 뒤 상세 설계를 확정하는 것이 필요합니다."
-        if prepared.scope_limited:
-            directions[2] = "전체 전환 대신 단일 기능 파일럿 구조와 단계적 전환 초안을 우선 확정하는 것이 필요합니다."
-        return directions[:3]
+        return self._engine_template_support().build_recommended_directions(prepared)
 
     def format_user_summary(
         self,
@@ -2561,8 +2156,6 @@ class RebuildAssistantService:
     def _extract_concepts(self, prepared: PreparedRebuildInput) -> list[str]:
         text = " ".join(
             [
-                prepared.goal,
-                " ".join(prepared.constraints),
                 " ".join(prepared.asset_presence.source_asset_names),
                 " ".join(prepared.asset_presence.ui_asset_names),
                 " ".join(prepared.asset_presence.schema_asset_names),
@@ -2572,7 +2165,7 @@ class RebuildAssistantService:
                 prepared.assets.ui_template,
                 prepared.assets.sql_queries,
                 prepared.assets.database_schema,
-                prepared.temp_context,
+                prepared.supporting_docs,
             ]
         ).lower()
         found: list[str] = []
@@ -2858,15 +2451,20 @@ class RebuildAssistantService:
 
     def _build_asset_presence_from_safe_bundle(self, safe_bundle: SafeAnalysisBundle) -> AssetPresenceSummary:
         summary = AssetPresenceSummary()
+        content_by_asset_id = {source.asset_id: source.content or "" for source in safe_bundle.sources}
         for asset in safe_bundle.asset_summary:
             name = (asset.name or "").strip()
             if not name:
                 continue
             lowered = name.lower()
-            if self._is_schema_asset_name(lowered):
+            if self._is_intent_asset_name(lowered):
+                continue
+            content = content_by_asset_id.get(asset.asset_id, "")
+            framework_hints = self._extract_framework_runtime_hints(name, content)
+            if self._is_schema_asset_name(lowered, content):
                 summary.has_schema_asset = True
                 summary.schema_asset_names.append(name)
-            elif self._is_sql_asset_name(lowered):
+            elif self._is_sql_asset_name(lowered, content):
                 summary.has_sql_asset = True
                 summary.sql_asset_names.append(name)
             elif self._is_ui_asset_name(lowered):
@@ -2881,27 +2479,76 @@ class RebuildAssistantService:
             elif self._is_doc_asset_name(lowered):
                 summary.has_docs = True
                 summary.doc_asset_names.append(name)
+            if framework_hints:
+                summary.has_framework_hint = True
+                summary.framework_runtime_hints = self._dedupe_list(summary.framework_runtime_hints + framework_hints)
+                if not self._is_doc_asset_name(lowered) and name not in summary.framework_asset_names:
+                    summary.framework_asset_names.append(name)
         return summary
 
     def _build_framework_hint(self, safe_bundle: SafeAnalysisBundle, asset_presence: AssetPresenceSummary) -> str:
-        hints = [f"safe_bundle={safe_bundle.bundle_id}", f"masking_level={safe_bundle.masking_level.value}"]
+        _ = safe_bundle
+        hints: list[str] = []
+        if asset_presence.framework_runtime_hints:
+            hints.append("runtime=" + ", ".join(asset_presence.framework_runtime_hints[:4]))
         if asset_presence.framework_asset_names:
-            hints.append("framework_docs=" + ", ".join(asset_presence.framework_asset_names[:3]))
-        if asset_presence.doc_asset_names:
-            hints.append("docs=" + ", ".join(asset_presence.doc_asset_names[:3]))
+            hints.append("artifacts=" + ", ".join(asset_presence.framework_asset_names[:3]))
         return ", ".join(hints)
 
-    def _is_schema_asset_name(self, name: str) -> bool:
+    def _is_schema_asset_name(self, name: str, content: str = "") -> bool:
         lowered = (name or "").strip().lower()
-        return lowered == "schema.sql" or "schema" in lowered
+        if lowered == "schema.sql" or "schema" in lowered:
+            return True
+        if not lowered.endswith(".sql"):
+            return False
+        return self._looks_like_schema_definition(content)
 
-    def _is_sql_asset_name(self, name: str) -> bool:
+    def _is_sql_asset_name(self, name: str, content: str = "") -> bool:
         lowered = (name or "").strip().lower()
-        return lowered.endswith(".sql") and not self._is_schema_asset_name(lowered)
+        return lowered.endswith(".sql") and not self._is_schema_asset_name(lowered, content)
 
     def _is_ui_asset_name(self, name: str) -> bool:
         lowered = (name or "").strip().lower()
         return any(lowered.endswith(ext) for ext in (".jsp", ".html", ".ftl", ".vue"))
+
+    def _looks_like_schema_definition(self, content: str) -> bool:
+        lowered = (content or "").lower()
+        ddl_patterns = (
+            r"\bcreate\s+table\b",
+            r"\balter\s+table\b",
+            r"\bcreate\s+(?:unique\s+)?index\b",
+            r"\badd\s+constraint\b",
+            r"\bprimary\s+key\b",
+            r"\bforeign\s+key\b",
+            r"\breferences\s+[a-z_][a-z0-9_]*\b",
+        )
+        return any(re.search(pattern, lowered, flags=re.IGNORECASE) for pattern in ddl_patterns)
+
+    def _extract_framework_runtime_hints(self, asset_name: str, content: str) -> list[str]:
+        lowered_name = (asset_name or "").strip().lower()
+        if self._is_doc_asset_name(lowered_name):
+            return []
+        lowered = (content or "").lower()
+        hints: list[str] = []
+        if lowered_name.endswith(".jsp") or any(token in lowered for token in ("<%@ page", "<jsp:", "<c:if", "httpservlet")):
+            hints.append("jsp/servlet")
+        if any(token in lowered for token in ("@springbootapplication", "@restcontroller", "@requestmapping", "springframework")):
+            hints.append("spring")
+        if any(token in lowered for token in ("from fastapi import", "fastapi(", "apirouter(")):
+            hints.append("fastapi")
+        if any(token in lowered for token in ("from flask import", "flask(")):
+            hints.append("flask")
+        if any(token in lowered for token in ("django.", "urlpatterns", "models.model")):
+            hints.append("django")
+        if lowered_name.endswith((".jsx", ".tsx", ".vue")) or any(token in lowered for token in ("from react", "react.", "usestate(", "definecomponent(")):
+            hints.append("react" if "react" in lowered or lowered_name.endswith((".jsx", ".tsx")) else "vue")
+        if any(token in lowered for token in ("const express", "express()", "require(\"express\")", "require('express')")):
+            hints.append("express")
+        if any(token in lowered for token in ("mybatis", "sqlsession")):
+            hints.append("mybatis")
+        if any(token in lowered for token in ("jakarta.persistence", "javax.persistence", "@entity")):
+            hints.append("jpa")
+        return self._dedupe_list(hints)
 
     def _looks_like_accounting_payload_asset(self, asset_name: str, content: str) -> bool:
         lowered = (asset_name or "").strip().lower()
@@ -2932,15 +2579,32 @@ class RebuildAssistantService:
 
     def _is_source_asset_name(self, name: str) -> bool:
         lowered = (name or "").strip().lower()
-        return any(lowered.endswith(ext) for ext in (".java", ".py", ".js", ".ts"))
+        return any(lowered.endswith(ext) for ext in self.SOURCE_ASSET_EXTENSIONS)
 
     def _is_framework_asset_name(self, name: str) -> bool:
         lowered = (name or "").strip().lower()
-        return lowered in {"pom.xml", "build.gradle", "requirements.txt", "package.json"}
+        return lowered in {
+            "pom.xml",
+            "build.gradle",
+            "settings.gradle",
+            "gradle.properties",
+            "requirements.txt",
+            "package.json",
+            "package-lock.json",
+            "pnpm-lock.yaml",
+            "yarn.lock",
+        }
+
+    def _is_intent_asset_name(self, name: str) -> bool:
+        lowered = (name or "").replace("\\", "/").strip().lower()
+        base_name = lowered.rsplit("/", 1)[-1]
+        return base_name in {"goal.txt", "constraints.txt", "scenario.md"}
 
     def _is_doc_asset_name(self, name: str) -> bool:
         lowered = (name or "").strip().lower()
-        return lowered == "readme.md" or lowered.endswith(".md")
+        if self._is_intent_asset_name(lowered):
+            return False
+        return lowered.startswith("readme") or lowered.endswith((".md", ".txt", ".rst", ".adoc"))
 
     def _feature_mode_label(self, mode: str) -> str:
         mapping = {
@@ -2954,8 +2618,6 @@ class RebuildAssistantService:
     def _resolve_domain_anchor(self, prepared: PreparedRebuildInput) -> str | None:
         text = " ".join(
             [
-                prepared.goal,
-                " ".join(prepared.constraints),
                 " ".join(prepared.asset_presence.source_asset_names),
                 " ".join(prepared.asset_presence.ui_asset_names),
                 " ".join(prepared.asset_presence.schema_asset_names),
@@ -2964,6 +2626,7 @@ class RebuildAssistantService:
                 prepared.assets.ui_template,
                 prepared.assets.sql_queries,
                 prepared.assets.database_schema,
+                prepared.supporting_docs,
             ]
         ).lower()
         claim_adjust_patterns = (
@@ -2997,12 +2660,11 @@ class RebuildAssistantService:
     def extract_core_business_rules(self, prepared: PreparedRebuildInput) -> list[str]:
         text = " ".join(
             [
-                prepared.goal,
-                " ".join(prepared.constraints),
                 prepared.assets.source_code,
                 prepared.assets.ui_template,
                 prepared.assets.sql_queries,
                 prepared.assets.database_schema,
+                prepared.supporting_docs,
             ]
         )
         if self._primary_concept(prepared) == "주문 마감":
@@ -3071,7 +2733,7 @@ class RebuildAssistantService:
             f"이번 회의에서는 {self._attach_object_particle(option_text)} 기준안으로 확정하는 것이 필요합니다.",
         ]
         if prepared.missing_context:
-            summary.append("추가 운영 확인이 필요한 항목은 별도 확인 필요 항목으로 분리해 후속 검증하는 것이 필요합니다.")
+            summary.append("추가 운영 확인이 필요한 항목은 별도 확인 필요 항목으로 분리해 후속 확인 대상으로 두는 것이 필요합니다.")
         return summary[:4]
 
     def build_grounded_business_rules(
@@ -3132,12 +2794,11 @@ class RebuildAssistantService:
     ) -> bool:
         bundle = " ".join(
             [
-                prepared.goal,
-                " ".join(prepared.constraints),
                 prepared.assets.source_code,
                 prepared.assets.ui_template,
                 prepared.assets.sql_queries,
                 prepared.assets.database_schema,
+                prepared.supporting_docs,
             ]
         )
         lowered = bundle.lower()
@@ -3202,7 +2863,7 @@ class RebuildAssistantService:
         for title, description, keywords, design_targets in defaults:
             if any(self._normalize_key(item.title) == self._normalize_key(title) for item in output):
                 continue
-            evidence = self._collect_evidence_refs(prepared, keywords, ("source", "ui", "sql", "constraint", "goal"))
+            evidence = self._collect_evidence_refs(prepared, keywords, ("source", "ui", "sql"))
             if not evidence:
                 continue
             confidence, confidence_reason = self._resolve_confidence(evidence)
@@ -3237,7 +2898,7 @@ class RebuildAssistantService:
             if any(self._normalize_key(item.description) == normalized for item in output):
                 continue
             keywords = self._keywords_from_text(rule)
-            evidence = self._collect_evidence_refs(prepared, keywords, ("source", "ui", "sql", "schema", "constraint"))
+            evidence = self._collect_evidence_refs(prepared, keywords, ("source", "ui", "sql", "schema"))
             confidence, confidence_reason = self._resolve_confidence(evidence)
             output.append(
                 GroundedBusinessRule(
@@ -3278,7 +2939,7 @@ class RebuildAssistantService:
             evidence = self._collect_evidence_refs(
                 prepared,
                 candidate["keywords"],
-                ("source", "ui", "sql", "schema", "constraint"),
+                ("source", "ui", "sql", "schema"),
             )
             if not evidence:
                 continue
@@ -3378,7 +3039,7 @@ class RebuildAssistantService:
         for title, description, keywords, design_targets in defaults:
             if any(self._normalize_key(item.title) == self._normalize_key(title) for item in output):
                 continue
-            evidence = self._collect_evidence_refs(prepared, keywords, ("source", "ui", "sql", "constraint", "goal"))
+            evidence = self._collect_evidence_refs(prepared, keywords, ("source", "ui", "sql"))
             if not evidence:
                 continue
             confidence, confidence_reason = self._resolve_confidence(evidence)
@@ -3432,7 +3093,7 @@ class RebuildAssistantService:
         for title, description, keywords, design_targets in defaults:
             if any(self._normalize_key(item.title) == self._normalize_key(title) for item in output):
                 continue
-            evidence = self._collect_evidence_refs(prepared, keywords, ("source", "ui", "sql", "constraint", "goal"))
+            evidence = self._collect_evidence_refs(prepared, keywords, ("source", "ui", "sql"))
             if not evidence:
                 continue
             confidence, confidence_reason = self._resolve_confidence(evidence)
@@ -3460,11 +3121,10 @@ class RebuildAssistantService:
                 candidates.append(rule)
         bundle = " ".join(
             [
-                prepared.goal,
-                " ".join(prepared.constraints),
                 prepared.assets.source_code,
                 prepared.assets.sql_queries,
                 prepared.assets.database_schema,
+                prepared.supporting_docs,
             ]
         ).lower()
         if any(token in bundle for token in ("duplicate", "중복", "exists", "count(")):
@@ -3893,7 +3553,7 @@ class RebuildAssistantService:
     ) -> list[AppliedJudgmentTemplate]:
         from mellow_link.services.refactoring_support_engine.judgment_synthesizer import JudgmentSynthesizer
 
-        return JudgmentSynthesizer(self).build_applied_templates(prepared, grounded_rules, retained_contracts)
+        return JudgmentSynthesizer().build_applied_templates(prepared, grounded_rules, retained_contracts)
 
     def _accumulate_signal_template_scores(
         self,
@@ -4054,7 +3714,7 @@ class RebuildAssistantService:
         from mellow_link.services.refactoring_support_engine.planning_synthesizer import PlanningSynthesizer
 
         decisions = self._compat_decision_artifacts(prepared, applied_templates or [])
-        return PlanningSynthesizer(self).build_verification_checkpoints(
+        return PlanningSynthesizer().build_verification_checkpoints(
             prepared,
             grounded_rules,
             retained_contracts,
@@ -4091,7 +3751,7 @@ class RebuildAssistantService:
     ) -> list[DecisionItem]:
         from mellow_link.services.refactoring_support_engine.judgment_synthesizer import JudgmentSynthesizer
 
-        return JudgmentSynthesizer(self).build_decision_items(
+        return JudgmentSynthesizer().build_decision_items(
             prepared,
             grounded_rules,
             applied_templates,
@@ -4108,7 +3768,7 @@ class RebuildAssistantService:
         from mellow_link.services.refactoring_support_engine.planning_synthesizer import PlanningSynthesizer
 
         decisions = self._compat_decision_artifacts(prepared, applied_templates)
-        return PlanningSynthesizer(self).build_priority_split_items(prepared, grounded_rules, retained_contracts, decisions)
+        return PlanningSynthesizer().build_priority_split_items(prepared, grounded_rules, retained_contracts, decisions)
 
     def build_design_options(
         self,
@@ -4120,7 +3780,7 @@ class RebuildAssistantService:
         from mellow_link.services.refactoring_support_engine.planning_synthesizer import PlanningSynthesizer
 
         decisions = self._compat_decision_artifacts(prepared, applied_templates)
-        return PlanningSynthesizer(self).build_design_options(prepared, grounded_rules, retained_contracts, decisions)
+        return PlanningSynthesizer().build_design_options(prepared, grounded_rules, retained_contracts, decisions)
 
     def _apply_recommended_selection_reason(
         self,
@@ -4133,7 +3793,7 @@ class RebuildAssistantService:
         from mellow_link.services.refactoring_support_engine.planning_synthesizer import PlanningSynthesizer
 
         decisions = self._compat_decision_artifacts(prepared, applied_templates)
-        return PlanningSynthesizer(self).apply_recommended_selection_reason(
+        return PlanningSynthesizer().apply_recommended_selection_reason(
             prepared,
             options,
             grounded_rules,
@@ -4152,7 +3812,7 @@ class RebuildAssistantService:
         from mellow_link.services.refactoring_support_engine.planning_synthesizer import PlanningSynthesizer
 
         decisions = self._compat_decision_artifacts(prepared, applied_templates)
-        return PlanningSynthesizer(self).pick_recommended_option(
+        return PlanningSynthesizer().pick_recommended_option(
             options,
             prepared,
             grounded_rules,
@@ -4421,7 +4081,7 @@ class RebuildAssistantService:
         from mellow_link.services.refactoring_support_engine.planning_synthesizer import PlanningSynthesizer
 
         decisions = self._compat_decision_artifacts(prepared, applied_templates)
-        return PlanningSynthesizer(self).build_execution_plan(
+        return PlanningSynthesizer().build_execution_plan(
             prepared,
             grounded_rules,
             retained_contracts,
@@ -5732,12 +5392,11 @@ class RebuildAssistantService:
     def _combined_evidence_text(self, prepared: PreparedRebuildInput) -> str:
         return " ".join(
             [
-                prepared.goal,
-                " ".join(prepared.constraints),
                 prepared.assets.source_code,
                 prepared.assets.ui_template,
                 prepared.assets.sql_queries,
                 prepared.assets.database_schema,
+                prepared.supporting_docs,
             ]
         )
 
@@ -5837,7 +5496,7 @@ class RebuildAssistantService:
         return RetainedContract(
             item=item,
             basis=basis,
-            evidence=self._collect_evidence_refs(prepared, keywords, ("source", "ui", "sql", "schema", "constraint")),
+            evidence=self._collect_evidence_refs(prepared, keywords, ("source", "ui", "sql", "schema")),
         )
 
     def _retained_contract_specs(self, concept: str) -> list[dict[str, object]]:
@@ -5910,8 +5569,6 @@ class RebuildAssistantService:
             ("ui", prepared.asset_presence.ui_asset_names, prepared.assets.ui_template),
             ("schema", prepared.asset_presence.schema_asset_names, prepared.assets.database_schema),
             ("sql", prepared.asset_presence.sql_asset_names, prepared.assets.sql_queries),
-            ("constraint", ["constraints.txt"], "\n".join(prepared.constraints)),
-            ("goal", ["goal.txt"], prepared.goal),
         ]
 
     def _extract_excerpt(self, text: str, keywords: tuple[str, ...] | list[str]) -> str:
@@ -5935,8 +5592,6 @@ class RebuildAssistantService:
         kinds = {item.evidence_kind for item in evidence}
         if kinds & {"source", "ui", "sql", "schema"}:
             return "확정", "현재 자산의 코드, 화면, SQL 또는 스키마에서 직접 확인되었습니다."
-        if kinds & {"constraint", "goal"}:
-            return "조건부", "제약조건 또는 목표 문장에서 확인되었으며 추가 운영 자산 확인이 필요합니다."
         return "가정", "직접 근거가 부족해 가정 수준으로 분류했습니다."
 
     def _dedupe_by_normalized_text(self, items: list, *, attr: str) -> list:
@@ -6093,7 +5748,7 @@ class RebuildAssistantService:
         return resource
 
     def _looks_like_jsp(self, prepared: PreparedRebuildInput) -> bool:
-        text = "\n".join([prepared.assets.source_code, prepared.assets.ui_template, prepared.temp_context]).lower()
+        text = "\n".join([prepared.assets.source_code, prepared.assets.ui_template]).lower()
         return "<%" in text or "<jsp:" in text or "c:foreach" in text or "c:if" in text
 
     def _contains_sql_in_ui(self, prepared: PreparedRebuildInput) -> bool:
