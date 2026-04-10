@@ -102,6 +102,11 @@ AI_Project/
 - `/`
 - `/ui`
 - `/projects/create`
+- `/projects/{project_id}`
+- `/projects/{project_id}/result?surface_mode=internal|external`
+
+`/modules/rebuild_assistant`는 현재 실행 화면이 아니라 안내 진입점이다.
+실제 프로젝트 생성과 분석 시작은 `/projects/create`에서 진행한다.
 
 빠른 시작:
 
