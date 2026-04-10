@@ -397,6 +397,7 @@ class ResultPackager:
                 continue
             snippet = self._build_code_diff_snippet(
                 detector_id=issue.detector_id,
+                issue_summary=str(issue.summary or ""),
                 evidence_ids=issue.evidence_ids,
                 evidence_map=evidence_map,
                 asset_text_map=asset_text_map,
@@ -415,10 +416,11 @@ class ResultPackager:
         self,
         *,
         detector_id: str,
+        issue_summary: str,
         evidence_ids: list[str],
         evidence_map: dict[str, Any],
         asset_text_map: dict[str, str],
-    ) -> dict[str, str] | None:
+    ) -> dict[str, Any] | None:
         for evidence_id in evidence_ids:
             evidence = evidence_map.get(evidence_id)
             if not evidence:
@@ -437,7 +439,11 @@ class ResultPackager:
             ).strip()
             if not source_text:
                 continue
-            observed = self._extract_observed_pattern_snippet(source_text, str(evidence.excerpt or ""))
+            observed = self._extract_observed_pattern_snippet(
+                source_text,
+                str(evidence.excerpt or ""),
+                locator=str(evidence.locator or ""),
+            )
             expected_pattern = self._expected_pattern_template(
                 detector_id=detector_id,
                 asset_type=str(evidence.asset_type or ""),
@@ -447,6 +453,9 @@ class ResultPackager:
             return {
                 "type": "before_after",
                 "file": str(evidence.asset_name or evidence.asset_id or "-"),
+                "detector_id": detector_id,
+                "issue_summary": issue_summary,
+                "difference_summary": self._difference_summary(detector_id=detector_id),
                 "observed": observed,
                 "expected_pattern": expected_pattern,
             }
@@ -475,29 +484,113 @@ class ResultPackager:
                 result[asset_name.lower()] = content
         return result
 
-    def _extract_observed_pattern_snippet(self, source_text: str, excerpt: str) -> str:
+    def _extract_observed_pattern_snippet(self, source_text: str, excerpt: str, *, locator: str = "") -> str:
         normalized_lines = [line.rstrip() for line in str(source_text or "").replace("\r\n", "\n").split("\n")]
         excerpt_lines = [line.strip() for line in str(excerpt or "").replace("\r\n", "\n").split("\n") if line.strip()]
         if not normalized_lines:
             return ""
-        anchor = excerpt_lines[0] if excerpt_lines else ""
-        index = -1
-        if anchor:
-            lowered_anchor = anchor.lower()
-            for current_index, line in enumerate(normalized_lines):
-                if lowered_anchor in line.lower():
-                    index = current_index
-                    break
+        index = self._line_index_from_locator(locator, line_count=len(normalized_lines))
         if index < 0:
-            compact_excerpt = " ".join(excerpt_lines).strip()
-            if compact_excerpt:
-                return "\n".join(excerpt_lines[:6]).strip()
-            return "\n".join(normalized_lines[:6]).strip()
+            index = self._line_index_from_anchor(normalized_lines, excerpt_lines)
+        if index < 0:
+            index = self._line_index_from_token_overlap(normalized_lines, excerpt_lines)
+        if index < 0:
+            return "\n".join([line for line in normalized_lines[:6] if line.strip()]).strip()
         start = max(0, index - 2)
         end = min(len(normalized_lines), index + 4)
         snippet_lines = normalized_lines[start:end]
         trimmed_lines = [line for line in snippet_lines if line.strip()]
         return "\n".join(trimmed_lines[:6]).strip()
+
+    def _line_index_from_locator(self, locator: str, *, line_count: int) -> int:
+        match = re.search(r"(?:^|:)line:(\d+)\b", str(locator or ""), flags=re.IGNORECASE)
+        if not match:
+            return -1
+        try:
+            line_no = int(match.group(1))
+        except ValueError:
+            return -1
+        if line_no < 1 or line_no > line_count:
+            return -1
+        return line_no - 1
+
+    def _line_index_from_anchor(self, normalized_lines: list[str], excerpt_lines: list[str]) -> int:
+        anchor = excerpt_lines[0] if excerpt_lines else ""
+        if not anchor:
+            return -1
+        lowered_anchor = anchor.lower()
+        for current_index, line in enumerate(normalized_lines):
+            if lowered_anchor in line.lower():
+                return current_index
+        return -1
+
+    def _line_index_from_token_overlap(self, normalized_lines: list[str], excerpt_lines: list[str]) -> int:
+        excerpt_text = " ".join(excerpt_lines).lower()
+        tokens = [
+            token
+            for token in re.findall(r"[a-z0-9_]{3,}", excerpt_text)
+            if token not in {"return", "class", "false", "true", "null", "none"}
+        ]
+        if not tokens:
+            return -1
+        best_index = -1
+        best_score = 0
+        for current_index, line in enumerate(normalized_lines):
+            lowered_line = line.lower()
+            score = sum(1 for token in tokens if token in lowered_line)
+            if score > best_score:
+                best_index = current_index
+                best_score = score
+        minimum_score = 1 if len(tokens) <= 2 else 2
+        return best_index if best_score >= minimum_score else -1
+
+    def _difference_summary(self, *, detector_id: str) -> list[str]:
+        mapping = {
+            "query_filter_leak": [
+                "조회 조건이 여러 경로에 분산되어 있음",
+                "권장 구조는 조회 조건 정규화와 SQL 적용을 조회 계층으로 모음",
+                "필터 조합 규칙이 화면이나 SQL 문자열에 직접 남지 않음",
+            ],
+            "validation_guard_leak": [
+                "validation이 저장 또는 처리 경로에 섞여 있음",
+                "권장 구조는 validation을 선행 단계로 분리함",
+                "실행 단계는 검증을 통과한 입력만 처리함",
+            ],
+            "state_transition_leak": [
+                "상태 전이 판단과 저장 호출이 한 경로에 묶여 있음",
+                "권장 구조는 상태 전이 정책과 저장 단계를 분리함",
+                "허용된 다음 상태만 persistence 계층으로 전달함",
+            ],
+            "ui_data_access_coupling": [
+                "화면 계층이 조회 또는 저장 규칙을 직접 알고 있음",
+                "권장 구조는 UI를 service 호출과 화면 표현에만 집중시킴",
+                "데이터 접근과 command 처리는 service 또는 repository로 분리함",
+            ],
+            "boundary_mismatch": [
+                "정책 판단과 persistence 의존이 한 경로에 묶여 있음",
+                "권장 구조는 boundary policy와 저장 책임을 분리함",
+                "허용 여부 판단 결과만 저장 계층으로 전달함",
+            ],
+            "rule_scatter": [
+                "업무 규칙이 여러 컴포넌트에 흩어져 있음",
+                "권장 구조는 규칙 평가를 공통 rule set으로 모음",
+                "실행 서비스는 평가 결과만 사용해 처리함",
+            ],
+            "duplicate_logic_candidate": [
+                "정규화 또는 검증 흐름이 중복 구현되어 있음",
+                "권장 구조는 공통 normalize 경로로 입력 처리를 통합함",
+                "서비스는 정규화된 payload만 받아 실행함",
+            ],
+            "mixed_responsibility": [
+                "하나의 구성요소에 validation, business, persistence 책임이 함께 있음",
+                "권장 구조는 책임을 계층별로 분리함",
+                "service 책임을 줄이고 저장 의존을 별도 계층으로 이동함",
+            ],
+        }
+        return list(mapping.get(detector_id, [
+            "현재 구조와 권장 구조의 책임 경계가 일치하지 않음",
+            "권장 구조는 입력 정리, 정책 판단, 실행 단계를 분리함",
+        ]))
 
     def _expected_pattern_template(self, *, detector_id: str, asset_type: str) -> str:
         lowered_asset_type = (asset_type or "").strip().lower()
@@ -673,7 +766,13 @@ class ResultPackager:
                 lines.extend(["```", "", "#### expected_pattern", "", "```diff"])
                 for line in str(item.get("expected_pattern") or "").splitlines():
                     lines.append(f"+ {line}")
-                lines.append("```")
+                lines.extend(["```", "", "#### difference_summary"])
+                difference_summary = item.get("difference_summary") or []
+                if difference_summary:
+                    for summary_line in difference_summary[:3]:
+                        lines.append(f"- {summary_line}")
+                else:
+                    lines.append("- responsibility split guidance unavailable")
 
         lines.extend(["", "## Structural Difference", "", "### Observed"])
         observed_lines = self._review_diff_structural_observed_lines(structural_diff)

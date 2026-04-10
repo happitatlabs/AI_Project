@@ -94,6 +94,21 @@ raw `assets` / `temp_session_id` 입력은 공개 API에서 사용하지 않습�
 - structure는 canonical source 기준으로만 추출됩니다.
 - `rebuild_assistant`는 SafeAnalysisBundle만 소비합니다.
 
+## 익명화 v0 노출 거버넌스
+
+현재 익명화 노출 원칙은 아래처럼 고정한다.
+
+- v0는 차단보다 관측과 검증 우선이다.
+- 공개 사용자 표면은 `anonymization_summary`만 노출한다.
+- 개발자 표면은 admin-only `debug_anonymization_report`만 사용한다.
+- raw/canonical content, mapping, original, export payload는 사용자 API에 포함하지 않는다.
+- preview는 canonical content를 직접 자른 값이 아니다.
+  - preview 전용 stricter masking을 한 번 더 거친 제한된 파생값만 허용한다.
+- validation 실패 시 run은 완료하지만 preview는 숨긴다.
+  - dev debug 표면에는 summary, validation findings, whitelist 기반 `bundle_debug`만 남긴다.
+- `bundle_debug`는 자유형 dict가 아니라 고정 메타데이터 상자다.
+  - 허용 필드: `canonical_source_count`, `structure_count`, `total_replacements`, `masking_level`, `policy_version`, `omitted_preview_count`, `validation_passed`
+
 ## 분류 모드
 
 현재 `service.py`는 입력 자산에서 기능 신호를 추출해 `primary_feature_mode`를 고릅니다.

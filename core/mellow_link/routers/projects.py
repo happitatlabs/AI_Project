@@ -30,6 +30,7 @@ from mellow_link.infra import (
 )
 from mellow_link.infra.run_events import get_run_events, get_run_snapshot
 from mellow_link.modules.rebuild_assistant.api import create_project_wrapped_run, start_project_wrapped_run
+from mellow_link.modules.rebuild_assistant.decision_document import build_decision_brief, render_decision_brief_markdown
 from mellow_link.modules.rebuild_assistant.manifest import MANIFEST as REBUILD_ASSISTANT_MANIFEST, MODULE_VERSION
 from mellow_link.modules.rebuild_assistant.schemas import (
     ProjectAssetItem,
@@ -963,20 +964,44 @@ def _build_executive_summary(
     core_conclusion: str,
     recommended_directions: list[str],
     executive_summary_v2: list[str],
+    grounded_business_rules: list[dict[str, Any]],
     decision_items: list[dict[str, Any]],
+    analysis_summary: list[str],
     diagnosis: dict[str, Any],
+    execution_plan: list[dict[str, Any]],
     recommended_option: dict[str, Any] | None,
     accounting: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     missing_context_details = list(diagnosis.get("missing_context_details") or [])
     key_risks = _trim_items(list(diagnosis.get("risks") or []))[:3]
-    summary_lines = _trim_items(executive_summary_v2)[:4]
     decision_lines = _trim_items(
         [str(item.get("statement") or "").strip() for item in (decision_items or []) if str(item.get("statement") or "").strip()]
     )[:3]
-    modernization_direction = _trim_items(recommended_directions or summary_lines)[:3]
+    fallback_actions = _build_executive_next_steps(
+        missing_context_details=missing_context_details,
+        recommended_directions=decision_lines,
+        accounting=accounting,
+    )
+    brief = build_decision_brief(
+        summary=core_conclusion,
+        rationale_candidates=[
+            *(str(item.get("description") or "").strip() for item in (grounded_business_rules or [])),
+            *(str(item.get("rationale") or "").strip() for item in (decision_items or [])),
+            *analysis_summary,
+            *executive_summary_v2,
+            *key_risks,
+        ],
+        action_candidates=[
+            *decision_lines,
+            *(str(item.get("goal") or "").strip() for item in (execution_plan or [])),
+            *recommended_directions,
+            *fallback_actions,
+        ],
+    )
+    summary_lines = list(brief.get("rationale_lines") or [])
+    action_lines = list(brief.get("action_lines") or [])
     recommended_name = str((recommended_option or {}).get("name") or "").strip()
-    has_core = bool(core_conclusion) or bool(summary_lines)
+    has_core = bool(core_conclusion) or bool(_trim_items(executive_summary_v2)[:4])
     has_direction = bool(decision_lines)
 
     if has_core or has_direction:
@@ -987,33 +1012,40 @@ def _build_executive_summary(
         state = "pending"
 
     if core_conclusion:
-        core_message = core_conclusion
+        core_message = str(brief.get("decision_summary") or "").strip() or core_conclusion
     elif state == "partial":
         core_message = "현재까지의 분석 결과를 기반으로 한 초안입니다."
     elif state == "pending":
         core_message = "분석 결과를 생성 중입니다."
     else:
         core_message = "결과를 요약할 수 있는 데이터가 아직 충분하지 않습니다."
+    modernization_direction = _trim_items(recommended_directions)[:3] if recommended_directions else (_trim_items(action_lines)[:3] if state != "pending" else [])
 
     return {
-        "title": "Executive Summary",
+        "title": "Decision Brief",
         "state": state,
         "core_message": core_message,
         "summary_lines": summary_lines,
         "modernization_direction": modernization_direction,
-        "decision_focus": decision_lines,
+        "decision_focus": action_lines,
         "recommended_option": recommended_name,
         "key_risks": key_risks[:3],
-        "next_steps": _build_executive_next_steps(
-            missing_context_details=missing_context_details,
-            recommended_directions=decision_lines,
-            accounting=accounting,
-        ),
+        "next_steps": action_lines,
     }
 
 
-def _sanitize_user_value(value: Any) -> Any:
+def _sanitize_user_value(value: Any, *, key_path: tuple[str, ...] = ()) -> Any:
     if isinstance(value, str):
+        if key_path and key_path[-1] in {"observed", "expected_pattern", "current_structure", "recommended_structure", "markdown"}:
+            sanitized = value.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
+            sanitized = sanitized.replace("REDACTED_PATH", "[PATH]")
+            sanitized = re.sub(r"\[SAFE (?:STRUCTURE|SOURCE):[^\]]+\]", "", sanitized, flags=re.IGNORECASE)
+            sanitized = re.sub(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", "[EMAIL]", sanitized)
+            sanitized = re.sub(r"\b(?:sk_(?:live|test)_[A-Za-z0-9]+|ghp_[A-Za-z0-9]+|xox[baprs]-[A-Za-z0-9-]+)\b", "[SECRET]", sanitized)
+            sanitized = re.sub(r"\b(?:\+?82[- ]?)?0\d{1,2}[- ]?\d{3,4}[- ]?\d{4}\b", "[PHONE]", sanitized)
+            sanitized = re.sub(r"(https?://[^\s\"']+|[A-Za-z]:\\[^\s\"']+|/(?:[A-Za-z0-9_.-]+/?)+)", "[PATH]", sanitized)
+            sanitized = re.sub(r"\n{3,}", "\n\n", sanitized)
+            return sanitized.strip()
         sanitized = value.strip()
         replacements = {
             "REDACTED_PATH": "",
@@ -1040,9 +1072,12 @@ def _sanitize_user_value(value: Any) -> Any:
         sanitized = sanitized.replace("[]", "")
         return " ".join(sanitized.split())
     if isinstance(value, list):
-        return [_sanitize_user_value(item) for item in value]
+        return [_sanitize_user_value(item, key_path=key_path) for item in value]
     if isinstance(value, dict):
-        return {key: _sanitize_user_value(item) for key, item in value.items()}
+        return {
+            key: _sanitize_user_value(item, key_path=(*key_path, str(key)))
+            for key, item in value.items()
+        }
     return value
 
 
@@ -1087,6 +1122,37 @@ def _resolved_narrative_axis(
     if explicit:
         return explicit
     return template_judgment or primary_judgment
+
+
+_CUSTOMER_INTENT_PREFIXES = (
+    "고객 요청:",
+    "선호 방향:",
+    "원하는 방식:",
+)
+
+
+def _build_customer_intent(project: ModernizationProject) -> dict[str, Any]:
+    seen: set[str] = set()
+    items: list[str] = []
+    for raw_item in _parse_json_list(project.constraints_json):
+        text = str(raw_item or "").strip()
+        if not text:
+            continue
+        normalized = text
+        for prefix in _CUSTOMER_INTENT_PREFIXES:
+            if text.lower().startswith(prefix.lower()):
+                normalized = text[len(prefix):].strip(" -")
+                break
+        else:
+            continue
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        items.append(normalized)
+    return {
+        "available": bool(items),
+        "items": items,
+    }
 
 
 def build_result_package(
@@ -1154,6 +1220,8 @@ def build_result_package(
         accounting_block = result.extensions.get("accounting")
         if isinstance(accounting_block, dict):
             accounting = _build_accounting_package_view(accounting_block)
+    customer_intent = _build_customer_intent(project)
+    structure_comparison = _build_structure_comparison_preview(result)
     surface_extensions = _surface_extensions(result)
     authoritative_payload = {
         "structure_snapshot": deepcopy(result.structure_snapshot) if result else {},
@@ -1175,8 +1243,11 @@ def build_result_package(
         core_conclusion=core_conclusion,
         recommended_directions=recommended_directions,
         executive_summary_v2=executive_summary_v2,
+        grounded_business_rules=grounded_business_rules,
         decision_items=decision_items,
+        analysis_summary=diagnosis["analysis_summary"],
         diagnosis=diagnosis,
+        execution_plan=execution_plan,
         recommended_option=recommended_option,
         accounting=accounting,
     )
@@ -1196,6 +1267,7 @@ def build_result_package(
         "structural_judgment": structural_judgment,
         "narrative_axis": narrative_axis,
         "feature_signal_mode": (result.feature_signal_mode if result else "").strip(),
+        "confidence": float(result.confidence) if result else 0.0,
         "report_purpose": (result.report_purpose if result else "").strip(),
         "report_scope": list(result.report_scope) if result else [],
         "report_questions": list(result.report_questions) if result else [],
@@ -1213,6 +1285,8 @@ def build_result_package(
         "execution_plan": execution_plan,
         "recommended_directions": recommended_directions,
         "accounting": accounting,
+        "customer_intent": customer_intent,
+        "structure_comparison": structure_comparison,
         "extensions": surface_extensions,
         "authoritative_payload": authoritative_payload,
         "polish_bundle": deepcopy(polish_bundle) if isinstance(polish_bundle, dict) else None,
@@ -1232,6 +1306,56 @@ def _surface_extensions(result: StructuredRebuildResult | None) -> dict[str, Any
         if isinstance(value, dict):
             output[key] = deepcopy(value)
     return output
+
+
+def _build_structure_comparison_preview(result: StructuredRebuildResult | None) -> dict[str, Any]:
+    review_diff = (
+        result.extensions.get("review_diff")
+        if result and isinstance(result.extensions, dict)
+        else None
+    )
+    if not isinstance(review_diff, dict):
+        return {"available": False, "items": []}
+    code_diff = review_diff.get("code_diff")
+    if not isinstance(code_diff, dict):
+        return {"available": False, "items": []}
+    snippets = code_diff.get("snippets")
+    if not isinstance(snippets, list):
+        return {"available": False, "items": []}
+    items: list[dict[str, Any]] = []
+    for snippet in snippets[:3]:
+        if not isinstance(snippet, dict):
+            continue
+        observed = str(snippet.get("observed") or "").strip()
+        expected_pattern = str(snippet.get("expected_pattern") or "").strip()
+        if not observed or not expected_pattern:
+            continue
+        difference_summary = _trim_items(snippet.get("difference_summary") or [], limit=3)
+        items.append(
+            {
+                "file": str(snippet.get("file") or "-"),
+                "issue_summary": str(snippet.get("issue_summary") or "").strip(),
+                "current_structure": observed,
+                "recommended_structure": expected_pattern,
+                "difference_summary": difference_summary,
+            }
+        )
+    return {
+        "available": bool(items),
+        "items": items,
+        "display_policy": "anonymized_only",
+    }
+
+
+def _demote_markdown_headings(markdown: str, *, levels: int = 1) -> str:
+    if levels <= 0:
+        return markdown
+    normalized = re.sub(r"\s+(#{2,6}\s)", r"\n\1", markdown.strip())
+
+    def _replace(match: re.Match[str]) -> str:
+        return f"{match.group(1)}{match.group(2)}{'#' * levels} "
+
+    return re.sub(r"(^|\n)(#{1,6})\s+", _replace, normalized)
 
 
 def _load_project_result_context(
@@ -1417,63 +1541,42 @@ def _result_package_markdown(pkg: dict[str, Any], *, surface_mode: str = "intern
     executive_summary = pkg.get("executive_summary") or {}
     provenance = pkg.get("provenance") or {}
     scope_notice = pkg.get("scope_notice") or {}
-    executive_state = _humanize_summary_state(str(executive_summary.get("state") or ""))
     diagnosis_state = _humanize_summary_state(str((pkg.get("diagnosis") or {}).get("state") or ""))
     draft_state = _humanize_summary_state(str((pkg.get("transition_draft") or {}).get("state") or ""))
     report_purpose = str(pkg.get("report_purpose") or "").strip()
     report_scope = _trim_items(pkg.get("report_scope") or [], limit=6)
     report_questions = _trim_items(pkg.get("report_questions") or [], limit=6)
-    summary_lines = executive_summary.get("summary_lines") or []
-    decision_focus = executive_summary.get("decision_focus") or []
-    risk_lines = executive_summary.get("key_risks") or []
-    next_step_lines = executive_summary.get("next_steps") or []
-    summary_markdown = [f"- {item}" for item in summary_lines] if summary_lines else ["- 해당 없음"]
-    decision_focus_markdown = [f"- {item}" for item in decision_focus] if decision_focus else ["- 해당 없음"]
-    risk_markdown = [f"- {item}" for item in risk_lines] if risk_lines else ["- 해당 없음"]
-    next_step_markdown = [f"- {item}" for item in next_step_lines] if next_step_lines else ["- 해당 없음"]
+    grounded_rules = pkg.get("grounded_business_rules") or []
+    retained = pkg.get("retained_contracts") or []
+    priority_items = pkg.get("priority_split_items") or []
+    verification = pkg.get("verification_checkpoints") or []
+    design_options = pkg.get("design_options") or []
+    execution_plan = pkg.get("execution_plan") or []
+    risks = (pkg.get("diagnosis") or {}).get("risks") or []
+    missing_context_details = (pkg.get("diagnosis") or {}).get("missing_context_details") or []
+    design = pkg.get("design") or {}
+    layer = design.get("layer_reconstruction") or {}
+    draft = ((pkg.get("transition_draft") or {}).get("recomposition_draft") or {})
+    review_diff = (((pkg.get("extensions") or {}) if isinstance(pkg, dict) else {}) or {}).get("review_diff") or {}
+    review_diff_markdown = str(review_diff.get("markdown") or "").strip()
+    decision_brief = {
+        "decision_summary": executive_summary.get("core_message") or "-",
+        "rationale_lines": executive_summary.get("summary_lines") or [],
+        "action_lines": executive_summary.get("next_steps") or [],
+    }
     lines = [
         f"# 결과 패키지 - {pkg['project']['project_name']}",
         "",
-        "## Executive Summary",
-        f"- 제목: {executive_summary.get('title') or '-'}",
-        f"- 상태: {executive_state or '-'}",
+        *render_decision_brief_markdown(decision_brief),
         "",
-        "### 결정 요약",
-        f"- {executive_summary.get('core_message') or '-'}",
-        "",
-        "### 핵심 판단",
-        *summary_markdown,
-        "",
-        "### 이번 회의 결정 항목",
-        *decision_focus_markdown,
-        "",
-        "### 주요 리스크",
-        *risk_markdown,
-        "",
-        "### 다음 실행",
-        *next_step_markdown,
-        "",
-        "## 보고서 목적",
-        f"- {report_purpose or '이 실행의 목적이 아직 정리되지 않았습니다.'}",
-        "",
-        "## 분석 범위",
-        *([f"- {item}" for item in report_scope] if report_scope else ["- 해당 없음"]),
-        "",
-        "## 검증 질문",
-        *([f"- {item}" for item in report_questions] if report_questions else ["- 해당 없음"]),
-        "",
-        "## 핵심 결론",
-        f"- {(pkg.get('core_conclusion') or '결과 생성 중')}",
-        "",
-        "## 핵심 업무 규칙",
+        "## 근거 자산",
     ]
-    grounded_rules = pkg.get("grounded_business_rules") or []
     if grounded_rules:
         for rule in grounded_rules:
             lines.extend(
                 [
                     f"### {rule.get('title') or '-'}",
-                    f"- 설명: {rule.get('description') or '-'}",
+                    f"- 관찰: {rule.get('description') or '-'}",
                     f"- 신뢰도: {rule.get('confidence') or '-'}",
                     f"- 신뢰도 근거: {rule.get('confidence_reason') or '-'}",
                     f"- 설계 반영 위치: {', '.join(rule.get('design_targets') or []) or '-'}",
@@ -1485,7 +1588,7 @@ def _result_package_markdown(pkg: dict[str, Any], *, surface_mode: str = "intern
                 lines.append("- 근거 자산")
                 for evidence in evidence_rows:
                     lines.append(f"  - {evidence.get('asset_name') or '-'}")
-                    lines.append(f"    - 조건 요약: {evidence.get('condition_summary') or '-'}")
+                    lines.append(f"    - 관찰 요약: {evidence.get('condition_summary') or '-'}")
                     lines.append(f"    - 설계 반영 위치: {', '.join(evidence.get('design_targets') or []) or '-'}")
                     lines.append(f"    - 신뢰도: {evidence.get('confidence') or '-'}")
     else:
@@ -1493,57 +1596,9 @@ def _result_package_markdown(pkg: dict[str, Any], *, surface_mode: str = "intern
         if fallback_core_rules:
             lines.extend(f"- {item}" for item in fallback_core_rules)
         else:
-            lines.append("- 직접 확인된 핵심 업무 규칙이 없습니다.")
-    lines.extend(
-        [
-            "",
-            "## 즉시 결정 필요",
-        ]
-    )
-    decisions = pkg.get("decision_items") or []
-    if decisions:
-        for item in decisions:
-            lines.append(f"- {item.get('statement') or '-'}")
-            lines.append(f"  - 근거: {item.get('rationale') or '-'}")
-    else:
-        lines.append("- 즉시 결정할 항목이 없습니다.")
-    lines.extend(
-        [
-            "",
-            "## 유지해야 할 계약",
-        ]
-    )
-    retained = pkg.get("retained_contracts") or []
-    if retained:
-        for item in retained:
-            lines.append(f"- {item.get('item') or '-'}")
-            lines.append(f"  - 근거: {item.get('basis') or '-'}")
-    else:
-        lines.append("- 직접 확인된 유지 계약이 없습니다.")
-    lines.extend(["", "## 분리 우선순위"])
-    for item in pkg.get("priority_split_items") or []:
-        lines.extend(
-            [
-                f"- {item.get('priority')}순위 {item.get('item') or item.get('title') or '-'}",
-                f"  - 이유: {item.get('reason') or '-'}",
-                f"  - 영향 범위: {item.get('impact_scope') or '-'}",
-                f"  - 선행 조건: {item.get('prerequisite') or '-'}",
-            ]
-        )
-        if item.get("linked_rules"):
-            lines.append(f"  - 관련 규칙: {', '.join(item.get('linked_rules') or [])}")
-        if item.get("linked_contracts"):
-            lines.append(f"  - 관련 계약: {', '.join(item.get('linked_contracts') or [])}")
-    lines.extend(["", "## 확인 필요 항목"])
-    verification = pkg.get("verification_checkpoints") or []
-    if verification:
-        for item in verification:
-            lines.append(f"- {item.get('item') or '-'}")
-            lines.append(f"  - 사유: {item.get('reason') or '-'}")
-    else:
-        lines.append("- 해당 없음")
-    lines.extend(["", "## 설계 선택지 비교"])
-    for option in pkg.get("design_options") or []:
+            lines.append("- 근거 자산이 아직 정리되지 않았습니다.")
+    lines.extend(["", "## 설계 선택지"])
+    for option in design_options:
         lines.extend(
             [
                 f"### {option.get('name') or '-'}",
@@ -1557,22 +1612,12 @@ def _result_package_markdown(pkg: dict[str, Any], *, surface_mode: str = "intern
                 "",
             ]
         )
-    if lines[-1] == "":
+    if design_options and lines[-1] == "":
         lines.pop()
-    lines.extend(["", "## 추천안"])
-    recommended_option = pkg.get("recommended_option") or {}
-    if recommended_option:
-        lines.extend(
-            [
-                f"- {recommended_option.get('name') or '-'}",
-                f"- 구조 설명: {recommended_option.get('structure_summary') or '-'}",
-                f"- 선택 근거: {recommended_option.get('selection_reason') or '-'}",
-            ]
-        )
-    else:
-        lines.append("- 추천안 미생성")
+    if not design_options:
+        lines.append("- 해당 없음")
     lines.extend(["", "## 실행 계획"])
-    for week in pkg.get("execution_plan") or []:
+    for week in execution_plan:
         lines.extend(
             [
                 f"### {week.get('week_label') or '-'}",
@@ -1585,6 +1630,93 @@ def _result_package_markdown(pkg: dict[str, Any], *, surface_mode: str = "intern
                 f"- 산출물: {' / '.join(week.get('deliverables') or []) or '해당 없음'}",
             ]
         )
+    if not execution_plan:
+        lines.append("- 해당 없음")
+    lines.extend(["", "## 리스크"])
+    if risks:
+        lines.extend(f"- {item}" for item in risks)
+    else:
+        lines.append(f"- {diagnosis_state}")
+    if missing_context_details:
+        lines.extend(["", "### 확인 필요 자료"])
+        for item in missing_context_details:
+            lines.append(f"- {item.get('required_material') or '-'}: {item.get('reason') or '-'}")
+    lines.extend(["", "## 참고 구조 비교"])
+    if review_diff_markdown:
+        lines.extend(
+            [
+                "- 이 섹션은 실제 코드 패치가 아니라 현재 구조와 권장 구조의 차이를 설명하는 참고 자료입니다.",
+                "- diff와 expected_pattern은 판단 근거를 보조하는 용도로만 사용합니다.",
+                "",
+                _demote_markdown_headings(review_diff_markdown, levels=1),
+            ]
+        )
+    else:
+        lines.append("- 참고 구조 비교 데이터가 없습니다.")
+    lines.extend(["", "## 부록"])
+    lines.extend(
+        [
+            "### 문서 맥락",
+            f"- 목적: {report_purpose or '이 실행의 목적이 아직 정리되지 않았습니다.'}",
+            "- 분석 범위",
+            *([f"  - {item}" for item in report_scope] if report_scope else ["  - 해당 없음"]),
+            "- 검증 질문",
+            *([f"  - {item}" for item in report_questions] if report_questions else ["  - 해당 없음"]),
+            "",
+            "### 유지 계약",
+        ]
+    )
+    if retained:
+        for item in retained:
+            lines.append(f"- {item.get('item') or '-'}")
+            lines.append(f"  - 근거: {item.get('basis') or '-'}")
+    else:
+        lines.append("- 직접 확인된 유지 계약이 없습니다.")
+    lines.extend(["", "### 분리 우선순위"])
+    if priority_items:
+        for item in priority_items:
+            lines.extend(
+                [
+                    f"- {item.get('priority')}순위 {item.get('item') or item.get('title') or '-'}",
+                    f"  - 이유: {item.get('reason') or '-'}",
+                    f"  - 영향 범위: {item.get('impact_scope') or '-'}",
+                    f"  - 선행 조건: {item.get('prerequisite') or '-'}",
+                ]
+            )
+            if item.get("linked_rules"):
+                lines.append(f"  - 관련 규칙: {', '.join(item.get('linked_rules') or [])}")
+            if item.get("linked_contracts"):
+                lines.append(f"  - 관련 계약: {', '.join(item.get('linked_contracts') or [])}")
+    else:
+        lines.append("- 해당 없음")
+    lines.extend(["", "### 확인 필요 항목"])
+    if verification:
+        for item in verification:
+            lines.append(f"- {item.get('item') or '-'}")
+            lines.append(f"  - 사유: {item.get('reason') or '-'}")
+    else:
+        lines.append("- 해당 없음")
+    lines.extend(["", "### 설계 메모"])
+    if design.get("rebuild_strategy"):
+        lines.extend(f"- {item}" for item in (design.get("rebuild_strategy") or []))
+    else:
+        lines.append(f"- {draft_state}")
+    for key, label in (("database", "데이터 계약"), ("backend", "API 및 정책"), ("frontend", "화면 구조")):
+        values = layer.get(key) or []
+        lines.append(f"#### {label}")
+        lines.extend(f"- {item}" for item in values)
+        if not values:
+            lines.append("- 해당 없음")
+    lines.extend(["", "### 전환 초안"])
+    draft_has_content = False
+    for key in ("database", "backend", "frontend"):
+        values = draft.get(key) or []
+        if values:
+            draft_has_content = True
+            lines.append(f"#### {key}")
+            lines.extend(f"- {item}" for item in values)
+    if not draft_has_content:
+        lines.append(f"- {draft_state}")
     accounting = pkg.get("accounting") or {}
     if accounting:
         calc_status = accounting.get("calculation_status") or {}
@@ -1595,33 +1727,30 @@ def _result_package_markdown(pkg: dict[str, Any], *, surface_mode: str = "intern
         lines.extend(
             [
                 "",
-                "## 회계 계산 요약",
-                f"- {accounting.get('summary_sentence') or '-'}",
-                "",
-                "## 계산 가능 여부",
+                "### 회계 참고",
+                f"- 요약: {accounting.get('summary_sentence') or '-'}",
                 f"- 계산 가능: {'예' if calc_status.get('can_calculate') else '아니오'}",
                 f"- 사유: {calc_status.get('reason') or calc_status.get('blocking_issue') or '-'}",
             ]
         )
         if input_validation.get("missing_required_inputs"):
             lines.append(f"- 누락 입력: {', '.join(input_validation.get('missing_required_inputs') or [])}")
-        lines.extend(["", "## 회계 방식 분석"])
         if analysis.get("candidate_methods"):
             lines.append(f"- 후보 방식: {', '.join(analysis.get('candidate_methods') or [])}")
-        lines.append(f"- 추천 방식: {analysis.get('recommended_method') or '-'}")
+        if analysis.get("recommended_method"):
+            lines.append(f"- 추천 방식: {analysis.get('recommended_method')}")
         for item in analysis.get("reasons") or []:
             lines.append(f"- {item.get('message') or '-'}")
-        lines.extend(["", "## 외화 계산 결과"])
-        lines.append(f"- 계산 상태: {fx_calc.get('status') or '-'}")
-        lines.append(f"- 적용 방식: {fx_calc.get('method') or '-'}")
+        if fx_calc.get("status"):
+            lines.append(f"- 외화 계산 상태: {fx_calc.get('status')}")
+        if fx_calc.get("failure_reason"):
+            lines.append(f"- 외화 계산 실패 사유: {fx_calc.get('failure_reason')}")
         if fx_calc.get("realized_gain_loss_krw") is not None:
             lines.append(f"- 환차손익: {fx_calc.get('realized_gain_loss_krw'):,}원")
-        if fx_calc.get("failure_reason"):
-            lines.append(f"- 실패 사유: {fx_calc.get('failure_reason')}")
         for step in fx_calc.get("detail_steps") or []:
             lines.append(f"- {step.get('message') or '-'}")
-        lines.extend(["", "## 전표 검토 결과"])
-        lines.append(f"- 검토 상태: {voucher_review.get('status') or '-'}")
+        if voucher_review.get("status"):
+            lines.append(f"- 전표 검토 상태: {voucher_review.get('status')}")
         if voucher_review.get("status") == "입력 부족":
             lines.append("- 차변/대변 균형: 검토 불가")
             lines.append("- 정책 일치: 검토 불가")
@@ -1631,37 +1760,15 @@ def _result_package_markdown(pkg: dict[str, Any], *, surface_mode: str = "intern
             if voucher_review.get("policy_consistent") is not None:
                 lines.append(f"- 정책 일치: {'예' if voucher_review.get('policy_consistent') else '아니오'}")
         if voucher_review.get("failure_reason"):
-            lines.append(f"- 실패 사유: {voucher_review.get('failure_reason')}")
+            lines.append(f"- 전표 검토 실패 사유: {voucher_review.get('failure_reason')}")
         for item in voucher_review.get("review_points") or []:
             lines.append(f"- {item.get('message') or '-'}")
         for item in voucher_review.get("mismatches") or []:
-            lines.append(f"- 불일치: {item.get('message') or '-'}")
-    lines.extend(["", "## 리스크"])
-    risks = pkg["diagnosis"].get("risks") or []
-    if risks:
-        lines.extend(f"- {item}" for item in risks)
-    else:
-        lines.append(f"- {diagnosis_state}")
-    lines.extend(["", "## 전환 초안"])
-    draft = (pkg["transition_draft"].get("recomposition_draft") or {})
-    draft_lines = []
-    for key in ("database", "backend", "frontend"):
-        values = draft.get(key) or []
-        if values:
-            draft_lines.append(f"### {key}")
-            draft_lines.extend(f"- {item}" for item in values)
-            draft_lines.append("")
-    if draft_lines:
-        lines.extend(draft_lines[:-1])
-    else:
-        lines.append(f"- {draft_state}")
-    review_diff = (((pkg.get("extensions") or {}) if isinstance(pkg, dict) else {}) or {}).get("review_diff") or {}
-    review_diff_markdown = str(review_diff.get("markdown") or "").strip()
-    if review_diff_markdown:
-        lines.extend(["", review_diff_markdown])
-    lines.extend(["", "## 부록"])
+            lines.append(f"- {item.get('message') or '-'}")
     lines.extend(
         [
+            "",
+            "### Provenance 및 입력 자산",
             f"- Run ID: {provenance.get('run_id') or '-'}",
             f"- 생성 기준 시각 (UTC): {provenance.get('generated_at') or '-'}",
             f"- Run 상태: {provenance.get('run_status') or '-'}",
@@ -1682,6 +1789,32 @@ def _result_explanation_markdown(explanation: ResultExplanationResponse) -> str:
     taxonomy = explanation.taxonomy_view
     cards = explanation.summary_cards or []
     sections = explanation.section_views or []
+    if explanation.surface_mode == "external":
+        card_map = {card.card_key: card for card in cards}
+        judgment_body = getattr(card_map.get("judgment"), "body", "") or taxonomy.core_judgment.structural_judgment or "-"
+        strategy_body = getattr(card_map.get("strategy"), "body", "") or taxonomy.core_judgment.recommended_strategy or "-"
+        execution_body = getattr(card_map.get("execution"), "body", "") or ""
+        lines = [
+            f"# 구조 판단 - {explanation.project_id}",
+            "",
+            "## 핵심 판단",
+            f"- {judgment_body}",
+            "",
+            "## 왜 이 방향인가",
+            f"- {strategy_body}",
+            "",
+            "## 다음 단계",
+        ]
+        if execution_body:
+            lines.append(f"- {execution_body}")
+        if sections:
+            for section in sections:
+                lines.extend(["", f"### {section.title}"])
+                for row in str(section.text or "").splitlines():
+                    normalized = row.strip()
+                    if normalized:
+                        lines.append(f"- {normalized}")
+        return "\n".join(lines).strip() + "\n"
     lines = [
         f"# 구조 판단 - {explanation.project_id}",
         "",

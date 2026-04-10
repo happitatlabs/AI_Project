@@ -62,6 +62,12 @@
                         </label>
                     </div>
 
+                    <label class="block">
+                        <span class="mb-2 block text-sm text-stone-300">고객이 원하는 방향</span>
+                        <textarea id="customerIntent" rows="4" placeholder="줄바꿈 기준으로 입력하세요.&#10;예: 화면은 최대한 유지하고 백엔드만 분리&#10;예: 단계적 전환을 원함&#10;예: React + REST 기준을 선호" class="w-full rounded-3xl border border-white/10 bg-stone-950/70 px-4 py-4 text-sm"></textarea>
+                        <span class="mt-2 block text-xs leading-6 text-stone-500">고객이 원하는 결과나 선호 방식을 적습니다. 구조 판단 시 일반 제약과 구분되도록 함께 전달됩니다.</span>
+                    </label>
+
                     <section class="rounded-3xl border border-white/10 bg-stone-950/40 p-5">
                         <div class="flex items-center justify-between gap-3">
                             <div>
@@ -331,23 +337,54 @@
                 .find(Boolean) || '';
         }
 
+        function parseLineItems(text) {
+            return String(text || '')
+                .split(/\r?\n/)
+                .map(function (line) { return line.trim(); })
+                .filter(Boolean);
+        }
+
         function mergeConstraintLines(existingText, incomingText) {
             const seen = new Set();
             const merged = [];
             function appendLines(raw) {
-                String(raw || '')
-                    .split(/\r?\n/)
-                    .map(function (line) { return line.trim(); })
-                    .filter(Boolean)
-                    .forEach(function (line) {
-                        if (seen.has(line)) return;
-                        seen.add(line);
-                        merged.push(line);
-                    });
+                parseLineItems(raw).forEach(function (line) {
+                    if (seen.has(line)) return;
+                    seen.add(line);
+                    merged.push(line);
+                });
             }
             appendLines(existingText);
             appendLines(incomingText);
             return merged.join('\n');
+        }
+
+        function normalizeCustomerIntentLine(line) {
+            const trimmed = String(line || '').trim();
+            if (!trimmed) return '';
+            if (/^(고객 요청|선호 방향|원하는 방식)\s*:/i.test(trimmed)) {
+                return trimmed;
+            }
+            return '고객 요청: ' + trimmed;
+        }
+
+        function buildConstraintPayload() {
+            const merged = [];
+            const seen = new Set();
+            parseLineItems(document.getElementById('constraints').value || '').forEach(function (line) {
+                if (seen.has(line)) return;
+                seen.add(line);
+                merged.push(line);
+            });
+            parseLineItems(document.getElementById('customerIntent').value || '')
+                .map(normalizeCustomerIntentLine)
+                .filter(Boolean)
+                .forEach(function (line) {
+                    if (seen.has(line)) return;
+                    seen.add(line);
+                    merged.push(line);
+                });
+            return merged;
         }
 
         function applyAssetAutofill(assetName, extractedText) {
@@ -369,6 +406,13 @@
                 if (constraintsEl) {
                     constraintsEl.value = mergeConstraintLines(constraintsEl.value, text);
                     changes.push('제약 조건 자동 병합');
+                }
+            }
+            if (['customer_request.txt', 'customer_intent.txt', 'preferred_direction.txt'].includes(normalizedName)) {
+                const customerIntentEl = document.getElementById('customerIntent');
+                if (customerIntentEl) {
+                    customerIntentEl.value = mergeConstraintLines(customerIntentEl.value, text);
+                    changes.push('고객 요청 자동 채움');
                 }
             }
             return changes;
@@ -470,10 +514,7 @@
                 return;
             }
             setFormStatus('프로젝트를 생성하고 있습니다...', false);
-            const constraints = (document.getElementById('constraints').value || '')
-                .split(/\r?\n/)
-                .map(function (item) { return item.trim(); })
-                .filter(Boolean);
+            const constraints = buildConstraintPayload();
             const res = await fetch('/projects', {
                 method: 'POST',
                 headers: headers({ 'Content-Type': 'application/json' }),

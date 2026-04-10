@@ -124,12 +124,33 @@ def test_sql_analytics_run_has_module_metadata(client):
     assert res.status_code == 200, res.text
     data = res.json()
     run_id = data["run_id"]
+    assert data["preferred_user_url"] == f"/runs?focus_run_id={run_id}"
 
     snap = client.get(f"/runs/{run_id}", headers=headers)
     assert snap.status_code == 200, snap.text
     body = snap.json()
     assert body["module_id"] == "sql_analytics"
     assert body["run_kind"] == "sql_analysis"
+
+
+def test_ai_workflow_console_run_returns_preferred_user_url(client, monkeypatch):
+    from mellow_link.modules.ai_workflow_console import api as workflow_api
+
+    monkeypatch.setattr(
+        workflow_api,
+        "start_ai_workflow_run",
+        lambda *args, **kwargs: None,
+    )
+
+    headers = _user_headers()
+    res = client.post(
+        "/modules/ai_workflow_console/runs",
+        headers={**headers, "Content-Type": "application/json"},
+        json={"task_type": "generation", "prompt": "간단한 생성 작업을 시작해줘"},
+    )
+    assert res.status_code == 200, res.text
+    data = res.json()
+    assert data["preferred_user_url"] == f"/runs?focus_run_id={data['run_id']}"
 
 
 def test_research_assistant_reuses_temp_upload_flow(client, monkeypatch):
@@ -163,6 +184,7 @@ def test_research_assistant_reuses_temp_upload_flow(client, monkeypatch):
     assert res.status_code == 200, res.text
     data = res.json()
     run_id = data["run_id"]
+    assert data["preferred_user_url"] == f"/runs?focus_run_id={run_id}"
 
     snap = client.get(f"/runs/{run_id}", headers=headers)
     assert snap.status_code == 200, snap.text
@@ -674,16 +696,15 @@ def test_rebuild_assistant_summary_mentions_scope_metadata():
     result = svc.build_result(prepared)
     summary = svc.format_user_summary(result, scope_limited=prepared.scope_limited, needs_more_input=bool(result.missing_context))
 
-    assert "Executive Summary" in summary
-    assert "즉시 결정 필요" in summary
-    assert "추천안" in summary
+    assert "## 결정 요약" in summary
+    assert "## 판단 근거" in summary
+    assert "## 실행 조치" in summary
     assert "실행 계획" in summary
-    assert "핵심 업무 규칙" in summary
-    assert "유지해야 할 계약" in summary
+    assert "근거 자산" in summary
+    assert "유지 계약" in summary
     assert "레이어별 재구성" in summary
     assert "초안" in summary
     assert "리스크" in summary
-    assert "추천 방향" in summary
     assert "confidence:" in summary
 
 
@@ -2513,6 +2534,80 @@ def test_rebuild_assistant_runner_emits_structured_result(monkeypatch):
     assert judgment_logs[0]["primary_judgment"] == payload["structured_result"]["primary_judgment"]
     assert judgment_logs[0]["primary_judgment_reason"]
     assert isinstance(judgment_logs[0]["pattern_candidates"], list)
+
+
+def test_rebuild_assistant_safe_bundle_runner_emits_anonymization_contract(monkeypatch):
+    from mellow_link.modules.rebuild_assistant import runner as rebuild_runner
+    from mellow_link.services.anonymization.bundle_builder import SafeBundleBuilder
+    from mellow_link.services.anonymization.schemas import (
+        AnonymizationAsset,
+        CanonicalAnonymizedSource,
+        MaskingLevel,
+        StructureArtifact,
+    )
+
+    events = []
+
+    class InlineThread:
+        def __init__(self, target=None, daemon=None, *args, **kwargs):
+            self._target = target
+
+        def start(self):
+            if self._target:
+                self._target()
+
+    def fake_emit(run_id_arg, event_type, payload, **kwargs):
+        events.append({"run_id": run_id_arg, "type": event_type, "payload": payload})
+
+    bundle = SafeBundleBuilder().build(
+        project_id="proj_runner_contract",
+        masking_level=MaskingLevel.FULL,
+        assets=[AnonymizationAsset(asset_id="asset_001", name="legacy.jsp", temp_file_id="temp_001", size=12)],
+        canonical_sources=[
+            CanonicalAnonymizedSource(
+                asset_id="asset_001",
+                level=MaskingLevel.FULL,
+                language="jsp",
+                content='class CLS_001 { function FUNC_001() { return "customer@example.com"; } }',
+                replacement_stats={"class": 1, "function": 1},
+            )
+        ],
+        structures=[StructureArtifact(asset_id="asset_001", level=MaskingLevel.FULL, extracted_from="canonical", nodes=[], edges=[])],
+    )
+
+    monkeypatch.setattr(rebuild_runner.threading, "Thread", InlineThread)
+    monkeypatch.setattr(rebuild_runner, "emit_event", fake_emit)
+
+    rebuild_runner.start_rebuild_assistant_safe_bundle_run(
+        run_id="run_rebuild_safe_bundle_contract",
+        session_id="session-test",
+        goal="이 JSP 주문 조회 화면을 React + REST API로 재구성해줘",
+        safe_bundle=bundle,
+        constraints=["기존 DB 호환 유지"],
+    )
+
+    debug_event = next(event for event in events if event["type"] == "debug_anonymization_report")
+    log_event = next(event for event in events if event["type"] == "log" and event["payload"].get("message") == "anonymization bundle ready")
+    finished = next(event for event in events if event["type"] == "run_finished")
+
+    assert debug_event["payload"]["policy_version"] == "safe_bundle_exposure_v0"
+    assert "report_summary" in debug_event["payload"]
+    assert "validation" in debug_event["payload"]
+    assert "bundle_debug" in debug_event["payload"]
+    assert "source_previews" in debug_event["payload"]
+    assert log_event["payload"] == {
+        "level": "info",
+        "message": "anonymization bundle ready",
+        "policy_version": "safe_bundle_exposure_v0",
+        "masking_level": "FULL",
+        "applied": True,
+        "total_replacements": 2,
+        "validation_passed": True,
+    }
+    assert "anonymization_summary" in finished["payload"]
+    assert finished["payload"]["anonymization_summary"]["total_replacements"] == 2
+    assert "source_previews" not in finished["payload"]
+    assert "bundle_debug" not in finished["payload"]
     todo_ids = [event["payload"].get("todo_id") for event in events if event["type"] == "todo_started"]
     assert todo_ids == ["B1", "B2", "B3", "B4", "B5"]
 
@@ -3085,11 +3180,10 @@ def test_rebuild_assistant_accounting_result_package_and_polish_bundle_include_a
     assert len(pkg["report_questions"]) == 3
     assert pkg["polish_bundle"]["audience"] == "manager"
     assert pkg["polish_bundle"]["delivery_mode"] == "client_report"
-    assert "## 보고서 목적" in markdown
-    assert "## 분석 범위" in markdown
-    assert "## 검증 질문" in markdown
-    assert "회계 계산 요약" in markdown
-    assert "외화 계산 결과" in markdown
+    assert "### 문서 맥락" in markdown
+    assert "외환 거래의 환차손익을 계산하고, 적용된 회계 방식과 전표 정합성을 함께 검토하기 위한 보고서입니다." in markdown
+    assert "### 회계 참고" in markdown
+    assert "외화 계산 상태" in markdown
     assert any(section.section_key == "accounting_summary" for section in polish_bundle.polished_sections)
     assert any(section.section_key == "report_purpose" for section in polish_bundle.polished_sections)
     assert any(fact in ("22500", "22,500") for fact in polish_bundle.preserved_facts)
@@ -3192,12 +3286,12 @@ def test_rebuild_assistant_success_full_result_package_hides_placeholders_and_hu
     assert "voucher_review requires vouchers and account_mappings" not in markdown
     assert "account 기능" not in markdown
     assert "회계 기능" in markdown
-    assert "## 보고서 목적" in markdown
+    assert "### 문서 맥락" in markdown
     assert "외환 거래의 환차손익을 계산하고, 적용된 회계 방식과 전표 정합성을 함께 검토하기 위한 보고서입니다." in markdown
     assert "필수 입력이 모두 제공되었습니다." in markdown
     assert "이동평균법" in markdown
     assert "환차익은 22,500원입니다." in markdown
-    assert "검토 상태: 완료" in markdown
+    assert "전표 검토 상태: 완료" in markdown
     assert "차변/대변 균형: 아니오" in markdown
     assert "정책 일치: 아니오" in markdown
     assert "입니다. 입니다." not in markdown
@@ -3368,7 +3462,7 @@ def test_project_result_static_ui_renders_accounting_polish_controls():
     assert "accounting_summary" in html
     assert "accounting_status" in html
     assert "회계 확장" in html
-    assert "보고서 목적" in html
+    assert "문서 맥락" in html
     assert "분석 범위" in html
     assert "검증 질문" in html
     assert "열람 대상" in html

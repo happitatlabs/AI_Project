@@ -29,6 +29,7 @@ status: current
   - 입력 정규화
 - `StructureAnalyzer`
   - 컴포넌트, 의존성, 레이어, slice 추출
+  - fallback `usecase` seed는 intent가 아니라 evidence asset을 기준으로 잡고, generic file token보다 설명력 있는 asset label을 우선 사용
 - `DiagnosisEngine`
   - detector 실행과 issue 생성
 - `DecisionEngine`

@@ -8,6 +8,20 @@
   - Python/Flask 기반 청구 조정 기능 레거시 샘플
 - `java_order_closure_case_01`
   - JSP/Java 기반 주문 마감 기능 레거시 샘플
+- `ui_01_normal_balanced_upload`
+  - `/projects/create` 업로드용 정상 익명화 검증 팩
+- `ui_02_ambiguous_identifier_upload`
+  - `/projects/create` 업로드용 애매한 식별자 유지 검증 팩
+- `ui_03_sensitive_signal_upload`
+  - `/projects/create` 업로드용 민감정보 다수 포함 검증 팩
+- `ui_04_event_split_upload`
+  - `/projects/create` 업로드용 user/dev surface 분리 확인 팩
+- `ui_05_dev_failure_guard_mapping`
+  - `bundle-runs`용 validation fail dev fixture
+
+UI 업로드/익명화 검증 전용 팩 사용법은 아래 문서를 본다.
+
+- [ANONYMIZATION_UI_SAMPLE_PACKS.md](/C:/Users/Hyein/ClaudeAI/AI_Project/core/mellow_link/modules/rebuild_assistant/samples/ANONYMIZATION_UI_SAMPLE_PACKS.md)
 
 고정 회귀 샘플 세트는 아래 5개를 기준으로 사용한다.
 

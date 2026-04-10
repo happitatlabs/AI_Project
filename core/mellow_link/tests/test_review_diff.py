@@ -14,7 +14,7 @@ from mellow_link.services.refactoring_support_engine.result_packager import Resu
 from mellow_link.services.refactoring_support_engine.schemas import EvidenceLink
 from mellow_link.services.refactoring_support_engine.structure_analyzer import StructureAnalyzer
 
-from .refactoring_support_test_utils import build_safe_bundle, load_expansion_sample_case
+from .refactoring_support_test_utils import build_safe_bundle, load_expansion_sample_case, load_sample_case
 
 MELLOW_LINK_ROOT = Path(__file__).resolve().parents[1]
 
@@ -139,12 +139,14 @@ def test_review_diff_builds_structural_and_evidence_sections_for_query_filter_re
     assert review_diff["code_diff"]["snippets"][0]["type"] == "before_after"
     assert "observed" in review_diff["code_diff"]["snippets"][0]
     assert "expected_pattern" in review_diff["code_diff"]["snippets"][0]
+    assert review_diff["code_diff"]["snippets"][0]["difference_summary"]
     assert "before" not in review_diff["code_diff"]["snippets"][0]
     assert "after" not in review_diff["code_diff"]["snippets"][0]
     assert review_diff["markdown"].index("## Why this decision?") < review_diff["markdown"].index("## 현재 구조 vs 권장 구조 비교") < review_diff["markdown"].index("## Structural Difference")
     assert "이 비교는 실제 패치가 아니라, 현재 구조와 권장 패턴의 차이를 검토하기 위한 근거 예시입니다." in review_diff["markdown"]
     assert "#### observed" in review_diff["markdown"]
     assert "#### expected_pattern" in review_diff["markdown"]
+    assert "#### difference_summary" in review_diff["markdown"]
 
 
 def test_review_diff_code_diff_stays_unavailable_for_noise_only_sample():
@@ -199,6 +201,7 @@ def approve(claim, user):
 
     snippet = packager._build_code_diff_snippet(
         detector_id="rule_scatter",
+        issue_summary="Rule scatter detected",
         evidence_ids=["EVID_TEST"],
         evidence_map={"EVID_TEST": evidence},
         asset_text_map=asset_text_map,
@@ -208,6 +211,75 @@ def approve(claim, user):
     assert snippet["file"] == "claim_approval_service.py"
     assert snippet["observed"]
     assert snippet["expected_pattern"]
+    assert snippet["difference_summary"]
+
+
+def test_review_diff_code_diff_uses_locator_context_when_excerpt_anchor_does_not_match_exact_line():
+    packager = ResultPackager()
+    prepared = SimpleNamespace(
+        safe_bundle=SimpleNamespace(
+            sources=[
+                SimpleNamespace(
+                    asset_id="asset_001",
+                    name="order_service.py",
+                    content="""
+class OrderService:
+    def submit(self, order_data, retry_flag, note_text, repo):
+        validator = OrderValidator()
+        if not validator.is_valid(order_data):
+            return {"error": "invalid"}
+        return repo.save(order_data)
+                    """.strip(),
+                )
+            ]
+        )
+    )
+    evidence = EvidenceLink(
+        evidence_id="EVID_LOCATOR",
+        asset_id="asset_001",
+        asset_name="order_service.py",
+        asset_type="source",
+        locator="line:2",
+        excerpt="def submit(self, order_data, retry_flag, note_text, repo): validator = OrderValidator()",
+        fingerprint="def submit(self, order_data, retry_flag, note_text, repo):",
+    )
+
+    snippet = packager._build_code_diff_snippet(
+        detector_id="validation_guard_leak",
+        issue_summary="Validation is mixed into the submit path",
+        evidence_ids=["EVID_LOCATOR"],
+        evidence_map={"EVID_LOCATOR": evidence},
+        asset_text_map=packager._source_text_map(prepared),
+    )
+
+    assert snippet is not None
+    assert "class OrderService:" in snippet["observed"]
+    assert "validator = OrderValidator()" in snippet["observed"]
+    assert "\n" in snippet["observed"]
+
+
+def test_review_diff_preserves_multiline_snippets_and_masks_sensitive_literals():
+    case = load_sample_case("ui_01_normal_balanced_upload")
+
+    result = _package_result(
+        case["asset_specs"],
+        goal=case["goal"],
+        constraints=case["constraints"],
+    )
+
+    snippets = result.extensions["review_diff"]["code_diff"]["snippets"]
+    order_service = next(item for item in snippets if item["file"] == "order_service.py")
+    order_lookup = next(item for item in snippets if item["file"] == "order_lookup.sql")
+
+    assert "\n" in order_service["observed"]
+    assert "\n" in order_service["expected_pattern"]
+    assert "ops.order@example.com" not in order_service["observed"]
+    assert "/internal/orders/submit" not in order_service["observed"]
+    assert "[EMAIL]" in order_service["observed"]
+    assert "[PATH]" in order_service["observed"]
+    assert "\n" in order_lookup["observed"]
+    assert "ops.order@example.com" not in order_lookup["observed"]
+    assert "[EMAIL]" in order_lookup["observed"]
 
 
 def test_internal_markdown_export_includes_review_diff_when_available():
@@ -241,11 +313,56 @@ def test_internal_markdown_export_includes_review_diff_when_available():
 
     markdown = _result_package_markdown(pkg, surface_mode="internal")
 
-    assert "## Decision Result" in markdown
-    assert "## Why this decision?" in markdown
-    assert "## 현재 구조 vs 권장 구조 비교" in markdown
-    assert "## Structural Difference" in markdown
+    assert "## 참고 구조 비교" in markdown
+    assert "### Decision Result" in markdown
+    assert "### Why this decision?" in markdown
+    assert "### 현재 구조 vs 권장 구조 비교" in markdown
+    assert "### Structural Difference" in markdown
     assert "synthetic_signal_detected" in markdown
+
+
+def test_build_result_package_preserves_multiline_structure_comparison_snippets():
+    case = load_sample_case("ui_01_normal_balanced_upload")
+    result = _package_result(
+        case["asset_specs"],
+        goal=case["goal"],
+        constraints=case["constraints"],
+    )
+    project = ModernizationProject(
+        id="proj_structure_multiline",
+        user_id=1,
+        session_id="sess_structure_multiline",
+        run_id="run_structure_multiline",
+        project_name="구조 비교 멀티라인",
+        client_name="OO카드",
+        template_key="default_modernization_v1",
+        template_mode="recommended",
+        constraints_json="[]",
+        upload_session_id="upload_structure_multiline",
+        asset_manifest_json="[]",
+        status="completed",
+    )
+
+    pkg = build_result_package(
+        project,
+        {"status": "completed", "run_id": project.run_id},
+        result,
+        assets=[],
+        polish_bundle=None,
+        app_version="0.1.0",
+    )
+
+    comparison = pkg["structure_comparison"]
+
+    assert comparison["available"] is True
+    assert comparison["items"]
+    order_service = next(item for item in comparison["items"] if item["file"] == "order_service.py")
+    assert "\n" in order_service["current_structure"]
+    assert "\n" in order_service["recommended_structure"]
+    assert "ops.order@example.com" not in order_service["current_structure"]
+    assert "/internal/orders/submit" not in order_service["current_structure"]
+    assert "[EMAIL]" in order_service["current_structure"]
+    assert "[PATH]" in order_service["current_structure"]
 
 
 def test_surface_filtered_result_package_marks_hidden_by_policy_when_review_diff_exists():
@@ -279,9 +396,15 @@ def test_surface_filtered_result_package_marks_hidden_by_policy_when_review_diff
 
     filtered = _surface_filtered_result_package(pkg, surface_mode="external")
 
+    assert pkg["structure_comparison"]["available"] is True
+    assert pkg["structure_comparison"]["items"]
     assert "review_diff" in (pkg.get("extensions") or {})
     assert "review_diff" not in (filtered.get("extensions") or {})
     assert "decision_governance" not in (filtered.get("extensions") or {})
+    assert filtered["structure_comparison"]["available"] is True
+    assert filtered["structure_comparison"]["items"][0]["current_structure"]
+    assert filtered["structure_comparison"]["items"][0]["recommended_structure"]
+    assert filtered["structure_comparison"]["items"][0]["difference_summary"]
     assert filtered["provenance"]["surface_access"]["access_profile"] == "external_basic"
     assert filtered["provenance"]["surface_access"]["field_visibility"]["review_diff"] == "hidden_by_policy"
     assert filtered["provenance"]["surface_access"]["field_visibility"]["decision_governance"] == "hidden_by_policy"
@@ -295,7 +418,6 @@ def test_project_result_ui_contains_review_diff_rendering_hooks():
     assert 'id="reviewDiffDecisionSection"' in html
     assert 'id="reviewDiffWhySection"' in html
     assert 'id="reviewDiffEvidenceSection"' in html
-    assert 'id="reviewDiffPatternSection"' in html
     assert 'id="internalSurface"' in html
     assert 'id="externalSurface"' in html
     assert 'id="surfaceModeInternalBtn"' in html
@@ -304,9 +426,14 @@ def test_project_result_ui_contains_review_diff_rendering_hooks():
     assert '<details id="reviewDiffDecisionSection"' not in html
     assert "function renderReviewDiff(pkg)" in html
     assert "function renderExternalSurface(pkg, explanation)" in html
-    assert 'id="codeDiffSection"' in html
-    assert 'id="showCodeDiffBtn"' in html
-    assert 'id="codeDiffPanel"' in html
+    assert 'id="structureComparisonSection"' in html
+    assert 'id="structureComparisonBox"' in html
+    assert 'id="customerIntentSection"' in html
+    assert 'id="customerIntentBox"' in html
+    assert 'id="externalComparisonSection"' in html
+    assert 'id="externalComparisonBox"' in html
+    assert 'id="externalCustomerIntentSection"' in html
+    assert 'id="externalCustomerIntentBox"' in html
     assert "function resultDownloadUrl(format)" in html
     assert "function resultDownloadFallbackName(format)" in html
     assert "function surfaceModeConfig(mode)" in html
@@ -316,37 +443,64 @@ def test_project_result_ui_contains_review_diff_rendering_hooks():
     assert "function applySurfaceAccessPolicy(mode)" in html
     assert "function resetReviewDiffSections()" in html
     assert "function renderReviewDiffStickyBar(pkg, reviewDiff)" in html
-    assert "function renderCodeDiffPanel(reviewDiff)" in html
+    assert "function renderStructureComparisonPanel(comparison)" in html
+    assert "function renderExternalStructureComparisonPanel(comparison)" in html
+    assert "function renderCustomerIntentBox(customerIntent)" in html
+    assert "function highlightAnonymizedSegments(text)" in html
+    assert "function renderExternalEvidenceHint(citations)" in html
+    assert "function shortenComparisonSnippet(text, maxLines, maxChars)" in html
+    assert "function inferStructureTheme(item)" in html
+    assert "function buildEffectSummary(item)" in html
+    assert "function renderStructureGuideCard(label, body, accentClass)" in html
+    assert "이 카드에서 먼저 볼 점" in html
+    assert "이 구조로 바꾸면" in html
+    assert "현재 구조를 그대로 둘 때의 부담과, 권장 구조로 나눴을 때의 효과를 먼저 읽는 영역입니다." in html
+    assert "escapeHtml(executive.title" not in html
+    assert "escapeHtml(executive.state" not in html
     assert "function renderCodeDiffLines(text, tone)" in html
+    assert "function renderComparisonSummaryList(items)" in html
+    assert 'class="rounded bg-white/10 px-1"' in html
+    assert 'id="optionsDetails"' in html
+    assert 'id="planDetails"' in html
+    assert 'id="appendixDetails"' in html
+    assert 'id="readingGuideDetails"' in html
+    assert 'id="riskDetails"' in html
+    assert 'id="reviewDiffDetails"' in html
+    assert "data-collapsible-badge" in html
+    assert "const shouldCollapse = function (section)" in html
+    assert "function updateCollapsibleBadge(detailsElement)" in html
+    assert "function bindCollapsibleDetails(root)" in html
     assert "surface_mode=" in html
-    assert "설명용 Markdown" in html
-    assert "검토용 Markdown" in html
+    assert "설명용 마크다운" in html
+    assert "검토용 마크다운" in html
     assert "설명용 내보내기" in html
     assert "검토용 내보내기" in html
-    assert "Review Diff와 governance trace를 제외한 설명 중심 산출물을 내보냅니다." in html
-    assert "Review Diff와 governance trace를 포함한 내부 검토용 산출물을 내보냅니다." in html
+    assert "참고 구조 비교와 판단 제어 추적을 제외한 설명 중심 산출물을 내보냅니다." in html
+    assert "참고 구조 비교와 판단 제어 추적을 포함한 내부 검토용 산출물을 내보냅니다." in html
     assert "extensions || {}).review_diff" in html
     assert "/result/explanation?audience=manager&surface_mode=external" in html
     assert "currentCapabilities.can_view_review_diff" in html
-    assert "currentCapabilities.can_view_code_diff" in html
     assert "currentAccessPolicy.surfaceVariant === 'external_presentation'" in html
-    assert "Decision Result" in html
-    assert "Why this decision?" in html
-    assert "Evidence Detail" in html
-    assert "Structural Difference" in html
-    assert "Primary" in html
-    assert "Blocked" in html
-    assert "Confidence" in html
-    assert "현재 구조 vs 권장 구조 비교" in html
-    assert "현재 구조 vs 권장 구조 보기" in html
-    assert "이 비교는 실제 패치가 아니라, 현재 구조와 권장 패턴의 차이를 검토하기 위한 근거 예시입니다." in html
-    assert "현재 시스템에서 실제로 사용되고 있는 코드 일부입니다." in html
-    assert "(판단의 근거가 되는 실제 구조입니다)" in html
+    assert "comparisonBox.innerHTML = renderExternalStructureComparisonPanel(structureComparison);" in html
+    assert "판단 결과" in html
+    assert "왜 이렇게 판단했는가" in html
+    assert "근거 상세" in html
+    assert "최종 판단" in html
+    assert "차단된 판단" in html
+    assert "신뢰도" in html
+    assert "구조 비교" in html
+    assert "현재 구조는 익명화된 실제 패턴이고, 권장 구조는 설명용 일반화 패턴입니다." in html
+    assert "이 섹션은 참고 부록이 아니라 판단 본문입니다." in html
+    assert "현재 시스템에서 관찰된 익명화 패턴입니다." in html
+    assert "(실제 구조를 안전하게 치환한 형태입니다)" in html
     assert "권장되는 구조 패턴 예시입니다." in html
     assert "(실제 코드가 아니라, 개선 방향을 설명하기 위한 일반화된 형태입니다)" in html
+    assert "실제 코드 근거 " in html
+    assert "이렇게 달라집니다" in html
+    assert "차이 설명" in html
     assert "코드 비교 보기" not in html
     assert "Code Diff" not in html
+    assert "익명화된 구조 비교 보기" not in html
     assert "synthetic_signal_detected" in html
     assert "whySection.open = true" in html
     assert "evidenceSection.open = false" in html
-    assert "patternSection.open = false" in html

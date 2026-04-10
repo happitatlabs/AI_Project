@@ -15,6 +15,7 @@ from mellow_link.services.refactoring_support_engine.input_assembler import Inpu
 from mellow_link.services.refactoring_support_engine.schemas import FeatureSignals, PreparedRebuildInput
 from mellow_link.services.refactoring_support_engine.template_support import TemplateSupport
 
+from .decision_document import build_decision_brief, render_decision_brief_markdown
 from .schemas import (
     AppliedJudgmentTemplate,
     AssetPresenceSummary,
@@ -1863,132 +1864,84 @@ class RebuildAssistantService:
         scope_limited: bool,
         needs_more_input: bool,
     ) -> str:
-        lines = [
-            "Executive Summary",
-            *self._render_bullets(result.executive_summary_v2),
-            "",
-            "핵심 결론",
-            f"- {result.one_line_conclusion}",
-            "",
-            "핵심 업무 규칙",
-        ]
+        decision_brief = build_decision_brief(
+            summary=(
+                result.one_line_conclusion
+                or ("현재 입력 기준에서는 추가 자료 확인 전까지 초안 판단으로 유지합니다." if needs_more_input else "결정 요약을 만들 근거가 아직 충분하지 않습니다.")
+            ),
+            rationale_candidates=[
+                *(rule.description for rule in result.grounded_business_rules),
+                *(item.rationale for item in result.decision_items),
+                *result.analysis_summary,
+                *result.executive_summary_v2,
+                *result.risks,
+            ],
+            action_candidates=[
+                *(item.statement for item in result.decision_items),
+                *(week.goal for week in result.execution_plan),
+                *result.recommended_directions,
+            ],
+        )
+        lines = [*render_decision_brief_markdown(decision_brief), "", "## 근거 자산"]
         for rule in result.grounded_business_rules:
             lines.extend(
                 [
-                    f"- {rule.title}: {rule.description}",
-                    f"  - 신뢰도: {rule.confidence} ({rule.confidence_reason})",
-                    f"  - 설계 반영 위치: {', '.join(rule.design_targets) if rule.design_targets else '-'}",
-                    f"  - 추가 검증 필요: {'예' if rule.needs_verification else '아니오'}",
+                    f"### {rule.title}",
+                    f"- 관찰: {rule.description}",
+                    f"- 신뢰도: {rule.confidence} ({rule.confidence_reason})",
+                    f"- 설계 반영 위치: {', '.join(rule.design_targets) if rule.design_targets else '-'}",
+                    f"- 추가 검증 필요: {'예' if rule.needs_verification else '아니오'}",
                 ]
             )
             for evidence in rule.evidence[:2]:
-                lines.append(f"  - 근거: {evidence.asset_name} [{evidence.asset_type}] {evidence.locator} / {evidence.excerpt}")
-        lines.extend(
-            [
-                "",
-                "즉시 결정 필요",
-            ]
-        )
-        decision_lines = [item.statement for item in result.decision_items if (item.statement or "").strip()]
-        if decision_lines:
-            lines.extend(self._render_bullets(decision_lines))
+                lines.append(f"- 근거 자산: {evidence.asset_name} [{evidence.asset_type}] {evidence.locator} / {evidence.excerpt}")
+        if not result.grounded_business_rules:
+            lines.append("- 해당 없음")
+        lines.extend(["", "## 설계 선택지"])
+        if result.design_options:
+            for option in result.design_options:
+                lines.extend(
+                    [
+                        f"### {option.name}",
+                        f"- 구조 설명: {option.structure_summary}",
+                        f"- 장점: {' / '.join(option.advantages) if option.advantages else '-'}",
+                        f"- 리스크: {' / '.join(option.risks) if option.risks else '-'}",
+                        f"- 난이도/기간: {option.difficulty} / {option.duration_weeks}주",
+                        f"- 추천 여부: {'예' if option.recommended else '아니오'}",
+                        f"- 선택 이유: {option.selection_reason}",
+                    ]
+                )
         else:
-            lines.append("- 즉시 결정할 항목이 없습니다.")
-        lines.extend(
-            [
-                "",
-                "유지해야 할 계약",
-                *self._render_bullets([item.item for item in result.retained_contracts]),
-                "",
-                "분리 우선순위",
-            ]
-        )
-        for item in result.priority_split_items:
-            lines.append(f"- {item.priority}순위 {item.title}: {item.reason}")
-        lines.extend(
-            [
-                "",
-                "확인 필요 항목",
-                *self._render_bullets([item.item for item in result.verification_checkpoints]),
-                "",
-                "설계 선택지 비교",
-            ]
-        )
-        for option in result.design_options:
-            lines.extend(
-                [
-                    f"- {option.name}: {option.structure_summary}",
-                    f"  - 장점: {' / '.join(option.advantages) if option.advantages else '-'}",
-                    f"  - 리스크: {' / '.join(option.risks) if option.risks else '-'}",
-                    f"  - 난이도/기간: {option.difficulty} / {option.duration_weeks}주",
-                    f"  - 추천 여부: {'예' if option.recommended else '아니오'}",
-                    f"  - 선택 이유: {option.selection_reason}",
-                ]
-            )
-        if result.recommended_option:
-            lines.extend(
-                [
-                    "",
-                    "추천안",
-                    f"- {result.recommended_option.name}: {result.recommended_option.structure_summary}",
-                    f"  - 선택 이유: {result.recommended_option.selection_reason}",
-                ]
-            )
-        lines.extend(
-            [
-                "",
-                "실행 계획",
-            ]
-        )
+            lines.append("- 해당 없음")
+        lines.extend(["", "## 실행 계획"])
         for week in result.execution_plan:
             lines.extend(
                 [
-                    f"- {week.week_label}: {week.goal}",
-                    f"  - 작업: {' / '.join(week.tasks) if week.tasks else '-'}",
-                    f"  - 인력: {' / '.join(week.roles) if week.roles else '-'}",
-                    f"  - 기간: {week.duration_weeks}주",
-                    f"  - 산출물: {' / '.join(week.deliverables) if week.deliverables else '-'}",
+                    f"### {week.week_label}",
+                    f"- 목표: {week.goal}",
+                    f"- 작업: {' / '.join(week.tasks) if week.tasks else '-'}",
+                    f"- 인력: {' / '.join(week.roles) if week.roles else '-'}",
+                    f"- 기간: {week.duration_weeks}주",
+                    f"- 산출물: {' / '.join(week.deliverables) if week.deliverables else '-'}",
                 ]
             )
-        lines.extend(
-            [
-                "",
-                "진단 요약",
-            ]
-        )
-        lines.extend(
-            [
-                *self._render_bullets(result.analysis_summary),
-                "",
-                "전환 초안",
-                *self._render_bullets(result.core_business_rules),
-                "",
-                "재구성 전략",
-                *self._render_bullets(result.rebuild_strategy),
-                "",
-                "레이어별 재구성",
-                "DB",
-                *self._render_bullets(result.layer_reconstruction.database),
-                "API",
-                *self._render_bullets(result.layer_reconstruction.backend),
-                "UI",
-                *self._render_bullets(result.layer_reconstruction.frontend),
-                "",
-                "초안",
-                "DB",
-                *self._render_bullets(result.recomposition_draft.database),
-                "API",
-                *self._render_bullets(result.recomposition_draft.backend),
-                "UI",
-                *self._render_bullets(result.recomposition_draft.frontend),
-                "",
-                "리스크",
-                *self._render_bullets(result.risks),
-            ]
-        )
+        if not result.execution_plan:
+            lines.append("- 해당 없음")
+        lines.extend(["", "## 리스크", *self._render_bullets(result.risks or ["해당 없음"]), "", "## 부록"])
+        lines.extend(["### 유지 계약", *self._render_bullets([item.item for item in result.retained_contracts] or ["해당 없음"])])
+        lines.extend(["", "### 분리 우선순위"])
+        if result.priority_split_items:
+            for item in result.priority_split_items:
+                lines.append(f"- {item.priority}순위 {item.title}: {item.reason}")
+        else:
+            lines.append("- 해당 없음")
+        lines.extend(["", "### 확인 필요 항목", *self._render_bullets([item.item for item in result.verification_checkpoints] or ["해당 없음"])])
+        lines.extend(["", "### 진단 요약", *self._render_bullets(result.analysis_summary or ["해당 없음"])])
+        lines.extend(["", "### 재구성 전략", *self._render_bullets(result.rebuild_strategy or ["해당 없음"])])
+        lines.extend(["", "### 레이어별 재구성", "DB", *self._render_bullets(result.layer_reconstruction.database or ["해당 없음"]), "API", *self._render_bullets(result.layer_reconstruction.backend or ["해당 없음"]), "UI", *self._render_bullets(result.layer_reconstruction.frontend or ["해당 없음"])])
+        lines.extend(["", "### 전환 초안", "DB", *self._render_bullets(result.recomposition_draft.database or ["해당 없음"]), "API", *self._render_bullets(result.recomposition_draft.backend or ["해당 없음"]), "UI", *self._render_bullets(result.recomposition_draft.frontend or ["해당 없음"])])
         if result.missing_context:
-            lines.append("")
-            lines.append("추가 자료 요청")
+            lines.extend(["", "### 추가 자료 요청"])
             for item in result.missing_context_details:
                 lines.extend(
                     [
@@ -2003,11 +1956,11 @@ class RebuildAssistantService:
             if not result.missing_context_details:
                 lines.extend(self._render_bullets(result.missing_context))
         if result.recommended_directions:
-            lines.extend(["", "추천 방향", *self._render_bullets(result.recommended_directions)])
+            lines.extend(["", "### 참고 메모", *self._render_bullets(result.recommended_directions)])
         lines.extend(
             [
                 "",
-                "실행 메타",
+                "### 실행 메타",
                 f"- confidence: {result.confidence:.2f}",
                 f"- scope_limited: {'true' if scope_limited else 'false'}",
                 f"- needs_more_input: {'true' if needs_more_input else 'false'}",
@@ -5612,16 +5565,42 @@ class RebuildAssistantService:
     def _sanitize_structured_result(self, result: StructuredRebuildResult) -> StructuredRebuildResult:
         return StructuredRebuildResult.model_validate(self._sanitize_for_user_output(result.model_dump()))
 
-    def _sanitize_for_user_output(self, value):
+    def _sanitize_for_user_output(self, value, *, key_path: tuple[str, ...] = ()):
         if isinstance(value, str):
-            return self._sanitize_text(value)
+            return self._sanitize_text(value, key_path=key_path)
         if isinstance(value, list):
-            return [self._sanitize_for_user_output(item) for item in value]
+            return [self._sanitize_for_user_output(item, key_path=key_path) for item in value]
         if isinstance(value, dict):
-            return {key: self._sanitize_for_user_output(item) for key, item in value.items()}
+            return {
+                key: self._sanitize_for_user_output(item, key_path=(*key_path, str(key)))
+                for key, item in value.items()
+            }
         return value
 
-    def _sanitize_text(self, text: str) -> str:
+    def _sanitize_text(self, text: str, *, key_path: tuple[str, ...] = ()) -> str:
+        if self._is_code_like_output_path(key_path):
+            return self._sanitize_code_like_text(text)
+        return self._sanitize_prose_text(text)
+
+    def _is_code_like_output_path(self, key_path: tuple[str, ...]) -> bool:
+        if not key_path:
+            return False
+        return key_path[-1] in {"observed", "expected_pattern", "current_structure", "recommended_structure", "markdown"}
+
+    def _sanitize_code_like_text(self, text: str) -> str:
+        sanitized = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip("\n")
+        if not sanitized:
+            return ""
+        sanitized = sanitized.replace("REDACTED_PATH", "[PATH]")
+        sanitized = re.sub(r"\[SAFE (?:STRUCTURE|SOURCE):[^\]]+\]", "", sanitized, flags=re.IGNORECASE)
+        sanitized = re.sub(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", "[EMAIL]", sanitized)
+        sanitized = re.sub(r"\b(?:sk_(?:live|test)_[A-Za-z0-9]+|ghp_[A-Za-z0-9]+|xox[baprs]-[A-Za-z0-9-]+)\b", "[SECRET]", sanitized)
+        sanitized = re.sub(r"\b(?:\+?82[- ]?)?0\d{1,2}[- ]?\d{3,4}[- ]?\d{4}\b", "[PHONE]", sanitized)
+        sanitized = re.sub(r"(https?://[^\s\"']+|[A-Za-z]:\\[^\s\"']+|/(?:[A-Za-z0-9_.-]+/?)+)", "[PATH]", sanitized)
+        sanitized = re.sub(r"\n{3,}", "\n\n", sanitized)
+        return sanitized.strip()
+
+    def _sanitize_prose_text(self, text: str) -> str:
         sanitized = (text or "").strip()
         from .postprocess.rules import apply_sentence_polish
 

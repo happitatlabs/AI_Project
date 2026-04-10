@@ -48,6 +48,19 @@ promoted expansion regression 대상:
 2. 기대값을 바꿀 때는 코드와 문서를 함께 수정
 3. 깨진 golden sample을 문서 없이 넘어가면 안 됨
 
+## 최근 변경
+
+2026-04-09 기준 정리:
+
+- `01. java_order_closure_case_01`은 engine regression으로 분류되어 fallback `first_entry_point` heuristic를 먼저 수정했다.
+- 결과 anchor는 `usecase:jsp`에서 `usecase:order_close_service`로 보정됐다.
+- 나머지 4건은 current policy 기준 정상 drift로 판정되어 golden expectation을 갱신했다.
+- promoted expansion regression 4건도 current deterministic output 기준으로 expected assertions를 동기화했다.
+
+관련 메모:
+
+- [[Golden_Failure_Triage_and_Update_2026-04-09]]
+
 ## 해석 포인트
 
 golden set은 canonical 회귀 축이고, expansion sample은 커버리지를 넓히는 보강 축이다.  
@@ -57,3 +70,4 @@ golden set은 canonical 회귀 축이고, expansion sample은 커버리지를 �
 
 - [[Validation_Governance_and_Checklists]]
 - [[Real_Project_Validation_Runs]]
+- [[Golden_Failure_Triage_and_Update_2026-04-09]]

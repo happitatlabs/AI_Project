@@ -25,7 +25,7 @@ try:
     from fastapi import FastAPI, HTTPException, Depends, Query
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.staticfiles import StaticFiles
-    from fastapi.responses import JSONResponse, HTMLResponse
+    from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
     from fastapi import Request
     FASTAPI_AVAILABLE = True
 except ImportError:
@@ -52,7 +52,7 @@ from mellow_link.infra import (
     log_event,
     get_db, User, UserRole, AgentFolder, ChatSession, GuestUsage,
     create_default_folders_for_user, ensure_user_has_folders, get_or_create_default_session,
-    verify_password, get_password_hash, create_access_token, get_current_user,
+    verify_password, get_password_hash, create_access_token, get_current_user, get_current_user_optional,
     check_guest_limit, increment_guest_usage,
     ACCESS_TOKEN_EXPIRE_MINUTES,
 )
@@ -663,15 +663,22 @@ if FASTAPI_AVAILABLE:
         return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
 
     @app.get("/user-console", tags=["Dev"], response_class=HTMLResponse)
-    async def user_console_view():
+    async def user_console_view(
+        run_id: str | None = Query(None),
+        db=Depends(get_db),
+        user: User | None = Depends(get_current_user_optional),
+    ):
         """User Console UI (사용자 뷰: Summary-first 진행/결과 표시)."""
-        return HTMLResponse(
-            content=(
-                "<!DOCTYPE html><html lang='ko'><head><meta charset='UTF-8'>"
-                "<meta http-equiv='refresh' content='0; url=/projects'>"
-                "<title>Redirecting</title></head><body></body></html>"
-            )
-        )
+        if run_id:
+            from mellow_link.routers.runs import _resolve_project_context_for_run, _get_run_or_404, _run_owned_by_user
+
+            project_context = _resolve_project_context_for_run(run_id, db)
+            if project_context:
+                run = _get_run_or_404(run_id, db)
+                if user is None or getattr(user, "role", "") == UserRole.ADMIN.value or _run_owned_by_user(run, user.id, db):
+                    return RedirectResponse(url=project_context["preferred_user_url"], status_code=307)
+            return RedirectResponse(url=f"/runs?focus_run_id={run_id}", status_code=307)
+        return RedirectResponse(url="/projects", status_code=307)
 
     # =========================================================================
     # Monitor endpoints that need special dependencies

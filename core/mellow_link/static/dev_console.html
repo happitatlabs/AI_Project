@@ -108,6 +108,27 @@
                 </div>
             </section>
 
+            <section id="anonymizationSection" class="hidden rounded-3xl border border-white/10 bg-slate-900/60 p-6">
+                <div class="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                        <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Anonymization</p>
+                        <h2 class="mt-2 text-lg font-medium">Summary + Validation + Preview</h2>
+                    </div>
+                    <div id="anonymizationEventMeta" class="text-xs text-slate-500">-</div>
+                </div>
+                <div id="anonymizationGuide" class="mt-5 rounded-2xl border border-cyan-400/20 bg-cyan-500/5 p-4"></div>
+                <div class="grid gap-6 xl:grid-cols-[0.9fr_1.1fr] mt-5">
+                    <div class="space-y-4">
+                        <div id="anonymizationSummaryBox" class="grid gap-3 md:grid-cols-2"></div>
+                        <div id="anonymizationValidationBox" class="space-y-3"></div>
+                    </div>
+                    <div id="anonymizationPreviewPanel" class="space-y-3">
+                        <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Source Previews</div>
+                        <div id="anonymizationPreviewBox" class="space-y-3"></div>
+                    </div>
+                </div>
+            </section>
+
             <section class="rounded-3xl border border-white/10 bg-slate-900/60 p-6">
                 <div class="flex flex-wrap gap-2 mb-5">
                     <button data-tab="events" class="tab-btn px-4 py-2 rounded-full border border-white/10 bg-white/5 text-sm">Raw Events</button>
@@ -148,7 +169,7 @@
         }
 
         function escapeHtml(value) {
-            return String(value || '')
+            return String(value == null ? '' : value)
                 .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;')
@@ -183,6 +204,138 @@
             }
             if (snapshot && snapshot.health && snapshot.health.last_error) return String(snapshot.health.last_error);
             return '에러가 없습니다.';
+        }
+
+        function latestAnonymizationDebug(events) {
+            for (let index = events.length - 1; index >= 0; index -= 1) {
+                if (events[index] && events[index].type === 'debug_anonymization_report') return events[index];
+            }
+            return null;
+        }
+
+        function renderAnonymization(event) {
+            const section = document.getElementById('anonymizationSection');
+            const guideBox = document.getElementById('anonymizationGuide');
+            const summaryBox = document.getElementById('anonymizationSummaryBox');
+            const validationBox = document.getElementById('anonymizationValidationBox');
+            const previewPanel = document.getElementById('anonymizationPreviewPanel');
+            const previewBox = document.getElementById('anonymizationPreviewBox');
+            const metaBox = document.getElementById('anonymizationEventMeta');
+            if (!section || !guideBox || !summaryBox || !validationBox || !previewPanel || !previewBox || !metaBox) return;
+            if (!event) {
+                section.classList.add('hidden');
+                guideBox.innerHTML = '';
+                summaryBox.innerHTML = '';
+                validationBox.innerHTML = '';
+                previewBox.innerHTML = '';
+                metaBox.textContent = '-';
+                return;
+            }
+            section.classList.remove('hidden');
+            const payload = event.payload || {};
+            const summary = payload.report_summary || {};
+            const validation = payload.validation || {};
+            const bundleDebug = payload.bundle_debug || {};
+            const previews = Array.isArray(payload.source_previews) ? payload.source_previews : [];
+            const validationPassed = Boolean(validation.passed);
+            metaBox.textContent = 'event: ' + formatTs(event.ts);
+            guideBox.innerHTML =
+                '<div class="flex flex-wrap items-center justify-between gap-3">' +
+                    '<div>' +
+                        '<div class="text-xs uppercase tracking-[0.2em] text-cyan-200/80">Review Order</div>' +
+                        '<div class="mt-2 text-sm text-slate-100">' + (validationPassed
+                            ? '기본 통과 기준은 validation.passed=true 입니다. 먼저 findings를 보고, risk flags는 참고 경고로 보고, preview는 보조 확인용으로만 해석합니다.'
+                            : 'validation.passed=false 이므로 통과가 아닙니다. findings를 먼저 확인하고 preview는 차단된 것으로 해석합니다.') + '</div>' +
+                    '</div>' +
+                    '<div class="rounded-full border px-3 py-1 text-xs ' + (validationPassed
+                        ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200'
+                        : 'border-rose-400/20 bg-rose-500/10 text-rose-200') + '">' +
+                        (validationPassed ? 'Baseline Pass' : 'Validation Failed') +
+                    '</div>' +
+                '</div>' +
+                '<div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4 mt-4 text-sm">' +
+                    '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3"><div class="text-xs uppercase tracking-[0.15em] text-slate-500">1. Passed</div><div class="mt-2 text-slate-200">`passed=true`면 기본 통과입니다.</div></div>' +
+                    '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3"><div class="text-xs uppercase tracking-[0.15em] text-slate-500">2. Findings</div><div class="mt-2 text-slate-200">가장 먼저 확인할 항목입니다.</div></div>' +
+                    '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3"><div class="text-xs uppercase tracking-[0.15em] text-slate-500">3. Risk Flags</div><div class="mt-2 text-slate-200">참고 경고이며 단독으로 실패를 뜻하지 않습니다.</div></div>' +
+                    '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3"><div class="text-xs uppercase tracking-[0.15em] text-slate-500">4. Preview</div><div class="mt-2 text-slate-200">검증 보조용이며 canonical이 아닙니다.</div></div>' +
+                '</div>';
+            summaryBox.innerHTML = [
+                ['Policy', payload.policy_version || '-'],
+                ['Masking Level', summary.masking_level || bundleDebug.masking_level || '-'],
+                ['Total Replacements', summary.total_replacements ?? bundleDebug.total_replacements ?? 0],
+                ['Canonical Sources', summary.canonical_source_count ?? bundleDebug.canonical_source_count ?? 0],
+                ['Structures', summary.structure_count ?? bundleDebug.structure_count ?? 0],
+                ['Validation', validationPassed ? 'passed' : 'failed'],
+                ['Omitted Previews', bundleDebug.omitted_preview_count ?? 0],
+            ].map(function (item) {
+                return '<div class="rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-3 text-sm">' +
+                    '<div class="text-xs uppercase tracking-[0.15em] text-slate-500">' + escapeHtml(item[0]) + '</div>' +
+                    '<div class="mt-2 text-slate-200">' + escapeHtml(item[1]) + '</div>' +
+                    '</div>';
+            }).join('');
+
+            const findings = Array.isArray(validation.findings) ? validation.findings : [];
+            const riskFlags = Array.isArray(summary.risk_flags) ? summary.risk_flags : [];
+            const assetCounts = Array.isArray(summary.asset_counts) ? summary.asset_counts : [];
+            const validationTone = validationPassed
+                ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200'
+                : 'border-amber-400/20 bg-amber-500/10 text-amber-100';
+            validationBox.innerHTML =
+                '<div class="rounded-2xl border px-4 py-4 ' + validationTone + '">' +
+                    '<div class="flex flex-wrap items-center justify-between gap-3">' +
+                        '<div class="font-medium">Primary Check: Validation + Findings</div>' +
+                        '<div class="text-xs">' + (validationPassed ? 'safe preview allowed' : 'preview withheld') + '</div>' +
+                    '</div>' +
+                    '<div class="mt-3 space-y-2 text-sm">' +
+                        (findings.length
+                            ? findings.map(function (finding) {
+                                return '<div class="rounded-xl border border-white/10 bg-black/20 px-3 py-3">' +
+                                    '<div class="font-medium">' + escapeHtml(finding.code || '-') + '</div>' +
+                                    '<div class="mt-1 text-xs text-slate-200">' + escapeHtml(finding.message || '-') + '</div>' +
+                                    '</div>';
+                            }).join('')
+                            : '<div class="text-sm">위반 사항이 없습니다.</div>') +
+                    '</div>' +
+                '</div>' +
+                '<div class="rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-4">' +
+                    '<div class="text-xs uppercase tracking-[0.15em] text-slate-500">Secondary Check: Summary + Risk Flags</div>' +
+                    '<div class="mt-3 space-y-2 text-sm">' +
+                        (assetCounts.length
+                            ? assetCounts.map(function (item) {
+                                return '<div class="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/20 px-3 py-2">' +
+                                    '<span>' + escapeHtml(item.asset_name || item.asset_id || '-') + '</span>' +
+                                    '<span class="text-slate-400">' + escapeHtml(item.replacement_count ?? 0) + '</span>' +
+                                    '</div>';
+                            }).join('')
+                            : '<div class="text-sm text-slate-500">표시할 자산 요약이 없습니다.</div>') +
+                    '</div>' +
+                    (riskFlags.length
+                        ? '<div class="mt-4 flex flex-wrap gap-2">' + riskFlags.map(function (flag) {
+                            return '<span class="rounded-full border border-amber-400/20 bg-amber-500/10 px-3 py-1 text-xs text-amber-100">' + escapeHtml(flag) + '</span>';
+                        }).join('') + '</div>'
+                        : '') +
+                '</div>';
+
+            if (!validationPassed) {
+                previewPanel.classList.add('hidden');
+                previewBox.innerHTML = '';
+                return;
+            }
+            previewPanel.classList.remove('hidden');
+            previewBox.innerHTML = previews.length
+                ? previews.map(function (preview) {
+                    return '<article class="rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-4">' +
+                        '<div class="flex items-start justify-between gap-3">' +
+                            '<div>' +
+                                '<div class="text-sm font-medium text-slate-100">' + escapeHtml(preview.asset_name || preview.asset_id || '-') + '</div>' +
+                                '<div class="mt-1 text-xs text-slate-500">asset_id: ' + escapeHtml(preview.asset_id || '-') + ' · lang: ' + escapeHtml(preview.language || '-') + ' · replacements: ' + escapeHtml(preview.replacement_count ?? 0) + '</div>' +
+                            '</div>' +
+                        '</div>' +
+                        '<div class="mt-3 text-[11px] uppercase tracking-[0.15em] text-slate-500">Preview is supporting evidence only, not canonical content</div>' +
+                        '<pre class="mt-3 rounded-xl border border-white/10 bg-black/20 p-3 text-xs leading-6 text-slate-200 whitespace-pre-wrap break-words">' + escapeHtml(preview.preview_text || '') + '</pre>' +
+                        '</article>';
+                }).join('')
+                : '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-4 text-sm text-slate-500">표시할 preview가 없습니다.</div>';
         }
 
         function renderStepTrace(events) {
@@ -282,6 +435,7 @@
             renderStepTrace(events);
             renderToolUsage(events);
             renderPromptResponse(events);
+            renderAnonymization(latestAnonymizationDebug(events));
             document.getElementById('rawEvents').textContent = JSON.stringify(events, null, 2);
             document.getElementById('rawSnapshot').textContent = JSON.stringify(state.raw || snapshot, null, 2);
             document.getElementById('linkOperator').href = '/operator-console?run_id=' + encodeURIComponent(snapshot.run_id);

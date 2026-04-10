@@ -16,7 +16,7 @@
             </div>
             <nav class="flex flex-wrap gap-2 text-sm">
                 <a id="linkRuns" href="/runs" class="px-4 py-2 rounded-full border border-white/10 hover:bg-white/5">Runs</a>
-                <a id="linkUser" href="/user-console" class="px-4 py-2 rounded-full border border-white/10 hover:bg-white/5">User</a>
+                <a id="linkUser" href="/projects" class="px-4 py-2 rounded-full border border-white/10 hover:bg-white/5">Workspace</a>
                 <a id="linkDev" href="/dev-console" class="px-4 py-2 rounded-full border border-white/10 hover:bg-white/5">Dev Console</a>
             </nav>
         </header>
@@ -153,8 +153,11 @@
             document.getElementById('controlState').textContent = message;
         }
 
-        function updateLinks(runId) {
-            document.getElementById('linkUser').href = '/user-console?run_id=' + encodeURIComponent(runId);
+        function updateLinks(runId, snapshot) {
+            const preferredUserUrl = snapshot && snapshot.preferred_user_url
+                ? snapshot.preferred_user_url
+                : ('/runs?focus_run_id=' + encodeURIComponent(runId));
+            document.getElementById('linkUser').href = preferredUserUrl;
             document.getElementById('linkDev').href = '/dev-console?run_id=' + encodeURIComponent(runId);
         }
 
@@ -173,7 +176,7 @@
             document.getElementById('currentStep').textContent = current ? (current.title || current.todo_id || '-') : '진행 중인 단계 없음';
             document.getElementById('summaryBox').textContent = snap.summary || '요약이 아직 없습니다.';
             setControlAvailability(snap);
-            updateLinks(snap.run_id);
+            updateLinks(snap.run_id, snap);
             const badge = document.getElementById('statusBadge');
             badge.className = 'px-3 py-1 rounded-full text-xs border ' + statusTone(snap.status);
             badge.textContent = snap.status || 'idle';

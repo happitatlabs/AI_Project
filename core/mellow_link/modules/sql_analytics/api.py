@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from mellow_link.infra import get_current_user, get_db, User
-from mellow_link.routers.runs import _resolve_run_session_id
+from mellow_link.routers.runs import _resolve_project_context_for_run, _resolve_run_session_id
 from mellow_link.infra.run_events import create_run
 
 from .runner import start_sql_analytics_run
@@ -31,4 +32,6 @@ def start_sql_analytics(
     session_id = _resolve_run_session_id(db, user, None)
     run_id = create_run(session_id=session_id, db=db, module_id="sql_analytics", run_kind="sql_analysis")
     start_sql_analytics_run(run_id=run_id, session_id=session_id, question=payload.question, input_type=payload.input_type)
-    return SQLAnalyticsStartResponse(run_id=run_id, session_id=session_id)
+    project_context = _resolve_project_context_for_run(run_id, db)
+    preferred_user_url = (project_context or {}).get("preferred_user_url") or f"/runs?focus_run_id={quote(run_id)}"
+    return SQLAnalyticsStartResponse(run_id=run_id, session_id=session_id, preferred_user_url=preferred_user_url)
