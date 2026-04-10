@@ -56,8 +56,42 @@ V0 범위는 전체 시스템 마이그레이션이 아니라 단일 기능 수�
 
 - UI 안내: `/modules/rebuild_assistant`
 - 실제 실행 시작점: `/projects/create`
+- 프로젝트 워크스페이스: `/projects/{project_id}`
+- 결과 패키지: `/projects/{project_id}/result?surface_mode=internal|external`
 - 기본 실행선: `project -> anonymization -> SafeAnalysisBundle -> rebuild_assistant`
 - 참고: `POST /modules/rebuild_assistant/runs` 는 더 이상 공개 실행 경로가 아니며 차단됩니다.
+
+`/modules/rebuild_assistant`는 현재 실행 화면이 아니라 안내 진입점이다.
+프로젝트 생성, 업로드, 고객 요구 입력, 실제 run 생성은 `/projects/create` 기준으로 동작한다.
+
+## 현재 결과 패키지 표면
+
+결과 패키지는 현재 `internal`과 `external` 두 표면으로 분리된다.
+
+- `internal`
+  - 의사결정 문서형 결과 화면
+  - 기본 본문은 `결정 요약 -> 고객이 원하는 방향 -> 구조 비교 -> 근거 자산`
+  - `설계 선택지`, `실행 계획`, `리스크`, `판단 상세 참고`, `부록`은 접힘 섹션으로 노출
+  - `판단 상세 참고`에는 review diff 기반 판단 상세가 포함되지만, 본문 구조 비교와 역할을 분리한다
+- `external`
+  - 외부 공유용 축약 화면
+  - 상단은 `핵심 판단 -> 왜 이 방향인가 -> 다음 단계` 3카드 중심으로 노출
+  - 구조 비교는 익명화된 실제 패턴과 일반화된 권장 패턴만 보여주며 원문 해제는 지원하지 않는다
+  - review diff, decision governance, raw/canonical content, mapping, 내부 식별자(`DEC-*`)는 직접 노출하지 않는다
+
+## 구조 비교 해석
+
+현재 구조 비교는 코드 패치 미리보기가 아니라 판단을 돕는 익명화 비교 카드다.
+
+- `현재 구조`
+  - 실제 자산에서 관찰된 구조를 익명화해 보여준다
+- `권장 구조`
+  - 개선 방향을 설명하기 위한 일반화 패턴이다
+- `차이 설명` 또는 external의 `이렇게 달라집니다`
+  - 무엇을 해야 하는지가 아니라 왜 이 분리가 변경 영향을 줄이는지를 효과 중심으로 설명한다
+
+inline unmask 토글은 제공하지 않는다.
+원문 접근이 필요하면 별도 권한 표면으로 분리하는 방향을 기준으로 유지한다.
 
 ## 입력
 
