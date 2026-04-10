@@ -1,0 +1,4 @@
+Operator note: primary contact ops-team@corp.local, backup phone "010-4444-2222".
+Escalate on host "db-billing.internal.example.com" and file "/srv/legacy/private/customer_exports/report.csv".
+Temporary token "tok_live_sensitive_123" must not reach preview.
+

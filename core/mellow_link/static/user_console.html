@@ -103,6 +103,14 @@
                 </div>
             </section>
 
+            <section id="anonymizationSection" class="hidden">
+                <div class="rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">입력 익명화</p>
+                    <h2 class="mt-3 text-xl font-semibold">Safe Bundle 노출 요약</h2>
+                    <div id="anonymizationBox" class="mt-4 space-y-4"></div>
+                </div>
+            </section>
+
             <section class="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
                 <div class="rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
                     <p class="text-xs uppercase tracking-[0.24em] text-slate-500">재분석</p>
@@ -301,6 +309,58 @@
             }).join('');
         }
 
+        function renderAnonymizationSummary(summary) {
+            const section = document.getElementById('anonymizationSection');
+            const box = document.getElementById('anonymizationBox');
+            if (!section || !box) return;
+            if (!summary || typeof summary !== 'object') {
+                section.classList.add('hidden');
+                box.innerHTML = '';
+                return;
+            }
+            section.classList.remove('hidden');
+            const validationPassed = Boolean(summary.validation_passed);
+            const validationTone = validationPassed
+                ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200'
+                : 'border-amber-400/20 bg-amber-500/10 text-amber-100';
+            const assetCounts = (summary.asset_counts || []).map(function (item) {
+                return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-200">' +
+                    '<div class="font-medium">' + escapeHtml(item.asset_name || item.asset_id || '-') + '</div>' +
+                    '<div class="mt-1 text-xs text-slate-400">asset_id: ' + escapeHtml(item.asset_id || '-') + ' · replacements: ' + escapeHtml(item.replacement_count || 0) + '</div>' +
+                    '</div>';
+            }).join('');
+            const riskFlags = (summary.risk_flags || []).map(function (flag) {
+                return '<span class="rounded-full border border-amber-400/20 bg-amber-500/10 px-3 py-1 text-xs text-amber-100">' + escapeHtml(flag) + '</span>';
+            }).join('');
+            box.innerHTML =
+                '<div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">' +
+                    '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm"><div class="text-xs uppercase tracking-[0.18em] text-slate-500">Applied</div><div class="mt-2 text-slate-100">' + (summary.applied ? 'Yes' : 'No') + '</div></div>' +
+                    '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm"><div class="text-xs uppercase tracking-[0.18em] text-slate-500">Policy</div><div class="mt-2 text-slate-100">' + escapeHtml(summary.policy_version || '-') + '</div></div>' +
+                    '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm"><div class="text-xs uppercase tracking-[0.18em] text-slate-500">Masking Level</div><div class="mt-2 text-slate-100">' + escapeHtml(summary.masking_level || '-') + '</div></div>' +
+                    '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm"><div class="text-xs uppercase tracking-[0.18em] text-slate-500">Total Replacements</div><div class="mt-2 text-slate-100">' + escapeHtml(summary.total_replacements || 0) + '</div></div>' +
+                    '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm"><div class="text-xs uppercase tracking-[0.18em] text-slate-500">Canonical Sources</div><div class="mt-2 text-slate-100">' + escapeHtml(summary.canonical_source_count || 0) + '</div></div>' +
+                    '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm"><div class="text-xs uppercase tracking-[0.18em] text-slate-500">Structures</div><div class="mt-2 text-slate-100">' + escapeHtml(summary.structure_count || 0) + '</div></div>' +
+                '</div>' +
+                '<div class="rounded-3xl border px-4 py-4 ' + validationTone + '">' +
+                    '<div class="flex flex-wrap items-center justify-between gap-3">' +
+                        '<div class="text-sm font-medium">Validation</div>' +
+                        '<div class="text-xs">' + (validationPassed ? 'passed' : 'failed') + '</div>' +
+                    '</div>' +
+                '</div>' +
+                '<div>' +
+                    '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">Asset Replacement Counts</div>' +
+                    '<div class="mt-3 grid gap-3 md:grid-cols-2">' +
+                        (assetCounts || '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-4 text-sm text-slate-500">표시할 자산별 치환 수가 없습니다.</div>') +
+                    '</div>' +
+                    ((summary.omitted_asset_count || 0) > 0
+                        ? '<div class="mt-3 text-xs text-slate-500">추가 생략 자산 수: ' + escapeHtml(summary.omitted_asset_count || 0) + '</div>'
+                        : '') +
+                '</div>' +
+                ((summary.risk_flags || []).length
+                    ? '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">Risk Flags</div><div class="mt-3 flex flex-wrap gap-2">' + riskFlags + '</div></div>'
+                    : '');
+        }
+
         async function uploadAdditionalAsset() {
             const input = document.getElementById('reanalysisFile');
             const statusNode = document.getElementById('uploadActionState');
@@ -418,6 +478,7 @@
             renderList('rulesBox', insights.rules || [], status === 'running' ? '결과 생성 중' : '데이터 없음');
             renderMissing(payload.missing_context_details || [], status);
             renderAssets(payload.assets || project.asset_manifest || []);
+            renderAnonymizationSummary(snapshot.anonymization_summary);
             renderPendingAssets();
             renderRunHistory(payload.run_history || []);
             document.getElementById('resultLink').href = '/projects/' + encodeURIComponent(project.id) + '/result';

@@ -5,6 +5,7 @@ from typing import Callable
 
 from mellow_link import app_state
 from mellow_link.infra.run_events import (
+    EVENT_TYPE_DEBUG_ANONYMIZATION_REPORT,
     EVENT_TYPE_LOG,
     EVENT_TYPE_PLAN_CREATED,
     EVENT_TYPE_RUN_FINISHED,
@@ -13,6 +14,7 @@ from mellow_link.infra.run_events import (
     EVENT_TYPE_TODO_STARTED,
     emit_event,
 )
+from mellow_link.services.anonymization import build_debug_anonymization_report_from_bundle
 from mellow_link.services.anonymization.schemas import SafeAnalysisBundle
 from mellow_link.services.refactoring_support_engine.narrative_augmentation import (
     NarrativeAugmentationService,
@@ -39,6 +41,7 @@ def _spawn_rebuild_run(
     goal: str,
     prepare_input: Callable[[RebuildAssistantService], object],
     run_meta: dict,
+    safe_bundle: SafeAnalysisBundle | None = None,
 ) -> None:
     todos = _rebuild_todos()
     narrative_augmentation = NarrativeAugmentationService()
@@ -46,6 +49,7 @@ def _spawn_rebuild_run(
     def _run() -> None:
         service = RebuildAssistantService()
         template_support = TemplateSupport()
+        anonymization_summary = None
         try:
             emit_event(
                 run_id,
@@ -61,6 +65,23 @@ def _spawn_rebuild_run(
 
             emit_event(run_id, EVENT_TYPE_TODO_STARTED, todos[0])
             prepared = prepare_input(service)
+            if safe_bundle is not None:
+                debug_report = build_debug_anonymization_report_from_bundle(safe_bundle)
+                anonymization_summary = debug_report["report_summary"]
+                emit_event(run_id, EVENT_TYPE_DEBUG_ANONYMIZATION_REPORT, debug_report)
+                emit_event(
+                    run_id,
+                    EVENT_TYPE_LOG,
+                    {
+                        "level": "info",
+                        "message": "anonymization bundle ready",
+                        "policy_version": debug_report["policy_version"],
+                        "masking_level": anonymization_summary["masking_level"],
+                        "applied": anonymization_summary["applied"],
+                        "total_replacements": anonymization_summary["total_replacements"],
+                        "validation_passed": anonymization_summary["validation_passed"],
+                    },
+                )
             emit_event(
                 run_id,
                 EVENT_TYPE_LOG,
@@ -158,6 +179,7 @@ def _spawn_rebuild_run(
                     "narrative_axis": result.narrative_axis,
                     "feature_signal_mode": result.feature_signal_mode,
                     "judgment_template_key": primary_template_id,
+                    "anonymization_summary": anonymization_summary,
                 },
             )
         except Exception as e:
@@ -169,6 +191,7 @@ def _spawn_rebuild_run(
                     "summary": f"Rebuild assistant failed: {str(e)[:300]}",
                     "module_id": "rebuild_assistant",
                     "run_kind": "rebuild_plan",
+                    "anonymization_summary": anonymization_summary,
                 },
             )
 
@@ -192,4 +215,5 @@ def start_rebuild_assistant_safe_bundle_run(
             constraints=constraints,
         ),
         run_meta={"safe_bundle_id": safe_bundle.bundle_id},
+        safe_bundle=safe_bundle,
     )

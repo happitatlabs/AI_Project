@@ -151,8 +151,23 @@ def test_explanation_presenter_hides_review_diff_preview_for_external_surface():
     assert external.review_diff_preview.evidence_signals == []
     assert external.review_diff_preview.blocked_decisions == []
     assert internal.taxonomy_view.model_dump() == external.taxonomy_view.model_dump()
-    assert [item.model_dump() for item in internal.summary_cards] == [item.model_dump() for item in external.summary_cards]
-    assert [item.model_dump() for item in internal.section_views] == [item.model_dump() for item in external.section_views]
+    assert [card.card_key for card in internal.summary_cards] == ["judgment", "strategy", "priority", "execution", "scope"]
+    assert [card.card_key for card in external.summary_cards] == ["judgment", "strategy", "execution"]
+    assert [card.title for card in external.summary_cards] == ["핵심 판단", "왜 이 방향인가", "다음 단계"]
+    assert [section.section_key for section in external.section_views] == ["recommended_option", "execution_plan", "risks"]
+    assert [section.title for section in external.section_views] == ["이 방향의 효과", "진행 흐름", "주의할 영향"]
+    external_text = " ".join(card.body for card in external.summary_cards) + " " + " ".join(section.text for section in external.section_views)
+    assert "decision type" not in external_text.lower()
+    assert "severity" not in external_text.lower()
+    assert "blast radius" not in external_text.lower()
+    assert "해야" not in external_text
+    assert "필요합니다" not in external_text
+    assert "Decision Brief" not in external_text
+    assert "ready" not in external_text.lower()
+    for card in external.summary_cards:
+        assert all(not citation.decision_id and not citation.issue_id and not citation.evidence_id and not citation.locator for citation in card.citations)
+    for section in external.section_views:
+        assert all(not citation.decision_id and not citation.issue_id and not citation.evidence_id and not citation.locator for citation in section.citations)
     assert internal.provenance["access_profile"] == "internal_full"
     assert internal.provenance["review_diff_surface"] == "preview_only"
     assert internal.provenance["review_diff_surface_policy"] == "visible"
@@ -410,6 +425,22 @@ def test_result_explanation_and_qa_endpoints_are_additive_and_read_only(client, 
     assert external_body["provenance"]["review_diff_surface_policy"] == "hidden_by_policy"
     assert external_body["provenance"]["field_visibility"]["review_diff"] == "hidden_by_policy"
     assert external_body["taxonomy_view"] == client_body["taxonomy_view"]
+    assert [card["card_key"] for card in external_body["summary_cards"]] == ["judgment", "strategy", "execution"]
+    assert [card["title"] for card in external_body["summary_cards"]] == ["핵심 판단", "왜 이 방향인가", "다음 단계"]
+    assert [section["section_key"] for section in external_body["section_views"]] == ["recommended_option", "execution_plan", "risks"]
+    assert [section["title"] for section in external_body["section_views"]] == ["이 방향의 효과", "진행 흐름", "주의할 영향"]
+    external_text = " ".join(card["body"] for card in external_body["summary_cards"]) + " " + " ".join(section["text"] for section in external_body["section_views"])
+    assert "decision type" not in external_text.lower()
+    assert "severity" not in external_text.lower()
+    assert "blast radius" not in external_text.lower()
+    assert "해야" not in external_text
+    assert "필요합니다" not in external_text
+    assert "Decision Brief" not in external_text
+    assert "ready" not in external_text.lower()
+    for card in external_body["summary_cards"]:
+        assert all(not citation["decision_id"] and not citation["issue_id"] and not citation["evidence_id"] and not citation["locator"] for citation in card["citations"])
+    for section in external_body["section_views"]:
+        assert all(not citation["decision_id"] and not citation["issue_id"] and not citation["evidence_id"] and not citation["locator"] for citation in section["citations"])
     assert "primary_judgment" not in developer_body["taxonomy_view"]
     assert "template_judgment" not in developer_body["taxonomy_view"]
     assert "feature_signal_mode" not in developer_body["taxonomy_view"]

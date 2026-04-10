@@ -52,5 +52,6 @@ def test_query_filter_low_intensity_sample_summary_has_no_immediate_decision():
         needs_more_input=bool(result.missing_context),
     )
 
-    assert "즉시 결정할 항목이 없습니다." in summary
+    assert "## 실행 조치" in summary
+    assert "즉시 결정할 항목이 없습니다." not in summary
     assert "주문 마감" not in summary

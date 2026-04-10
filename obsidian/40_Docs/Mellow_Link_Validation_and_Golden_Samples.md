@@ -31,6 +31,19 @@ status: current
 2. 기대값이 바뀌면 코드와 문서를 같은 변경에서 갱신
 3. golden sample이 깨졌는데 문서 갱신이 없으면 변경 완료로 보지 않음
 
+## 최근 상태
+
+2026-04-09 기준 recent regression 처리:
+
+- golden failure triage 결과 `update_golden 4건`, `fix_engine 1건`으로 정리됐다.
+- `01. java_order_closure_case_01`은 fallback `first_entry_point` regression을 수정한 뒤 baseline을 갱신했다.
+- `00. rca_exception_case_01`, `02. python_claim_adjustment_case_01`, `04. amount_limit`, `01_success_full`은 current policy 기준 정상 drift로 문서화 후 expectation을 갱신했다.
+- promoted expansion regression 4건도 current deterministic output에 맞춰 expected assertions를 다시 동기화했다.
+
+상세 메모:
+
+- [[Golden_Failure_Triage_and_Update_2026-04-09]]
+
 ## 확장 샘플 풀
 
 주요 promoted expansion regression 대상:
@@ -74,3 +87,4 @@ status: current
 - 거버넌스/QA: [[Mellow_Link_Engine_Governance_and_QA]]
 - 제품/로드맵: [[Mellow_Link_Product_and_Roadmap]]
 - 엔진 기준: [[Refactoring_Support_Engine]]
+- validation 세부 메모: [[Golden_Failure_Triage_and_Update_2026-04-09]]

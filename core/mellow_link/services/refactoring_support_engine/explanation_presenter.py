@@ -46,6 +46,13 @@ AUDIENCE_LABELS: dict[str, dict[str, str]] = {
     },
 }
 
+STRUCTURAL_JUDGMENT_LABELS: dict[str, str] = {
+    "refactor": "책임 분리형 개선",
+    "redesign": "구조 재설계",
+    "migration_consideration": "단계적 전환 검토",
+    "observation_only": "추가 관찰 필요",
+}
+
 
 SECTION_TITLES: dict[str, str] = {
     "report_purpose": "보고 목적",
@@ -94,125 +101,81 @@ class ExplanationPresenter:
         scope_citations = self._scope_citations(structure_snapshot, evidence_map=evidence_map)
         risk_citations = self._risk_citations(improvement_plan_bundle, top_decision=top_decision, evidence_map=evidence_map, issue_map=issue_map)
 
-        summary_cards = [
-            ResultExplanationSummaryCard(
-                card_key="judgment",
-                title=AUDIENCE_LABELS[normalized_audience]["judgment"],
-                body=self._judgment_body(
-                    audience=normalized_audience,
-                    structural_judgment=structural_judgment,
-                    recommended_strategy=str(decision_summary.get("recommended_strategy") or "-"),
-                    top_decision=top_decision,
-                ),
-                citations=strategy_citations,
-            ),
-            ResultExplanationSummaryCard(
-                card_key="strategy",
-                title=AUDIENCE_LABELS[normalized_audience]["strategy"],
-                body=self._strategy_body(
-                    audience=normalized_audience,
-                    recommended_strategy=str(decision_summary.get("recommended_strategy") or "-"),
-                    top_decision=top_decision,
-                    top_issue=top_issue,
-                ),
-                citations=strategy_citations,
-            ),
-            ResultExplanationSummaryCard(
-                card_key="priority",
-                title=AUDIENCE_LABELS[normalized_audience]["priority"],
-                body=self._priority_body(audience=normalized_audience, top_decision=top_decision),
-                citations=strategy_citations,
-            ),
-            ResultExplanationSummaryCard(
-                card_key="execution",
-                title=AUDIENCE_LABELS[normalized_audience]["execution"],
-                body=self._execution_body(
-                    audience=normalized_audience,
-                    execution_stages=improvement_plan_bundle.get("execution_stages"),
-                    top_stage=top_stage,
-                ),
-                citations=stage_citations,
-            ),
-            ResultExplanationSummaryCard(
-                card_key="scope",
-                title=AUDIENCE_LABELS[normalized_audience]["scope"],
-                body=self._scope_body(audience=normalized_audience, coverage_summary=coverage_summary),
-                citations=scope_citations,
-            ),
-        ]
-
-        section_views: list[ResultExplanationSectionView] = []
-        section_views.append(
-            ResultExplanationSectionView(
-                section_key="report_purpose",
-                title=SECTION_TITLES["report_purpose"],
-                audience=normalized_audience,
-                text=self._section_text(
-                    section_key="report_purpose",
-                    audience=normalized_audience,
-                    result_package=result_package,
-                    polished_sections=polished_sections,
-                ),
-                citations=strategy_citations,
+        if normalized_surface_mode == "external":
+            external_strategy_citations = self._externalize_citations(strategy_citations)
+            external_stage_citations = self._externalize_citations(stage_citations)
+            external_risk_citations = self._externalize_citations(risk_citations)
+            summary_cards = self._external_summary_cards(
+                structural_judgment=structural_judgment,
+                recommended_strategy=str(decision_summary.get("recommended_strategy") or "-"),
+                top_decision=top_decision,
+                top_issue=top_issue,
+                top_stage=top_stage,
+                strategy_citations=external_strategy_citations,
+                stage_citations=external_stage_citations,
             )
-        )
-        section_views.append(
-            ResultExplanationSectionView(
-                section_key="one_line_conclusion",
-                title=SECTION_TITLES["one_line_conclusion"],
+            section_views = self._external_section_views(
                 audience=normalized_audience,
-                text=self._section_text(
-                    section_key="one_line_conclusion",
-                    audience=normalized_audience,
-                    result_package=result_package,
-                    polished_sections=polished_sections,
-                ),
-                citations=strategy_citations,
+                result_package=result_package,
+                strategy_citations=external_strategy_citations,
+                stage_citations=external_stage_citations,
+                risk_citations=external_risk_citations,
             )
-        )
-        section_views.append(
-            ResultExplanationSectionView(
-                section_key="recommended_option",
-                title=SECTION_TITLES["recommended_option"],
+        else:
+            summary_cards = [
+                ResultExplanationSummaryCard(
+                    card_key="judgment",
+                    title=AUDIENCE_LABELS[normalized_audience]["judgment"],
+                    body=self._judgment_body(
+                        audience=normalized_audience,
+                        structural_judgment=structural_judgment,
+                        recommended_strategy=str(decision_summary.get("recommended_strategy") or "-"),
+                        top_decision=top_decision,
+                    ),
+                    citations=strategy_citations,
+                ),
+                ResultExplanationSummaryCard(
+                    card_key="strategy",
+                    title=AUDIENCE_LABELS[normalized_audience]["strategy"],
+                    body=self._strategy_body(
+                        audience=normalized_audience,
+                        recommended_strategy=str(decision_summary.get("recommended_strategy") or "-"),
+                        top_decision=top_decision,
+                        top_issue=top_issue,
+                    ),
+                    citations=strategy_citations,
+                ),
+                ResultExplanationSummaryCard(
+                    card_key="priority",
+                    title=AUDIENCE_LABELS[normalized_audience]["priority"],
+                    body=self._priority_body(audience=normalized_audience, top_decision=top_decision),
+                    citations=strategy_citations,
+                ),
+                ResultExplanationSummaryCard(
+                    card_key="execution",
+                    title=AUDIENCE_LABELS[normalized_audience]["execution"],
+                    body=self._execution_body(
+                        audience=normalized_audience,
+                        execution_stages=improvement_plan_bundle.get("execution_stages"),
+                        top_stage=top_stage,
+                    ),
+                    citations=stage_citations,
+                ),
+                ResultExplanationSummaryCard(
+                    card_key="scope",
+                    title=AUDIENCE_LABELS[normalized_audience]["scope"],
+                    body=self._scope_body(audience=normalized_audience, coverage_summary=coverage_summary),
+                    citations=scope_citations,
+                ),
+            ]
+            section_views = self._internal_section_views(
                 audience=normalized_audience,
-                text=self._section_text(
-                    section_key="recommended_option",
-                    audience=normalized_audience,
-                    result_package=result_package,
-                    polished_sections=polished_sections,
-                ),
-                citations=strategy_citations,
+                result_package=result_package,
+                polished_sections=polished_sections,
+                strategy_citations=strategy_citations,
+                stage_citations=stage_citations,
+                risk_citations=risk_citations,
             )
-        )
-        section_views.append(
-            ResultExplanationSectionView(
-                section_key="execution_plan",
-                title=SECTION_TITLES["execution_plan"],
-                audience=normalized_audience,
-                text=self._section_text(
-                    section_key="execution_plan",
-                    audience=normalized_audience,
-                    result_package=result_package,
-                    polished_sections=polished_sections,
-                ),
-                citations=stage_citations,
-            )
-        )
-        section_views.append(
-            ResultExplanationSectionView(
-                section_key="risks",
-                title=SECTION_TITLES["risks"],
-                audience=normalized_audience,
-                text=self._section_text(
-                    section_key="risks",
-                    audience=normalized_audience,
-                    result_package=result_package,
-                    polished_sections=polished_sections,
-                ),
-                citations=risk_citations,
-            )
-        )
-        section_views = [section for section in section_views if section.text.strip()]
 
         warnings = list(polish_bundle.get("warnings") or []) if polish_bundle else []
         if not polish_bundle:
@@ -294,6 +257,50 @@ class ExplanationPresenter:
             f"상위 개선 방식은 {decision_type}입니다."
         )
 
+    def _external_judgment_body(
+        self,
+        *,
+        structural_judgment: str,
+        recommended_strategy: str,
+    ) -> str:
+        label = self._humanize_structural_judgment(structural_judgment)
+        strategy = recommended_strategy or "리팩터링 우선"
+        return f"현재 구조는 {label} 성격이 강해, {strategy} 방향이 변경 영향을 더 작게 유지합니다."
+
+    def _external_strategy_body(
+        self,
+        *,
+        recommended_strategy: str,
+        top_decision: dict[str, Any],
+        top_issue: dict[str, Any],
+    ) -> str:
+        rationale = self._compress_external_sentence(
+            str(top_decision.get("rationale") or "").strip() or str(top_issue.get("summary") or "").strip()
+        )
+        if rationale:
+            return f"문제의 중심이 {rationale}에 있어, {recommended_strategy} 방향이 회귀 범위를 줄입니다."
+        return f"{recommended_strategy} 방향은 책임 경계를 나눠 변경 범위를 작게 유지합니다."
+
+    def _external_execution_body(
+        self,
+        *,
+        top_stage: dict[str, Any],
+        top_decision: dict[str, Any],
+    ) -> str:
+        stage_title = self._compress_external_sentence(str(top_stage.get("title") or "").strip())
+        rationale = self._compress_external_sentence(str(top_decision.get("rationale") or "").strip())
+        if stage_title and rationale:
+            return f"첫 단계에서 {stage_title}를 먼저 정하면, {rationale}와 연결된 변경 범위가 흔들리지 않습니다."
+        if stage_title:
+            return f"첫 단계에서 {stage_title}를 먼저 정하면, 후속 변경 순서가 더 안정적으로 고정됩니다."
+        return "첫 단계에서 범위와 책임 경계를 먼저 정하면, 후속 설계와 구현 범위가 흔들리지 않습니다."
+
+    def _humanize_structural_judgment(self, structural_judgment: str) -> str:
+        normalized = str(structural_judgment or "").strip()
+        if not normalized:
+            return "추가 관찰이 필요한"
+        return STRUCTURAL_JUDGMENT_LABELS.get(normalized, normalized)
+
     def _polished_section_map(self, polish_bundle: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
         if not polish_bundle:
             return {}
@@ -328,6 +335,165 @@ class ExplanationPresenter:
             if issue_id:
                 output[issue_id] = item
         return output
+
+    def _internal_section_views(
+        self,
+        *,
+        audience: str,
+        result_package: dict[str, Any],
+        polished_sections: dict[str, dict[str, Any]],
+        strategy_citations: list[ResultCitation],
+        stage_citations: list[ResultCitation],
+        risk_citations: list[ResultCitation],
+    ) -> list[ResultExplanationSectionView]:
+        section_views: list[ResultExplanationSectionView] = []
+        section_views.append(
+            ResultExplanationSectionView(
+                section_key="report_purpose",
+                title=SECTION_TITLES["report_purpose"],
+                audience=audience,
+                text=self._section_text(
+                    section_key="report_purpose",
+                    audience=audience,
+                    result_package=result_package,
+                    polished_sections=polished_sections,
+                ),
+                citations=strategy_citations,
+            )
+        )
+        section_views.append(
+            ResultExplanationSectionView(
+                section_key="one_line_conclusion",
+                title=SECTION_TITLES["one_line_conclusion"],
+                audience=audience,
+                text=self._section_text(
+                    section_key="one_line_conclusion",
+                    audience=audience,
+                    result_package=result_package,
+                    polished_sections=polished_sections,
+                ),
+                citations=strategy_citations,
+            )
+        )
+        section_views.append(
+            ResultExplanationSectionView(
+                section_key="recommended_option",
+                title=SECTION_TITLES["recommended_option"],
+                audience=audience,
+                text=self._section_text(
+                    section_key="recommended_option",
+                    audience=audience,
+                    result_package=result_package,
+                    polished_sections=polished_sections,
+                ),
+                citations=strategy_citations,
+            )
+        )
+        section_views.append(
+            ResultExplanationSectionView(
+                section_key="execution_plan",
+                title=SECTION_TITLES["execution_plan"],
+                audience=audience,
+                text=self._section_text(
+                    section_key="execution_plan",
+                    audience=audience,
+                    result_package=result_package,
+                    polished_sections=polished_sections,
+                ),
+                citations=stage_citations,
+            )
+        )
+        section_views.append(
+            ResultExplanationSectionView(
+                section_key="risks",
+                title=SECTION_TITLES["risks"],
+                audience=audience,
+                text=self._section_text(
+                    section_key="risks",
+                    audience=audience,
+                    result_package=result_package,
+                    polished_sections=polished_sections,
+                ),
+                citations=risk_citations,
+            )
+        )
+        return [section for section in section_views if section.text.strip()]
+
+    def _external_summary_cards(
+        self,
+        *,
+        structural_judgment: str,
+        recommended_strategy: str,
+        top_decision: dict[str, Any],
+        top_issue: dict[str, Any],
+        top_stage: dict[str, Any],
+        strategy_citations: list[ResultCitation],
+        stage_citations: list[ResultCitation],
+    ) -> list[ResultExplanationSummaryCard]:
+        return [
+            ResultExplanationSummaryCard(
+                card_key="judgment",
+                title="핵심 판단",
+                body=self._external_judgment_body(
+                    structural_judgment=structural_judgment,
+                    recommended_strategy=recommended_strategy,
+                ),
+                citations=strategy_citations,
+            ),
+            ResultExplanationSummaryCard(
+                card_key="strategy",
+                title="왜 이 방향인가",
+                body=self._external_strategy_body(
+                    recommended_strategy=recommended_strategy,
+                    top_decision=top_decision,
+                    top_issue=top_issue,
+                ),
+                citations=strategy_citations,
+            ),
+            ResultExplanationSummaryCard(
+                card_key="execution",
+                title="다음 단계",
+                body=self._external_execution_body(
+                    top_stage=top_stage,
+                    top_decision=top_decision,
+                ),
+                citations=stage_citations,
+            ),
+        ]
+
+    def _external_section_views(
+        self,
+        *,
+        audience: str,
+        result_package: dict[str, Any],
+        strategy_citations: list[ResultCitation],
+        stage_citations: list[ResultCitation],
+        risk_citations: list[ResultCitation],
+    ) -> list[ResultExplanationSectionView]:
+        sections = [
+            ResultExplanationSectionView(
+                section_key="recommended_option",
+                title="이 방향의 효과",
+                audience=audience,
+                text=self._external_recommended_option_text(result_package),
+                citations=strategy_citations,
+            ),
+            ResultExplanationSectionView(
+                section_key="execution_plan",
+                title="진행 흐름",
+                audience=audience,
+                text=self._external_execution_plan_text(result_package),
+                citations=stage_citations,
+            ),
+            ResultExplanationSectionView(
+                section_key="risks",
+                title="주의할 영향",
+                audience=audience,
+                text=self._external_risk_text(result_package),
+                citations=risk_citations,
+            ),
+        ]
+        return [section for section in sections if section.text.strip()]
 
     def _decision_citations(
         self,
@@ -506,6 +672,67 @@ class ExplanationPresenter:
             if audience_text:
                 return audience_text
         return self._deterministic_fallback_text(section_key=section_key, result_package=result_package)
+
+    def _external_recommended_option_text(self, result_package: dict[str, Any]) -> str:
+        option = result_package.get("recommended_option") or {}
+        if not isinstance(option, dict):
+            return ""
+        lines: list[str] = []
+        structure_summary = self._compress_external_sentence(str(option.get("structure_summary") or "").strip())
+        selection_reason = self._compress_external_sentence(str(option.get("selection_reason") or "").strip())
+        outcomes = [str(item).strip() for item in option.get("expected_outcomes") or [] if str(item).strip()]
+        if structure_summary:
+            lines.append(f"이 방향은 {structure_summary}를 중심으로 경계를 나눠 변경 범위를 줄입니다.")
+        if outcomes:
+            for item in outcomes[:2]:
+                normalized = self._compress_external_sentence(str(item))
+                if normalized:
+                    lines.append(f"그 결과 {normalized}.")
+        elif selection_reason:
+            lines.append(f"그 이유는 {selection_reason}이 변경 영향을 크게 만들기 때문입니다.")
+        return "\n".join(lines)
+
+    def _external_execution_plan_text(self, result_package: dict[str, Any]) -> str:
+        output: list[str] = []
+        for item in (result_package.get("execution_plan") or [])[:2]:
+            if not isinstance(item, dict):
+                continue
+            week_label = str(item.get("week_label") or "").strip()
+            goal = self._compress_external_sentence(str(item.get("goal") or "").strip())
+            tasks = [str(task).strip() for task in item.get("tasks") or [] if str(task).strip()]
+            if week_label and goal:
+                output.append(f"{week_label}에는 {goal}을 먼저 맞춰 후속 변경 범위를 고정합니다.")
+            elif goal:
+                output.append(f"{goal}을 먼저 맞추면 다음 단계 누락을 줄일 수 있습니다.")
+            first_task = self._compress_external_sentence(tasks[0]) if tasks else ""
+            if first_task:
+                output.append(f"이 단계에서 {first_task}를 정리하면 구현 흔들림을 줄일 수 있습니다.")
+        return "\n".join(output)
+
+    def _external_risk_text(self, result_package: dict[str, Any]) -> str:
+        risks = ((result_package.get("diagnosis") or {}).get("risks") or []) if isinstance(result_package, dict) else []
+        normalized = [self._compress_external_sentence(str(risk).strip()) for risk in risks if str(risk).strip()]
+        normalized = [item for item in normalized if item]
+        return "\n".join(f"- {item}" for item in normalized[:2])
+
+    def _compress_external_sentence(self, text: str) -> str:
+        normalized = " ".join(str(text or "").split()).strip()
+        if not normalized:
+            return ""
+        normalized = normalized.rstrip(".")
+        normalized = normalized.replace("해야 합니다", "")
+        normalized = normalized.replace("해야합니다", "")
+        normalized = normalized.replace("해야 한다", "")
+        normalized = normalized.replace("검토하는 것이 필요합니다", "")
+        normalized = normalized.replace("확정하는 것이 필요합니다", "")
+        normalized = normalized.replace("정리하는 것이 필요합니다", "")
+        normalized = normalized.replace("확인하는 것이 필요합니다", "")
+        normalized = normalized.replace("필요합니다", "")
+        normalized = normalized.strip(" ,")
+        return normalized
+
+    def _externalize_citations(self, citations: list[ResultCitation]) -> list[ResultCitation]:
+        return [ResultCitation() for _ in citations]
 
     def _deterministic_fallback_text(self, *, section_key: str, result_package: dict[str, Any]) -> str:
         if section_key == "report_purpose":

@@ -163,6 +163,8 @@
             }
             body.innerHTML = filtered.map(function (run) {
                 const summary = (run.summary || '').trim() || '-';
+                const userUrl = run.preferred_user_url || ('/runs?focus_run_id=' + encodeURIComponent(run.run_id));
+                const userLabel = run.preferred_user_label === 'result' ? 'Result' : 'Workspace';
                 return '<tr class="hover:bg-white/5">' +
                     '<td class="px-4 py-3 font-mono text-cyan-300">' + run.run_id + '</td>' +
                     '<td class="px-4 py-3">' + badge(run.status) + '</td>' +
@@ -170,7 +172,7 @@
                     '<td class="px-4 py-3 text-slate-300">' + (run.run_kind || 'generic') + '</td>' +
                     '<td class="px-4 py-3 text-slate-300">' + (run.processing_time != null ? run.processing_time + 'ms' : '-') + '</td>' +
                     '<td class="px-4 py-3 text-slate-400 max-w-[28rem]"><div style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">' + summary + '</div></td>' +
-                    '<td class="px-4 py-3"><div class="flex flex-col gap-1"><a href="/user-console?run_id=' + encodeURIComponent(run.run_id) + '" class="text-cyan-300 hover:text-cyan-200">User</a><a href="/operator-console?run_id=' + encodeURIComponent(run.run_id) + '" class="text-cyan-300 hover:text-cyan-200">Operator</a><a href="/dev-console?run_id=' + encodeURIComponent(run.run_id) + '" class="text-cyan-300 hover:text-cyan-200">Dev</a></div></td>' +
+                    '<td class="px-4 py-3"><div class="flex flex-col gap-1"><a href="' + userUrl + '" class="text-cyan-300 hover:text-cyan-200">' + userLabel + '</a><a href="/operator-console?run_id=' + encodeURIComponent(run.run_id) + '" class="text-cyan-300 hover:text-cyan-200">Operator</a><a href="/dev-console?run_id=' + encodeURIComponent(run.run_id) + '" class="text-cyan-300 hover:text-cyan-200">Dev</a></div></td>' +
                     '</tr>';
             }).join('');
         }

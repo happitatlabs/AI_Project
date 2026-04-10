@@ -13,3 +13,4 @@ class AIWorkflowStartResponse(BaseModel):
     session_id: str
     module_id: str = "ai_workflow_console"
     run_kind: str = "workflow_run"
+    preferred_user_url: str

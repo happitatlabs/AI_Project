@@ -24,6 +24,11 @@
             if (token) headers['Authorization'] = 'Bearer ' + token;
             return headers;
         }
+        function resolveNextUrl(data) {
+            if (data && data.preferred_user_url) return data.preferred_user_url;
+            if (data && data.project_id) return '/projects/' + encodeURIComponent(data.project_id);
+            return '/runs?focus_run_id=' + encodeURIComponent(data.run_id);
+        }
         document.getElementById('startBtn').addEventListener('click', async function () {
             const question = (document.getElementById('question').value || '').trim();
             const error = document.getElementById('error');
@@ -40,7 +45,7 @@
                 return;
             }
             const data = await res.json();
-            window.location.href = '/user-console?run_id=' + encodeURIComponent(data.run_id);
+            window.location.href = resolveNextUrl(data);
         });
     </script>
 </body>

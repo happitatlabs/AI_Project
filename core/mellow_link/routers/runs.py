@@ -13,6 +13,7 @@ import logging
 import os
 from datetime import datetime
 from typing import Optional, Dict, Any, List
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks, Request
 from fastapi.responses import StreamingResponse, HTMLResponse
@@ -28,7 +29,7 @@ from mellow_link.infra import (
     ensure_user_has_folders,
     get_or_create_default_session,
 )
-from mellow_link.infra.database import AgentRun, ChatSession, User
+from mellow_link.infra.database import AgentRun, ChatSession, ModernizationProject, ProjectRunHistory, User
 from mellow_link.infra.run_events import (
     create_run,
     emit_event,
@@ -126,6 +127,41 @@ def _calc_duration_ms(run: AgentRun, events: List[Dict[str, Any]]) -> Optional[i
     return None
 
 
+def _resolve_project_context_for_run(run_id: str, db: Session) -> Optional[Dict[str, Any]]:
+    project = db.query(ModernizationProject).filter(ModernizationProject.run_id == run_id).first()
+    run_role = "latest"
+
+    if not project:
+        history = (
+            db.query(ProjectRunHistory)
+            .filter(ProjectRunHistory.run_id == run_id)
+            .order_by(ProjectRunHistory.created_at.desc(), ProjectRunHistory.id.desc())
+            .first()
+        )
+        if not history:
+            return None
+        project = db.query(ModernizationProject).filter(ModernizationProject.id == history.project_id).first()
+        if not project:
+            return None
+        run_role = "history"
+
+    project_id = str(project.id)
+    workspace_url = f"/projects/{quote(project_id)}"
+    result_url = f"{workspace_url}/result"
+    preferred_user_url = result_url if run_role == "latest" and (project.status or "").lower() == "completed" else workspace_url
+    preferred_user_label = "result" if preferred_user_url == result_url else "workspace"
+    return {
+        "project_id": project_id,
+        "project_name": project.project_name,
+        "project_status": project.status,
+        "project_run_role": run_role,
+        "project_workspace_url": workspace_url,
+        "project_result_url": result_url,
+        "preferred_user_url": preferred_user_url,
+        "preferred_user_label": preferred_user_label,
+    }
+
+
 def _summarize_run_row(run: AgentRun, db: Session) -> Dict[str, Any]:
     events = get_run_events(run.run_id, db=db)
     decision = get_decision_from_events(events)
@@ -148,6 +184,7 @@ def _summarize_run_row(run: AgentRun, db: Session) -> Dict[str, Any]:
         "escalated": bool(decision.get("escalated")),
         "needs_approval": bool(snapshot.get("needs_approval")),
         "block_reason": block.get("reason_code"),
+        **(_resolve_project_context_for_run(run.run_id, db) or {}),
     }
 
 
@@ -439,7 +476,10 @@ async def get_run_endpoint(
     snapshot = get_run_snapshot(run_id, db=db, paused=RUN_CONTROL_STATE.get(run_id, {}).get("paused"))
     if not snapshot:
         raise HTTPException(status_code=404, detail="Run not found")
-    return snapshot
+    return {
+        **snapshot,
+        **(_resolve_project_context_for_run(run_id, db) or {}),
+    }
 
 
 @router.get("/runs/{run_id}/dev")
@@ -452,10 +492,15 @@ async def get_run_dev_endpoint(
     run = _get_run_or_404(run_id, db)
     if not _run_owned_by_user(run, user.id, db):
         raise HTTPException(status_code=403, detail="해당 run에 대한 권한이 없습니다.")
-    snapshot = get_run_snapshot(run_id, db=db, paused=RUN_CONTROL_STATE.get(run_id, {}).get("paused"))
+    snapshot = get_run_snapshot(
+        run_id,
+        db=db,
+        paused=RUN_CONTROL_STATE.get(run_id, {}).get("paused"),
+        include_dev_only=False,
+    )
     if not snapshot:
         raise HTTPException(status_code=404, detail="Run not found")
-    events = get_run_events(run_id, db=db)
+    events = get_run_events(run_id, db=db, include_dev_only=False)
     decision = get_decision_from_events(events)
     health = compute_run_health(events)
     run = db.query(AgentRun).filter(AgentRun.run_id == run_id).first()
@@ -464,6 +509,7 @@ async def get_run_dev_endpoint(
         "events": events,
         "decision": decision,
         "health": health,
+        **(_resolve_project_context_for_run(run_id, db) or {}),
     }
 
 
@@ -483,8 +529,23 @@ async def dev_get_run_endpoint(
     db: Session = Depends(get_db),
     user: User = Depends(get_admin_user_required),
 ) -> Dict[str, Any]:
-    snapshot = await get_run_dev_endpoint(run_id=run_id, db=db, user=user)
-    return snapshot
+    _get_run_or_404(run_id, db)
+    snapshot = get_run_snapshot(
+        run_id,
+        db=db,
+        paused=RUN_CONTROL_STATE.get(run_id, {}).get("paused"),
+        include_dev_only=True,
+    )
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="Run not found")
+    events = get_run_events(run_id, db=db, include_dev_only=True)
+    return {
+        **snapshot,
+        "events": events,
+        "decision": get_decision_from_events(events),
+        "health": compute_run_health(events),
+        **(_resolve_project_context_for_run(run_id, db) or {}),
+    }
 
 
 @router.get("/api/dev/runs/{run_id}/events")
@@ -494,7 +555,7 @@ async def dev_get_run_events_endpoint(
     user: User = Depends(get_admin_user_required),
 ) -> Dict[str, Any]:
     _get_run_or_404(run_id, db)
-    return {"run_id": run_id, "events": get_run_events(run_id, db=db)}
+    return {"run_id": run_id, "events": get_run_events(run_id, db=db, include_dev_only=True)}
 
 
 @router.get("/api/dev/runs/{run_id}/raw")
@@ -504,8 +565,13 @@ async def dev_get_run_raw_endpoint(
     user: User = Depends(get_admin_user_required),
 ) -> Dict[str, Any]:
     run = _get_run_or_404(run_id, db)
-    events = get_run_events(run_id, db=db)
-    snapshot = get_run_snapshot(run_id, db=db, paused=RUN_CONTROL_STATE.get(run_id, {}).get("paused"))
+    events = get_run_events(run_id, db=db, include_dev_only=True)
+    snapshot = get_run_snapshot(
+        run_id,
+        db=db,
+        paused=RUN_CONTROL_STATE.get(run_id, {}).get("paused"),
+        include_dev_only=True,
+    )
     return {
         "run": {
             "run_id": run.run_id,
@@ -515,6 +581,7 @@ async def dev_get_run_raw_endpoint(
             "updated_at": run.updated_at.isoformat() if run.updated_at else None,
             "summary": run.summary,
         },
+        "project": _resolve_project_context_for_run(run_id, db),
         "snapshot": snapshot,
         "events": events,
     }

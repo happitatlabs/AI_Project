@@ -14,3 +14,4 @@ class ResearchAssistantStartResponse(BaseModel):
     session_id: str
     module_id: str = "research_assistant"
     run_kind: str = "research_run"
+    preferred_user_url: str

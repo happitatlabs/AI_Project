@@ -13,3 +13,4 @@ class SQLAnalyticsStartResponse(BaseModel):
     session_id: str
     module_id: str = "sql_analytics"
     run_kind: str = "sql_analysis"
+    preferred_user_url: str

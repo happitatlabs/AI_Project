@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse
@@ -8,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from mellow_link.infra import get_current_user, get_db, User
 from mellow_link.infra.run_events import create_run
-from mellow_link.routers.runs import _resolve_run_session_id
+from mellow_link.routers.runs import _resolve_project_context_for_run, _resolve_run_session_id
 
 from .runner import start_research_run
 from .schemas import ResearchAssistantStartRequest, ResearchAssistantStartResponse
@@ -49,4 +50,6 @@ def start_research_assistant(
         context_note=payload.context_note,
         temp_session_id=payload.temp_session_id,
     )
-    return ResearchAssistantStartResponse(run_id=run_id, session_id=session_id)
+    project_context = _resolve_project_context_for_run(run_id, db)
+    preferred_user_url = (project_context or {}).get("preferred_user_url") or f"/runs?focus_run_id={quote(run_id)}"
+    return ResearchAssistantStartResponse(run_id=run_id, session_id=session_id, preferred_user_url=preferred_user_url)

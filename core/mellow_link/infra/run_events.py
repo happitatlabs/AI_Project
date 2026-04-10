@@ -29,6 +29,9 @@ EVENT_TYPE_TOOL_DONE = "tool_done"
 EVENT_TYPE_LOG = "log"
 EVENT_TYPE_RUN_FINISHED = "run_finished"
 EVENT_TYPE_ERROR = "error"
+EVENT_TYPE_DEBUG_ANONYMIZATION_REPORT = "debug_anonymization_report"
+
+DEV_ONLY_EVENT_TYPES = {EVENT_TYPE_DEBUG_ANONYMIZATION_REPORT}
 
 # block(차단/대기) 판정용 상수 (초)
 STUCK_THRESHOLD_SEC = 30
@@ -270,7 +273,9 @@ def get_run_events(
     run_id: str,
     since_ts: Optional[float] = None,
     since_event_id: Optional[int] = None,
-    db: Optional[Session] = None
+    db: Optional[Session] = None,
+    *,
+    include_dev_only: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     실행 이벤트를 조회.
@@ -302,6 +307,8 @@ def get_run_events(
         
         result = []
         for event in events:
+            if not include_dev_only and event.type in DEV_ONLY_EVENT_TYPES:
+                continue
             try:
                 payload = json.loads(event.payload_json) if event.payload_json else {}
             except json.JSONDecodeError:
@@ -682,7 +689,24 @@ def build_block_status(
     return empty_block
 
 
-def get_run_snapshot(run_id: str, db: Optional[Session] = None, paused: Optional[bool] = None) -> Optional[Dict[str, Any]]:
+def _extract_latest_anonymization_summary(events: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    for event in reversed(events):
+        if event.get("type") != EVENT_TYPE_RUN_FINISHED:
+            continue
+        payload = event.get("payload") or {}
+        summary = payload.get("anonymization_summary")
+        if isinstance(summary, dict):
+            return summary
+    return None
+
+
+def get_run_snapshot(
+    run_id: str,
+    db: Optional[Session] = None,
+    paused: Optional[bool] = None,
+    *,
+    include_dev_only: bool = False,
+) -> Optional[Dict[str, Any]]:
     """
     실행 스냅샷을 조회 (todos + 최근 이벤트).
     
@@ -705,7 +729,7 @@ def get_run_snapshot(run_id: str, db: Optional[Session] = None, paused: Optional
             return None
         
         # 최근 이벤트 조회
-        events = get_run_events(run_id, db=db)
+        events = get_run_events(run_id, db=db, include_dev_only=include_dev_only)
         
         # Todos 추출: 가장 마지막 plan_created 이벤트의 payload.todos 사용 (재계획/재시작 시 최신 계획 반영)
         todos = []
@@ -785,6 +809,7 @@ def get_run_snapshot(run_id: str, db: Optional[Session] = None, paused: Optional
             "needs_approval": needs_approval,
             "approval_required": approval_required,
             "auto_closed_todos": auto_closed_todos,
+            "anonymization_summary": _extract_latest_anonymization_summary(events),
         }
     finally:
         if should_close:

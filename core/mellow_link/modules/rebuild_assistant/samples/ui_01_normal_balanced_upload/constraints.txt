@@ -1,0 +1,4 @@
+기존 DB 계약 유지
+READY 상태 저장 규칙 유지
+화면 submit 흐름은 유지하되 React + REST 기준으로 재구성 검토
+

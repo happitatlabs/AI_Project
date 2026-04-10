@@ -86,6 +86,7 @@ from .run_events import (
     EVENT_TYPE_LOG,
     EVENT_TYPE_RUN_FINISHED,
     EVENT_TYPE_ERROR,
+    EVENT_TYPE_DEBUG_ANONYMIZATION_REPORT,
 )
 
 __all__ = [
@@ -151,6 +152,7 @@ __all__ = [
     "EVENT_TYPE_LOG",
     "EVENT_TYPE_RUN_FINISHED",
     "EVENT_TYPE_ERROR",
+    "EVENT_TYPE_DEBUG_ANONYMIZATION_REPORT",
     # Helper Functions
     "create_default_folders_for_user",
     "ensure_user_has_folders",

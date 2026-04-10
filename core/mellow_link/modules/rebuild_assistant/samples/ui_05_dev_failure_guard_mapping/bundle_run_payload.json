@@ -1,0 +1,85 @@
+{
+  "goal": "debug guard mapping validation fail sample",
+  "constraints": [
+    "preview should be withheld on validation failure",
+    "user surface must not expose raw bundle detail"
+  ],
+  "safe_bundle": {
+    "bundle_id": "safe_bundle_failure_guard_mapping",
+    "project_id": "proj_failure_guard_mapping",
+    "masking_level": "FULL",
+    "asset_summary": [
+      {
+        "asset_id": "asset_001",
+        "name": "unsafe_preview_bridge.py",
+        "temp_file_id": "temp_001",
+        "size": 120,
+        "kind_hint": "source_code",
+        "language": "python"
+      },
+      {
+        "asset_id": "asset_002",
+        "name": "mapping_audit.sql",
+        "temp_file_id": "temp_002",
+        "size": 84,
+        "kind_hint": "sql_queries",
+        "language": "sql"
+      }
+    ],
+    "sources": [
+      {
+        "asset_id": "asset_001",
+        "level": "FULL",
+        "language": "python",
+        "source_type": "canonical_anonymized",
+        "content": "class CLS_001:\n    def FUNC_001(debug_token):\n        COL_001 = \"API_001\"\n        return debug_token\n",
+        "replacement_stats": {
+          "class": 1,
+          "function": 1,
+          "column": 1,
+          "api_path": 1
+        }
+      },
+      {
+        "asset_id": "asset_002",
+        "level": "FULL",
+        "language": "sql",
+        "source_type": "canonical_anonymized",
+        "content": "SELECT COL_001\nFROM TBL_001\nWHERE COL_001 = 'tok_debug_only'\n",
+        "replacement_stats": {
+          "table": 1,
+          "column": 1
+        }
+      }
+    ],
+    "structures": [
+      {
+        "asset_id": "asset_001",
+        "level": "FULL",
+        "extracted_from": "canonical",
+        "nodes": [
+          { "kind": "class", "id": "CLS_001" },
+          { "kind": "function", "id": "FUNC_001" },
+          { "kind": "api", "id": "API_001" }
+        ],
+        "edges": []
+      },
+      {
+        "asset_id": "asset_002",
+        "level": "FULL",
+        "extracted_from": "canonical",
+        "nodes": [
+          { "kind": "table", "id": "TBL_001" },
+          { "kind": "column", "id": "COL_001" }
+        ],
+        "edges": []
+      }
+    ],
+    "guard": {
+      "contains_original": false,
+      "contains_mapping": true,
+      "canonical_only": true,
+      "structure_extracted_from_canonical": true
+    }
+  }
+}
