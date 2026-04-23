@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>결과 패키지</title>
+    <title>판단판</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { font-family: "Pretendard", "Segoe UI", sans-serif; }
@@ -21,8 +21,8 @@
         <header class="no-print flex flex-wrap items-center justify-between gap-4">
             <div>
                 <p id="surfaceBadge" class="text-xs uppercase tracking-[0.28em] text-cyan-300/80">내부 검토</p>
-                <h1 id="pageTitle" class="mt-2 text-3xl font-semibold">결과 패키지</h1>
-                <p id="pageDescription" class="mt-2 text-sm text-slate-400">결정 요약, 판단 근거, 실행 조치를 먼저 보여주고, 근거 자산과 참고 자료는 뒤에 배치해 빠른 의사결정을 돕습니다.</p>
+                <h1 id="pageTitle" class="mt-2 text-3xl font-semibold">판단판</h1>
+                <p id="pageDescription" class="mt-2 text-sm text-slate-400">문서 묶음 대신 상황, 문제, 판단 질문, 선택지 비교, 기준, 결론, 리스크를 한 화면에서 검토합니다.</p>
             </div>
             <nav class="flex flex-wrap gap-2 text-sm">
                 <div class="flex overflow-hidden rounded-full border border-white/10 bg-slate-950/60">
@@ -58,6 +58,20 @@
             <div id="internalSurface" class="space-y-6">
             <section id="reviewDiffStickyBar" class="no-print sticky top-4 z-30 hidden rounded-[1.5rem] border border-cyan-300/20 bg-slate-950/95 px-4 py-3 backdrop-blur">
             </section>
+            <section class="print-card rounded-[2rem] border border-cyan-300/20 bg-slate-900/70 p-4 sm:p-6">
+                <div class="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                        <p class="text-xs uppercase tracking-[0.24em] text-cyan-200">판단판</p>
+                        <h3 class="mt-3 text-2xl font-semibold text-slate-100">한 화면에서 보는 판단 흐름</h3>
+                        <p class="mt-2 text-sm leading-7 text-slate-300">분리된 분석 결과를 판단 항목 단위로 재배치한 내부 검토 화면입니다.</p>
+                    </div>
+                    <div class="rounded-2xl border border-cyan-300/20 bg-cyan-500/10 px-4 py-3 text-xs leading-6 text-cyan-100">
+                        비교 중심
+                    </div>
+                </div>
+                <div id="judgmentBoardBox" class="mt-6 space-y-5"></div>
+            </section>
+            <div id="legacyDocumentSurface" class="hidden">
             <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
                 <details id="readingGuideDetails" class="group">
                     <summary class="flex cursor-pointer items-center justify-between gap-4">
@@ -74,7 +88,7 @@
                         </div>
                         <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
                             <div class="text-xs uppercase tracking-[0.2em] text-slate-500">읽는 순서</div>
-                            <div class="mt-3 text-sm leading-7 text-slate-200">결정 요약 -> 판단 근거 -> 실행 조치 -> 근거 자산 -> 설계 선택지 -> 실행 계획 순서로 확인하면 됩니다.</div>
+                            <div id="readingGuideSequenceText" class="mt-3 text-sm leading-7 text-slate-200">결정 요약 -> 판단 근거 -> 실행 조치 -> 유지 계약 -> 설계 선택지 -> 실행 계획 -> 범위 및 한계 순서로 보면 승인 판단이 빨라집니다.</div>
                         </div>
                         <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
                             <div class="text-xs uppercase tracking-[0.2em] text-slate-500">회의에서 결정할 것</div>
@@ -89,19 +103,19 @@
             </section>
 
             <section class="print-card rounded-[2rem] border border-cyan-300/20 bg-cyan-500/5 p-6">
-                <p class="text-xs uppercase tracking-[0.24em] text-cyan-200">결정 요약</p>
+                <p class="text-xs uppercase tracking-[0.24em] text-cyan-200">한 줄 결론</p>
                 <div id="executiveSummaryBox" class="mt-4"></div>
             </section>
 
             <section id="customerIntentSection" class="print-card hidden rounded-[2rem] border border-amber-300/20 bg-amber-500/5 p-6">
                 <p class="text-xs uppercase tracking-[0.24em] text-amber-200">고객이 원하는 방향</p>
-                <p class="mt-2 text-sm leading-7 text-slate-300">실제 코드 근거가 아니라 고객 요구 맥락입니다. 추천안과 실행 계획을 읽을 때 함께 참고합니다.</p>
+                <p class="mt-2 text-sm leading-7 text-slate-300">고객 요구는 구조 판단의 제약 조건이므로, 우선 조치와 실행 범위를 좁힐 때 함께 확인해야 합니다.</p>
                 <div id="customerIntentBox" class="mt-5"></div>
             </section>
 
             <section id="structureComparisonSection" class="print-card hidden rounded-[2rem] border border-emerald-300/20 bg-emerald-500/5 p-6">
                 <p class="text-xs uppercase tracking-[0.24em] text-emerald-200">구조 비교</p>
-                <p class="mt-2 text-sm leading-7 text-slate-300">현재 구조는 익명화된 실제 패턴이고, 권장 구조는 설명용 일반화 패턴입니다. 이 섹션은 참고 부록이 아니라 판단 본문입니다.</p>
+                <p class="mt-2 text-sm leading-7 text-slate-300">변경 전, 변경 후, 근거 순으로 비교해 승인 범위를 좁히는 본문 영역입니다. 익명화된 실제 패턴 위에서 개선 방향을 다시 쓰며, 새 helper 이름만 예시로 생성될 수 있습니다.</p>
                 <div id="structureComparisonBox" class="mt-5 space-y-4"></div>
             </section>
 
@@ -114,8 +128,8 @@
                 <details id="optionsDetails" class="group">
                     <summary class="flex cursor-pointer items-center justify-between gap-4">
                         <div>
-                            <p class="text-xs uppercase tracking-[0.24em] text-slate-500">설계 선택지</p>
-                            <p class="mt-2 text-sm text-slate-400">기본은 접힌 상태로 두고, 비교가 필요할 때 펼쳐 확인합니다.</p>
+                            <p id="optionsSectionLabel" class="text-xs uppercase tracking-[0.24em] text-slate-500">설계 선택지</p>
+                            <p id="optionsSectionDescription" class="mt-2 text-sm text-slate-400">기본은 접힌 상태로 두고, 비교가 필요할 때 펼쳐 확인합니다.</p>
                         </div>
                         <span data-collapsible-badge class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-cyan-500/10 group-open:text-cyan-200">펼치기</span>
                     </summary>
@@ -127,14 +141,15 @@
                 <details id="planDetails" class="group">
                     <summary class="flex cursor-pointer items-center justify-between gap-4">
                         <div>
-                            <p class="text-xs uppercase tracking-[0.24em] text-slate-500">실행 계획</p>
-                            <p class="mt-2 text-sm leading-7 text-slate-400">코드 자동 변경이나 배포가 아니라 적용 전 검토를 위한 실행 준비 계획입니다.</p>
+                            <p id="planSectionLabel" class="text-xs uppercase tracking-[0.24em] text-slate-500">실행 계획</p>
+                            <p id="planSectionDescription" class="mt-2 text-sm leading-7 text-slate-400">코드 자동 변경이나 배포가 아니라 적용 전 검토를 위한 실행 준비 계획입니다.</p>
                         </div>
                         <span data-collapsible-badge class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-cyan-500/10 group-open:text-cyan-200">펼치기</span>
                     </summary>
                     <div id="planBox" class="mt-4 space-y-4 text-sm text-slate-300"></div>
                 </details>
             </section>
+            </div>
 
             <section id="accountingSection" class="print-card hidden rounded-[2rem] border border-emerald-300/20 bg-emerald-500/5 p-6">
                 <div class="flex flex-wrap items-start justify-between gap-4">
@@ -175,6 +190,7 @@
                 <div id="accountingWarningsBox" class="mt-4 hidden rounded-2xl border border-amber-300/20 bg-amber-500/10 px-4 py-4 text-sm text-amber-100"></div>
             </section>
 
+            <div id="legacyRiskSurface" class="hidden">
             <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
                 <details id="riskDetails" class="group">
                     <summary class="flex cursor-pointer items-center justify-between gap-4">
@@ -187,6 +203,7 @@
                     <div id="diagnosisBox" class="mt-4 space-y-4 text-sm text-slate-300"></div>
                 </details>
             </section>
+            </div>
 
             <section id="reviewDiffSection" class="print-card hidden rounded-[2rem] border border-indigo-300/20 bg-indigo-500/5 p-6">
                 <details id="reviewDiffDetails" class="group">
@@ -229,22 +246,29 @@
             </div>
 
             <div id="externalSurface" class="hidden space-y-6">
+                <section class="print-card rounded-[2rem] border border-cyan-300/20 bg-slate-900/70 p-4 sm:p-6">
+                    <p class="text-xs uppercase tracking-[0.24em] text-cyan-200">공유용 판단판</p>
+                    <h3 class="mt-3 text-2xl font-semibold text-slate-100">결정에 필요한 정보만 재배치</h3>
+                    <p class="mt-2 text-sm leading-7 text-slate-300">원문 문서 대신 상황, 문제, 선택지, 기준, 결론, 리스크를 한 화면에서 확인합니다.</p>
+                    <div id="externalJudgmentBoardBox" class="mt-6 space-y-5"></div>
+                </section>
+                <div id="externalLegacySurface" class="hidden">
                 <section class="print-card rounded-[2rem] border border-cyan-300/20 bg-cyan-500/5 p-6">
                     <p class="text-xs uppercase tracking-[0.24em] text-cyan-200">외부 공유 화면</p>
-                    <h3 class="mt-3 text-2xl font-semibold text-slate-100">이번 판단 요약</h3>
-                    <p class="mt-2 text-sm leading-7 text-slate-300">핵심 판단, 왜 이 방향인지, 다음 단계만 먼저 보여주고 내부 제어 정보는 제외합니다.</p>
+                    <h3 class="mt-3 text-2xl font-semibold text-slate-100">이번 결정 패키지</h3>
+                    <p class="mt-2 text-sm leading-7 text-slate-300">한 줄 결론, 왜 이 방향인지, 다음 단계만 먼저 보여주고 내부 제어 정보는 제외합니다.</p>
                     <div id="externalSummaryCardsBox" class="mt-5 grid gap-4 xl:grid-cols-3"></div>
                 </section>
 
                 <section id="externalCustomerIntentSection" class="print-card hidden rounded-[2rem] border border-amber-300/20 bg-amber-500/5 p-6">
                     <p class="text-xs uppercase tracking-[0.24em] text-amber-200">고객이 원하는 방향</p>
-                    <p class="mt-2 text-sm leading-7 text-slate-300">실제 코드 근거가 아니라 고객 요구 맥락입니다. 권장 전략과 다음 단계를 읽을 때 함께 참고합니다.</p>
+                    <p class="mt-2 text-sm leading-7 text-slate-300">고객 요구는 구조 판단의 제약 조건이므로, 권장 전략과 다음 단계를 줄일 때 함께 확인해야 합니다.</p>
                     <div id="externalCustomerIntentBox" class="mt-5"></div>
                 </section>
 
                 <section id="externalComparisonSection" class="print-card hidden rounded-[2rem] border border-emerald-300/20 bg-emerald-500/5 p-6">
                     <p class="text-xs uppercase tracking-[0.24em] text-emerald-200">구조 비교</p>
-                    <p class="mt-2 text-sm leading-7 text-slate-300">현재 구조는 익명화된 실제 패턴이고, 권장 구조는 설명용 일반화 패턴입니다. 원문은 이 화면에서 직접 열지 않습니다.</p>
+                    <p class="mt-2 text-sm leading-7 text-slate-300">변경 전, 변경 후, 근거 순으로 비교해 설명 범위를 줄이는 영역입니다. 익명화된 실제 패턴 위에서 개선 방향을 다시 쓰며, 원문은 이 화면에서 직접 열지 않습니다.</p>
                     <div id="externalComparisonBox" class="mt-5 space-y-4"></div>
                 </section>
 
@@ -252,6 +276,7 @@
                     <p class="text-xs uppercase tracking-[0.24em] text-slate-500">추가 설명</p>
                     <div id="externalSectionsBox" class="mt-4 space-y-4"></div>
                 </section>
+                </div>
             </div>
         </main>
     </div>
@@ -259,6 +284,7 @@
     <script>
         const projectId = window.location.pathname.split('/')[2] || '';
         const searchParams = new URLSearchParams(window.location.search);
+        const currentRunId = (searchParams.get('run_id') || '').trim();
         const accountingSectionKeys = ['accounting_summary', 'accounting_status', 'accounting_analysis', 'fx_calculation', 'voucher_review'];
         const accountingSectionTitles = {
             accounting_summary: '회계 계산 요약',
@@ -361,8 +387,8 @@
             if (mode === 'external') {
                 return {
                     badge: '외부 공유',
-                    pageTitle: '구조 판단',
-                    pageDescription: '외부 공유용 화면입니다. 구조 판단, 권장 전략, 판단 근거, 다음 단계를 설명 중심으로 제공합니다.',
+                    pageTitle: '공유용 판단판',
+                    pageDescription: '외부 공유용 화면입니다. 상황, 문제, 선택지, 기준, 결론, 리스크를 한 화면에서 판단 순서대로 보여줍니다.',
                     exportTitle: '설명용 내보내기',
                     exportHint: '참고 구조 비교와 판단 제어 추적을 제외한 설명 중심 산출물을 내보냅니다.',
                     exportBoxClass: 'rounded-[1.5rem] border border-cyan-300/20 bg-cyan-500/5 px-4 py-3',
@@ -387,8 +413,8 @@
             }
             return {
                 badge: '내부 검토',
-                pageTitle: '결과 패키지',
-                pageDescription: '결정 요약, 판단 근거, 실행 조치를 먼저 보여주고, 근거 자산과 참고 자료는 뒤에 배치해 빠른 의사결정을 돕습니다.',
+                pageTitle: '판단판',
+                pageDescription: '문서 묶음 대신 상황, 문제, 판단 질문, 선택지 비교, 기준, 결론, 리스크를 한 화면에서 검토합니다.',
                 exportTitle: '검토용 내보내기',
                 exportHint: '참고 구조 비교와 판단 제어 추적을 포함한 내부 검토용 산출물을 내보냅니다.',
                 exportBoxClass: 'rounded-[1.5rem] border border-white/10 bg-slate-950/60 px-4 py-3',
@@ -479,7 +505,11 @@
         }
 
         function resultDownloadUrl(format) {
-            return '/projects/' + encodeURIComponent(projectId) + '/result?format=' + encodeURIComponent(format) + '&surface_mode=' + encodeURIComponent(currentSurfaceMode);
+            let url = '/projects/' + encodeURIComponent(projectId) + '/result?format=' + encodeURIComponent(format) + '&surface_mode=' + encodeURIComponent(currentSurfaceMode);
+            if (currentRunId) {
+                url += '&run_id=' + encodeURIComponent(currentRunId);
+            }
+            return url;
         }
 
         function resultDownloadFallbackName(format) {
@@ -533,33 +563,168 @@
         function listOrState(items, stateMessage) {
             if (items && items.length) {
                 return items.map(function (item) {
-                    return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' + item + '</div>';
+                    return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4 text-sm leading-7 text-slate-200">' + escapeHtml(item) + '</div>';
                 }).join('');
             }
-            return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + stateMessage + '</div>';
+            return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + escapeHtml(stateMessage) + '</div>';
         }
+
+        function displaySections(pkg) {
+            return (((pkg || {}).display || {}).sections || {});
+        }
+
+        function displayStates(pkg) {
+            return (((pkg || {}).display || {}).section_states || {});
+        }
+
+        function surfaceWording(pkg) {
+            return ((((pkg || {}).extensions || {}).decision_governance || {}).surface_wording || {});
+        }
+
+        function usesAnalysisFirstSurface(pkg) {
+            return String((surfaceWording(pkg) || {}).mode || '') === 'analysis_first_operational_source';
+        }
+
+        function usesComparisonFirstSurface(pkg) {
+            return String((surfaceWording(pkg) || {}).mode || '') === 'comparison_first_option';
+        }
+
+        function operationalInformationRole(pkg) {
+            if (!usesAnalysisFirstSurface(pkg)) {
+                return '';
+            }
+            const axis = String((pkg || {}).question_axis || (((pkg || {}).canonical_payload || {}).request_context || {}).question_axis || '').trim();
+            if (axis === 'journal_linkage') {
+                return 'diagnosis';
+            }
+            if (axis === 'calculation_rule') {
+                return 'decision';
+            }
+            return 'structure';
+        }
+
+        function usesSpecializedFamilySurface(pkg) {
+            return usesAnalysisFirstSurface(pkg) || usesComparisonFirstSurface(pkg);
+        }
+
+        function sectionTitle(pkg, key, fallback) {
+            const titles = (surfaceWording(pkg) || {}).section_titles || {};
+            return titles[key] || fallback;
+        }
+
+        function applyOperationalSurfaceCopy(pkg) {
+            const analysisFirst = usesAnalysisFirstSurface(pkg);
+            const readingGuide = document.getElementById('readingGuideSequenceText');
+            const optionsLabel = document.getElementById('optionsSectionLabel');
+            const optionsDescription = document.getElementById('optionsSectionDescription');
+            const planLabel = document.getElementById('planSectionLabel');
+            const planDescription = document.getElementById('planSectionDescription');
+            const pageDescription = document.getElementById('pageDescription');
+            const role = operationalInformationRole(pkg);
+
+            if (readingGuide) {
+                readingGuide.textContent = role === 'diagnosis'
+                    ? '전표/GL 진단 요약 -> 왜 중요한가 -> 불일치 가능성 순서로 보면 회계 영향 판단이 빨라집니다.'
+                    : role === 'decision'
+                    ? '선택지 요약 -> 비교 기준 -> 추천 근거 -> 적용 검증 기준 순서로 보면 계산 기준 판단이 빨라집니다.'
+                    : role === 'structure'
+                    ? '분석 목적 -> 현행 분석 요약 -> 핵심 객체 -> 처리 단계 순서로 보면 실제 동작 흐름이 빨라집니다.'
+                    : analysisFirst
+                    ? '자산 정체 -> 현행 분석 근거 -> 후속 개선 검토 -> 검토 순서 -> 운영 리스크 순서로 보면 운영 판단이 빨라집니다.'
+                    : '한 줄 결론 -> 판단 근거 -> 개선 전략 -> 실행 단계 -> 리스크 순서로 보면 승인 판단이 빨라집니다.';
+            }
+            if (optionsLabel) {
+                optionsLabel.textContent = sectionTitle(pkg, 'recommended_option', '설계 선택지');
+            }
+            if (optionsDescription) {
+                optionsDescription.textContent = role === 'diagnosis'
+                    ? '추천안이 아니라 전표/GL 불일치 가능성과 영향만 확인합니다.'
+                    : role === 'decision'
+                    ? '계산 기준 선택지와 추천 근거만 확인합니다.'
+                    : role === 'structure'
+                    ? '추천안이 아니라 처리 흐름을 이해한 뒤 필요한 경우 다른 문서를 참조합니다.'
+                    : analysisFirst
+                    ? '현행 분석 이후에 비교할 개선 후보를 접어서 확인합니다.'
+                    : '기본은 접힌 상태로 두고, 비교가 필요할 때 펼쳐 확인합니다.';
+            }
+            if (planLabel) {
+                planLabel.textContent = sectionTitle(pkg, 'execution_plan', '실행 계획');
+            }
+            if (planDescription) {
+                planDescription.textContent = role === 'diagnosis'
+                    ? '구조 설명이 아니라 전표/GL 기준 불일치 가능성을 확인하는 진단 단계입니다.'
+                    : role === 'decision'
+                    ? '흐름 설명이 아니라 선택 기준과 추천안 적용 검증을 정리하는 단계입니다.'
+                    : role === 'structure'
+                    ? '판단이나 해결 방향이 아니라 객체와 처리 순서를 확인하는 단계입니다.'
+                    : analysisFirst
+                    ? '코드 자동 변경이나 배포가 아니라 객체와 처리 순서를 확인하는 검토 단계입니다.'
+                    : '코드 자동 변경이나 배포가 아니라 적용 전 검토를 위한 실행 준비 계획입니다.';
+            }
+            if (pageDescription && analysisFirst) {
+                pageDescription.textContent = currentSurfaceMode === 'external'
+                    ? '공유 가능한 판단 항목만 추려 상황, 문제, 선택지, 기준, 결론, 리스크 순서로 제공합니다.'
+                    : '운영 분석 결과를 상황, 문제, 판단 질문, 선택지 비교, 기준, 결론, 리스크 순서로 재배치합니다.';
+            }
+        }
+
+        function renderDecisionMetric(label, body, accentClass) {
+            return '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-3">' +
+                '<div class="text-xs uppercase tracking-[0.2em] ' + (accentClass || 'text-slate-500') + '">' + escapeHtml(label || '-') + '</div>' +
+                '<div class="mt-2 text-sm leading-7 text-slate-100">' + escapeHtml(body || '-') + '</div>' +
+                '</div>';
+        }
+
+        function renderComparisonPoints(points) {
+            const values = (points || []).filter(function (point) {
+                return point && String(point.label || '').trim() && String(point.value || '').trim();
+            });
+            if (!values.length) {
+                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">비교 포인트가 없습니다.</div>';
+            }
+            return '<div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">' + values.map(function (point) {
+                return renderDecisionMetric(point.label || '-', point.value || '-', 'text-slate-500');
+            }).join('') + '</div>';
+        }
+
+        function renderTaggedList(title, items, accentClass) {
+            const values = (items || []).filter(function (item) { return String(item || '').trim(); });
+            if (!values.length) {
+                return renderDecisionMetric(title, '해당 없음', accentClass);
+            }
+            return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
+                '<div class="text-xs uppercase tracking-[0.2em] ' + (accentClass || 'text-slate-500') + '">' + escapeHtml(title || '-') + '</div>' +
+                '<div class="mt-3 space-y-2">' +
+                values.map(function (item) {
+                    return '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200">' + escapeHtml(item) + '</div>';
+                }).join('') +
+                '</div>' +
+                '</div>';
+            }
 
         function renderMissing(items, fallback) {
             if (!items || !items.length) {
-                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + fallback + '</div>';
+                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + escapeHtml(fallback) + '</div>';
             }
             return items.map(function (item) {
                 return '<div class="rounded-3xl border border-white/10 bg-black/20 px-4 py-4">' +
-                    '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">[필요 자료]</div>' +
-                    '<div class="mt-2">- ' + (item.required_material || '-') + '</div>' +
-                    '<div class="mt-4 text-xs uppercase tracking-[0.2em] text-slate-500">[이유]</div>' +
-                    '<div class="mt-2">- ' + (item.reason || '-') + '</div>' +
+                    '<div class="flex flex-wrap items-center justify-between gap-3">' +
+                        '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">승인 전 확인 자료</div>' +
+                        '<div class="rounded-full border border-amber-300/20 bg-amber-500/10 px-3 py-1 text-xs text-amber-100">' + escapeHtml(item.priority || '승인 전 확보') + '</div>' +
+                    '</div>' +
+                    '<div class="mt-3 text-sm font-medium text-slate-100">' + escapeHtml(item.required_material || '-') + '</div>' +
+                    '<div class="mt-3 text-sm leading-7 text-slate-300">' + escapeHtml(item.reason || '-') + '</div>' +
                     '</div>';
             }).join('');
         }
 
-        function renderLayerSection(title, section) {
+        function renderLayerSection(title, section, emptyMessage) {
             const values = section || [];
             if (!values.length) {
-                return '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">' + title + '</div><div class="mt-2 text-slate-500">데이터 없음</div></div>';
+                return '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">' + escapeHtml(title) + '</div><div class="mt-2 text-slate-500">' + escapeHtml(emptyMessage || '이 레이어 경계를 바로 고정하면 안 됩니다.') + '</div></div>';
             }
             return '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">' + title + '</div><div class="mt-3 space-y-2">' +
-                values.map(function (item) { return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">' + item + '</div>'; }).join('') +
+                values.map(function (item) { return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm leading-7 text-slate-200">' + escapeHtml(item) + '</div>'; }).join('') +
                 '</div></div>';
         }
 
@@ -577,15 +742,18 @@
             return blocks.length ? blocks.join('') : '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + stateMessage + '</div>';
         }
 
-        function renderGroundedRules(items, stateMessage) {
-            if (!items || !items.length) {
-                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + stateMessage + '</div>';
+        function renderGroundedRules(section) {
+            const items = (section && section.items) || [];
+            const stateMessage = (section && section.empty_message) || '핵심 규칙 근거를 다시 정리해야 합니다.';
+            if (!items.length) {
+                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + escapeHtml(stateMessage) + '</div>';
             }
             return items.map(function (item) {
                 const evidence = (item.evidence_cards || []).map(function (row) {
                     return '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-xs text-slate-300">' +
                         '<div class="font-medium text-slate-100">' + escapeHtml(row.asset_name || '-') + '</div>' +
-                        '<div class="mt-2 text-slate-400">' + escapeHtml(row.condition_summary || '-') + '</div>' +
+                        '<div class="mt-2 text-slate-300">' + escapeHtml(row.condition_summary || '-') + '</div>' +
+                        '<div class="mt-2 text-slate-500">왜 중요한가: ' + escapeHtml(row.why_important || '-') + '</div>' +
                         '<div class="mt-2 text-slate-500">설계 반영 위치: ' + escapeHtml((row.design_targets || []).join(', ') || '-') + '</div>' +
                         '<div class="mt-1 text-slate-500">신뢰도: ' + escapeHtml(row.confidence || '-') + '</div>' +
                         '</div>';
@@ -593,12 +761,21 @@
                 return '<div class="rounded-3xl border border-white/10 bg-black/20 px-4 py-4">' +
                     '<div class="flex flex-wrap items-center justify-between gap-3">' +
                         '<div class="text-base font-medium text-slate-100">' + escapeHtml(item.title || '-') + '</div>' +
-                        '<div class="rounded-full border border-cyan-300/20 bg-cyan-500/10 px-3 py-1 text-xs text-cyan-200">' + escapeHtml(item.confidence || '-') + '</div>' +
+                        '<div class="flex flex-wrap items-center gap-2">' +
+                            '<div class="rounded-full border border-fuchsia-300/20 bg-fuchsia-500/10 px-3 py-1 text-xs text-fuchsia-100">' + escapeHtml(item.priority || '-') + '</div>' +
+                            '<div class="rounded-full border border-cyan-300/20 bg-cyan-500/10 px-3 py-1 text-xs text-cyan-200">' + escapeHtml(item.confidence || '-') + '</div>' +
+                        '</div>' +
                     '</div>' +
-                    '<div class="mt-3 text-sm leading-7 text-slate-200">' + escapeHtml(item.description || '-') + '</div>' +
+                    '<div class="mt-3 text-sm leading-7 text-slate-200">' + escapeHtml(item.decision || '-') + '</div>' +
                     '<div class="mt-4 grid gap-3 md:grid-cols-2">' +
-                        '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-3"><div class="text-xs uppercase tracking-[0.2em] text-slate-500">설계 반영 위치</div><div class="mt-2 text-sm">' + escapeHtml((item.design_targets || []).join(', ') || '-') + '</div></div>' +
-                        '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-3"><div class="text-xs uppercase tracking-[0.2em] text-slate-500">신뢰도 근거</div><div class="mt-2 text-sm">' + escapeHtml(item.confidence_reason || '-') + '</div></div>' +
+                        renderDecisionMetric('미조치 시 영향', item.unchanged_consequence || item.impact || '-', 'text-rose-200') +
+                        renderDecisionMetric('우선 검토 포인트', item.action || '-', 'text-emerald-200') +
+                        renderDecisionMetric('피해야 할 방식', item.anti_pattern || '-', 'text-amber-200') +
+                        renderDecisionMetric('우선순위 판단', item.priority_reason || item.priority || '-', 'text-fuchsia-200') +
+                    '</div>' +
+                    '<div class="mt-4 grid gap-3 md:grid-cols-2">' +
+                        renderDecisionMetric('설계 반영 위치', (item.design_targets || []).join(', ') || '-', 'text-slate-500') +
+                        renderDecisionMetric('신뢰도 근거', item.confidence_reason || '-', 'text-slate-500') +
                     '</div>' +
                     '<div class="mt-4 text-xs uppercase tracking-[0.2em] text-slate-500">근거 자산</div>' +
                     '<div class="mt-3 space-y-2">' + (evidence || '<div class="text-slate-500">근거 없음</div>') + '</div>' +
@@ -609,7 +786,7 @@
 
         function renderCardList(items, stateMessage, titleKey, bodyKey, metaKey) {
             if (!items || !items.length) {
-                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + stateMessage + '</div>';
+                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + escapeHtml(stateMessage) + '</div>';
             }
             return items.map(function (item) {
                 return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
@@ -621,13 +798,13 @@
         }
 
         function renderPriority(items, stateMessage) {
-            if (!items || !items.length) return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + stateMessage + '</div>';
+            if (!items || !items.length) return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + escapeHtml(stateMessage) + '</div>';
             return items.map(function (item) {
                 return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
                     '<div class="font-medium text-slate-100">' + escapeHtml(String(item.priority || '-')) + '순위 · ' + escapeHtml(item.item || item.title || '-') + '</div>' +
-                    '<div class="mt-2 text-sm">' + escapeHtml(item.reason || '-') + '</div>' +
+                    '<div class="mt-2 text-sm leading-7 text-slate-300">' + escapeHtml(item.reason || '-') + '</div>' +
                     '<div class="mt-3 grid gap-3 md:grid-cols-2 text-xs text-slate-400">' +
-                        '<div>영향 범위: ' + escapeHtml(item.impact_scope || '-') + '</div>' +
+                        '<div>왜 중요한가: ' + escapeHtml(item.impact_scope || '-') + '</div>' +
                         '<div>선행 조건: ' + escapeHtml(item.prerequisite || '-') + '</div>' +
                     '</div>' +
                     '<div class="mt-3 text-xs text-slate-500">관련 규칙: ' + escapeHtml((item.linked_rules || []).join(', ') || '-') + '</div>' +
@@ -636,34 +813,100 @@
             }).join('');
         }
 
-        function renderOptions(items, stateMessage) {
-            if (!items || !items.length) return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + stateMessage + '</div>';
+        function renderOptions(section) {
+            const items = (section && section.items) || [];
+            const stateMessage = (section && section.empty_message) || '전략 우선순위를 다시 정해야 합니다.';
+            if (!items.length) return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + escapeHtml(stateMessage) + '</div>';
             return items.map(function (item) {
                 return '<div class="rounded-3xl border border-white/10 bg-black/20 px-4 py-4">' +
                     '<div class="flex flex-wrap items-center justify-between gap-3">' +
                         '<div class="text-base font-medium text-slate-100">' + escapeHtml(item.name || '-') + '</div>' +
-                        '<div class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300">' + escapeHtml(item.difficulty || '-') + ' · ' + escapeHtml(String(item.duration_weeks || 0)) + '주</div>' +
+                        '<div class="rounded-full border border-fuchsia-300/20 bg-fuchsia-500/10 px-3 py-1 text-xs text-fuchsia-100">' + escapeHtml(item.priority || '-') + '</div>' +
                     '</div>' +
-                    '<div class="mt-3 text-sm leading-7 text-slate-200">' + escapeHtml(item.structure_summary || '-') + '</div>' +
+                    '<div class="mt-3 text-sm leading-7 text-slate-200">' + escapeHtml(item.decision || '-') + '</div>' +
+                    '<div class="mt-4 grid gap-3 md:grid-cols-2">' +
+                        renderDecisionMetric('미조치 시 영향', item.unchanged_consequence || '-', 'text-rose-200') +
+                        renderDecisionMetric('우선순위 판단', item.priority_reason || item.priority || '-', 'text-fuchsia-200') +
+                    '</div>' +
+                    '<div class="mt-4">' +
+                        '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">비교 포인트</div>' +
+                        '<div class="mt-3">' + renderComparisonPoints(item.comparison_points || []) + '</div>' +
+                    '</div>' +
                     '<div class="mt-4 grid gap-4 md:grid-cols-2">' +
                         '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">장점</div><div class="mt-2 space-y-2">' + (item.advantages || []).map(function (entry) { return '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm">' + escapeHtml(entry) + '</div>'; }).join('') + '</div></div>' +
                         '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">리스크</div><div class="mt-2 space-y-2">' + (item.risks || []).map(function (entry) { return '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm">' + escapeHtml(entry) + '</div>'; }).join('') + '</div></div>' +
                     '</div>' +
-                    '<div class="mt-4 text-xs text-slate-400">선택 근거: ' + escapeHtml(item.selection_reason || '-') + '</div>' +
-                    '<div class="mt-2 text-xs text-cyan-200">추천 여부: ' + escapeHtml(item.recommended ? '예' : '아니오') + '</div>' +
+                    '<div class="mt-4 grid gap-3 md:grid-cols-3">' +
+                        renderDecisionMetric('왜 이 선택지가 남아 있는가', item.selection_reason || '-', 'text-slate-500') +
+                        renderDecisionMetric('먼저 볼 포인트', item.action || '-', 'text-emerald-200') +
+                        renderDecisionMetric('피해야 할 방식', item.anti_pattern || '-', 'text-amber-200') +
+                    '</div>' +
+                    '<div class="mt-3 text-xs text-cyan-200">추천 여부: ' + escapeHtml(item.recommended ? '예' : '아니오') + '</div>' +
                     '</div>';
             }).join('');
         }
 
-        function renderPlan(items, stateMessage) {
-            if (!items || !items.length) return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + stateMessage + '</div>';
+        function renderOperationalFollowupChecks(pkg, section) {
+            const followups = ((pkg || {}).recommended_directions || []).filter(function (item) {
+                return String(item || '').trim();
+            });
+            const checkpoints = ((pkg || {}).verification_checkpoints || []).filter(function (item) {
+                return item && (String(item.item || '').trim() || String(item.reason || '').trim());
+            });
+            const stateMessage = (section && section.empty_message) || '후속 확인 항목을 다시 정해야 합니다.';
+            const blocks = [];
+            if (followups.length) {
+                blocks.push(
+                    '<div class="rounded-3xl border border-white/10 bg-black/20 px-4 py-4">' +
+                        '<div class="text-xs uppercase tracking-[0.2em] text-emerald-200">후속 확인 항목</div>' +
+                        '<div class="mt-3 space-y-2">' +
+                            followups.map(function (entry) {
+                                return '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200">' + escapeHtml(entry) + '</div>';
+                            }).join('') +
+                        '</div>' +
+                    '</div>'
+                );
+            }
+            if (checkpoints.length) {
+                blocks.push(
+                    '<div class="rounded-3xl border border-white/10 bg-black/20 px-4 py-4">' +
+                        '<div class="text-xs uppercase tracking-[0.2em] text-cyan-200">검증 포인트</div>' +
+                        '<div class="mt-3 space-y-2">' +
+                            checkpoints.map(function (item) {
+                                return '<div class="rounded-2xl border border-white/10 bg-white/5 px-3 py-3">' +
+                                    '<div class="text-sm font-medium text-slate-100">' + escapeHtml(item.item || '-') + '</div>' +
+                                    '<div class="mt-2 text-sm leading-7 text-slate-300">' + escapeHtml(item.reason || '-') + '</div>' +
+                                '</div>';
+                            }).join('') +
+                        '</div>' +
+                    '</div>'
+                );
+            }
+            if (!blocks.length) {
+                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + escapeHtml(stateMessage) + '</div>';
+            }
+            return '<div class="space-y-4">' + blocks.join('') + '</div>';
+        }
+
+        function renderPlan(section) {
+            const items = (section && section.items) || [];
+            const stateMessage = (section && section.empty_message) || '실행 순서를 다시 정해야 합니다.';
+            if (!items.length) return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">' + escapeHtml(stateMessage) + '</div>';
             return items.map(function (item) {
                 return '<div class="rounded-3xl border border-white/10 bg-black/20 px-4 py-4">' +
                     '<div class="flex flex-wrap items-center justify-between gap-3">' +
                         '<div class="text-base font-medium text-slate-100">' + escapeHtml(item.week_label || '-') + '</div>' +
-                        '<div class="text-xs text-slate-400">' + escapeHtml(String(item.duration_weeks || 0)) + '주</div>' +
+                        '<div class="rounded-full border border-fuchsia-300/20 bg-fuchsia-500/10 px-3 py-1 text-xs text-fuchsia-100">' + escapeHtml(item.priority || '-') + '</div>' +
                     '</div>' +
-                    '<div class="mt-3 text-sm leading-7 text-slate-200">' + escapeHtml(item.goal || '-') + '</div>' +
+                    '<div class="mt-3 text-sm leading-7 text-slate-200">' + escapeHtml(item.decision || '-') + '</div>' +
+                    '<div class="mt-4 grid gap-3 md:grid-cols-2">' +
+                        renderDecisionMetric('미조치 시 영향', item.unchanged_consequence || '-', 'text-rose-200') +
+                        renderDecisionMetric('우선순위 판단', item.priority_reason || item.priority || '-', 'text-fuchsia-200') +
+                    '</div>' +
+                    '<div class="mt-4 grid gap-3 md:grid-cols-2">' +
+                        renderDecisionMetric('우선 검토 포인트', item.action || '-', 'text-emerald-200') +
+                        renderDecisionMetric('왜 중요한가', ((item.related_contracts || [])[0]) || ((item.related_rules || [])[0]) || '-', 'text-slate-500') +
+                    '</div>' +
                     '<div class="mt-3 text-xs text-slate-500">관련 규칙: ' + escapeHtml((item.related_rules || []).join(', ') || '-') + '</div>' +
                     '<div class="mt-1 text-xs text-slate-500">관련 계약: ' + escapeHtml((item.related_contracts || []).join(', ') || '-') + '</div>' +
                     '<div class="mt-4 grid gap-4 md:grid-cols-3">' +
@@ -1131,7 +1374,14 @@
             '</div>';
         }
 
-        const ANONYMIZED_SEGMENT_PATTERN = /\[(?:[A-Z][A-Z0-9_:\-\/]*[A-Z0-9])\]|\b(?:asset_[0-9a-f]+|TBL_\d+|COL_\d+|CLS_\d+|FUNC_\d+|API_\d+|SCR_\d+|Component\d+|Service\d+|Repository\d+|RuleFragment\d+|QueryFragment\d+|ReportQuery\d+|DataStore\d+|Slice\d+|FilterInput\d+)\b/gi;
+        const ANONYMIZED_SEGMENT_PATTERN = /\b(?:CLS|FUNC|VAR|TBL|COL|API)_\d+\b/g;
+
+        function anonymizedTokenLegend(label) {
+            return '<div class="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">' +
+                '<span class="rounded bg-white/10 px-1 text-slate-100">' + escapeHtml(label || 'CLS_001') + '</span>' +
+                '<span>흰 배경 토큰은 익명화된 실제 식별자입니다.</span>' +
+            '</div>';
+        }
 
         function highlightAnonymizedSegments(text) {
             const source = String(text || '');
@@ -1155,15 +1405,17 @@
             if (!lines.length) {
                 return '<div class="text-slate-500">비어 있음</div>';
             }
-            const lineTone = tone === 'expected_pattern'
+            const panelTone = tone === 'expected_pattern'
                 ? 'border-emerald-300/20 bg-emerald-500/10 text-emerald-50'
                 : 'border-cyan-300/20 bg-cyan-500/10 text-cyan-50';
-            return lines.map(function (line, index) {
-                return '<div class="grid grid-cols-[40px_1fr] gap-3 border px-3 py-2 font-mono text-xs leading-6 ' + lineTone + '">' +
+            const rows = lines.map(function (line, index) {
+                const rowBorder = index === 0 ? '' : ' border-t border-white/10';
+                return '<div class="grid grid-cols-[40px_1fr] gap-3 px-3 py-2 font-mono text-xs leading-6' + rowBorder + '">' +
                     '<div class="text-slate-400">' + escapeHtml(String(index + 1)) + '</div>' +
                     '<div class="whitespace-pre-wrap break-words">' + highlightAnonymizedSegments(line) + '</div>' +
                 '</div>';
             }).join('');
+            return '<div class="overflow-hidden rounded-2xl border ' + panelTone + '">' + rows + '</div>';
         }
 
         function inferStructureTheme(item) {
@@ -1279,6 +1531,65 @@
             }).join('') + '</div>';
         }
 
+        function normalizeStructureLines(text) {
+            return String(text || '')
+                .replace(/\r\n/g, '\n')
+                .replace(/\r/g, '\n')
+                .split('\n')
+                .map(function (line) { return line.trim(); })
+                .filter(Boolean);
+        }
+
+        function buildStructureChangePairs(currentText, recommendedText) {
+            const currentLines = normalizeStructureLines(currentText);
+            const recommendedLines = normalizeStructureLines(recommendedText);
+            const maxLength = Math.max(currentLines.length, recommendedLines.length);
+            const pairs = [];
+            for (let index = 0; index < maxLength; index += 1) {
+                const before = currentLines[index] || '';
+                const after = recommendedLines[index] || '';
+                if (!before && !after) continue;
+                if (before === after) continue;
+                pairs.push({ before: before, after: after });
+            }
+            if (!pairs.length && (currentLines.length || recommendedLines.length)) {
+                pairs.push({
+                    before: currentLines[0] || '',
+                    after: recommendedLines[0] || ''
+                });
+            }
+            return pairs.slice(0, 4);
+        }
+
+        function renderStructureChangePreview(currentText, recommendedText) {
+            const pairs = buildStructureChangePairs(currentText, recommendedText);
+            if (!pairs.length) {
+                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">직접 비교할 변경 포인트가 없습니다.</div>';
+            }
+            return '<div class="space-y-3">' + pairs.map(function (pair, index) {
+                const before = pair.before
+                    ? '<div class="mt-2 whitespace-pre-wrap break-words font-mono text-xs leading-6 text-slate-100">' + highlightAnonymizedSegments(pair.before) + '</div>'
+                    : '<div class="mt-2 text-xs text-slate-500">해당 줄 없음</div>';
+                const after = pair.after
+                    ? '<div class="mt-2 whitespace-pre-wrap break-words font-mono text-xs leading-6 text-slate-100">' + highlightAnonymizedSegments(pair.after) + '</div>'
+                    : '<div class="mt-2 text-xs text-slate-500">해당 줄 없음</div>';
+                return '<div class="rounded-2xl border border-white/10 bg-black/20 px-3 py-3">' +
+                    '<div class="text-[11px] uppercase tracking-[0.2em] text-slate-500">변경 포인트 ' + escapeHtml(String(index + 1)) + '</div>' +
+                    '<div class="mt-2 text-xs leading-6 text-slate-400">같은 위치의 변경 전과 변경 후를 비교해 승인 근거를 바로 읽습니다.</div>' +
+                    '<div class="mt-3 grid gap-3">' +
+                        '<div class="rounded-xl border border-rose-300/20 bg-rose-500/5 px-3 py-3">' +
+                            '<div class="text-[11px] uppercase tracking-[0.2em] text-rose-200">변경 전</div>' +
+                            before +
+                        '</div>' +
+                        '<div class="rounded-xl border border-emerald-300/20 bg-emerald-500/5 px-3 py-3">' +
+                            '<div class="text-[11px] uppercase tracking-[0.2em] text-emerald-200">변경 후</div>' +
+                            after +
+                        '</div>' +
+                    '</div>' +
+                '</div>';
+            }).join('') + '</div>';
+        }
+
         function renderStructureGuideCard(label, body, accentClass) {
             return '<div class="rounded-2xl border border-white/10 ' + (accentClass || 'bg-white/5') + ' px-4 py-4">' +
                 '<div class="text-[11px] uppercase tracking-[0.2em] text-slate-400">' + escapeHtml(label) + '</div>' +
@@ -1302,25 +1613,30 @@
                     '</div>' +
                     '<div class="mt-4 grid gap-4 xl:grid-cols-3">' +
                         '<div>' +
-                            '<div class="text-xs leading-6 text-slate-400">현재 시스템에서 관찰된 익명화 패턴입니다.<br>(실제 구조를 안전하게 치환한 형태입니다)</div>' +
-                            '<div class="text-[11px] uppercase tracking-[0.2em] text-cyan-300">현재 구조</div>' +
+                            '<div class="text-xs leading-6 text-slate-400">변경 전에 어떤 결합을 풀어야 하는지 보여주는 익명화 패턴입니다.<br>(실제 구조를 안전하게 치환한 형태입니다)</div>' +
+                            '<div class="text-[11px] uppercase tracking-[0.2em] text-cyan-300">변경 전</div>' +
+                            anonymizedTokenLegend('CLS_001') +
                             '<div class="mt-3 space-y-3">' +
-                                renderStructureGuideCard('이 카드에서 먼저 볼 점', copy.currentObservation, 'bg-cyan-500/10') +
+                                renderStructureGuideCard('왜 중요한가', copy.currentObservation, 'bg-cyan-500/10') +
                                 '<div class="space-y-2 overflow-y-auto pr-1" style="max-height: 24rem;">' + renderCodeDiffLines(item.current_structure || item.observed || item.before || '', 'current_structure') + '</div>' +
                             '</div>' +
                         '</div>' +
                         '<div>' +
-                            '<div class="text-xs leading-6 text-slate-400">권장되는 구조 패턴 예시입니다.<br>(실제 코드가 아니라, 개선 방향을 설명하기 위한 일반화된 형태입니다)</div>' +
-                            '<div class="text-[11px] uppercase tracking-[0.2em] text-emerald-300">권장 구조</div>' +
+                            '<div class="text-xs leading-6 text-slate-400">변경 후 어떤 경계를 고정할지 보여주는 권장 예시입니다.<br>(새 helper 이름만 예시용으로 생성될 수 있습니다)</div>' +
+                            '<div class="text-[11px] uppercase tracking-[0.2em] text-emerald-300">변경 후</div>' +
                             '<div class="mt-3 space-y-3">' +
-                                renderStructureGuideCard('이 구조로 바꾸면', copy.recommendedObservation, 'bg-emerald-500/10') +
+                                renderStructureGuideCard('왜 중요한가', copy.recommendedObservation, 'bg-emerald-500/10') +
                                 '<div class="space-y-2 overflow-y-auto pr-1" style="max-height: 24rem;">' + renderCodeDiffLines(item.recommended_structure || item.expected_pattern || item.after || '', 'expected_pattern') + '</div>' +
                             '</div>' +
                         '</div>' +
                         '<div>' +
-                            '<div class="text-xs leading-6 text-slate-400">현재 구조를 그대로 둘 때의 부담과, 권장 구조로 나눴을 때의 효과를 먼저 읽는 영역입니다.</div>' +
-                            '<div class="text-[11px] uppercase tracking-[0.2em] text-amber-300">차이 설명</div>' +
-                            '<div class="mt-3 overflow-y-auto pr-1" style="max-height: 24rem;">' + renderComparisonSummaryList(effectSummary) + '</div>' +
+                            '<div class="text-xs leading-6 text-slate-400">변경 전과 변경 후를 비교해 승인 근거를 바로 읽는 영역입니다.</div>' +
+                            '<div class="text-[11px] uppercase tracking-[0.2em] text-amber-300">근거</div>' +
+                            '<div class="mt-3 space-y-3 overflow-y-auto pr-1" style="max-height: 24rem;">' +
+                                renderStructureGuideCard('왜 중요한가', copy.decisionFocus, 'bg-amber-500/10') +
+                                renderStructureChangePreview(item.current_structure || item.observed || item.before || '', item.recommended_structure || item.expected_pattern || item.after || '') +
+                                renderComparisonSummaryList(effectSummary) +
+                            '</div>' +
                         '</div>' +
                     '</div>' +
                 '</div>';
@@ -1336,7 +1652,7 @@
             const reviewDiff = (((pkg || {}).extensions || {}).review_diff) || null;
             const whySection = document.getElementById('reviewDiffWhySection');
             const evidenceSection = document.getElementById('reviewDiffEvidenceSection');
-            if (!currentCapabilities.can_view_review_diff || !reviewDiff) {
+            if (!currentCapabilities.can_view_review_diff || !reviewDiff || usesSpecializedFamilySurface(pkg)) {
                 section.classList.add('hidden');
                 stickyBar.classList.add('hidden');
                 stickyBar.innerHTML = '';
@@ -1348,8 +1664,8 @@
                 return;
             }
             section.classList.remove('hidden');
-            stickyBar.classList.remove('hidden');
-            stickyBar.innerHTML = renderReviewDiffStickyBar(pkg, reviewDiff);
+            stickyBar.classList.add('hidden');
+            stickyBar.innerHTML = '';
             resetReviewDiffSections();
             decisionBox.innerHTML = renderReviewDiffDecisionBox(reviewDiff);
             evidenceBox.innerHTML = renderReviewDiffEvidenceBox(reviewDiff);
@@ -1399,21 +1715,33 @@
         }
 
         function renderExternalSummaryCards(explanation) {
+            const hero = (((currentPackage || {}).display || {}).hero || {});
             const cards = (explanation || {}).summary_cards || [];
             const preferredOrder = ['judgment', 'strategy', 'execution'];
             const orderedCards = preferredOrder.map(function (key) {
                 return cards.find(function (card) { return card.card_key === key; });
             }).filter(Boolean);
+            const heroCard = hero.headline
+                ? '<div class="rounded-2xl border border-cyan-300/20 bg-cyan-500/10 px-4 py-4">' +
+                    '<div class="text-xs uppercase tracking-[0.2em] text-cyan-200">' + escapeHtml(hero.label || '한 줄 결론') + '</div>' +
+                    '<div class="mt-3 text-sm leading-7 text-slate-100">' + escapeHtml(hero.headline || '-') + '</div>' +
+                    '<div class="mt-4 grid gap-3 md:grid-cols-2">' +
+                        renderDecisionMetric('영향', hero.impact || '-', 'text-rose-200') +
+                        renderDecisionMetric('우선 조치', hero.priority_action || '-', 'text-emerald-200') +
+                    '</div>' +
+                    '</div>'
+                : '';
             if (!orderedCards.length) {
-                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">외부 요약 카드가 없습니다.</div>';
+                return heroCard || '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">외부 요약 카드가 없습니다.</div>';
             }
-            return orderedCards.map(function (card) {
+            const renderedCards = orderedCards.map(function (card) {
                 return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
                     '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">' + escapeHtml(card.title || '-') + '</div>' +
                     '<div class="mt-3 text-sm leading-7 text-slate-100">' + escapeHtml(card.body || '-') + '</div>' +
                     renderExternalEvidenceHint(card.citations || []) +
                     '</div>';
             }).join('');
+            return heroCard ? heroCard + renderedCards : renderedCards;
         }
 
         function renderCustomerIntentBox(customerIntent) {
@@ -1477,33 +1805,341 @@
                     '</div>' +
                     '<div class="mt-4 grid gap-4 xl:grid-cols-3">' +
                         '<div class="rounded-2xl border border-white/10 bg-cyan-500/5 px-4 py-4">' +
-                            '<div class="text-[11px] uppercase tracking-[0.2em] text-cyan-200">현재 구조</div>' +
-                            '<div class="mt-2 text-xs leading-6 text-slate-400">실제 구조를 안전하게 치환한 익명화 패턴입니다.</div>' +
+                            '<div class="text-[11px] uppercase tracking-[0.2em] text-cyan-200">변경 전</div>' +
+                            '<div class="mt-2 text-xs leading-6 text-slate-400">지금 어떤 결합을 풀어야 하는지 보여주는 익명화 패턴입니다.</div>' +
+                            anonymizedTokenLegend('CLS_001') +
+                            '<div class="mt-3 text-xs leading-6 text-cyan-100">' + escapeHtml(copy.currentObservation || '-') + '</div>' +
                             '<div class="mt-3 rounded-2xl border border-white/10 bg-black/30 px-3 py-3 text-sm leading-6 text-slate-100">' +
                                 renderCodeDiffLines(currentSnippet, 'current_structure') +
                             '</div>' +
                         '</div>' +
                         '<div class="rounded-2xl border border-white/10 bg-emerald-500/5 px-4 py-4">' +
-                            '<div class="text-[11px] uppercase tracking-[0.2em] text-emerald-200">권장 구조</div>' +
-                            '<div class="mt-2 text-xs leading-6 text-slate-400">개선 방향을 설명하기 위한 일반화 패턴입니다.</div>' +
+                            '<div class="text-[11px] uppercase tracking-[0.2em] text-emerald-200">변경 후</div>' +
+                            '<div class="mt-2 text-xs leading-6 text-slate-400">어떤 경계를 먼저 고정해야 하는지 보여주는 권장 예시입니다.</div>' +
+                            '<div class="mt-3 text-xs leading-6 text-emerald-100">' + escapeHtml(copy.recommendedObservation || '-') + '</div>' +
                             '<div class="mt-3 rounded-2xl border border-white/10 bg-black/30 px-3 py-3 text-sm leading-6 text-slate-100">' +
                                 renderCodeDiffLines(recommendedSnippet, 'expected_pattern') +
                             '</div>' +
                         '</div>' +
                         '<div class="rounded-2xl border border-white/10 bg-amber-500/5 px-4 py-4">' +
-                            '<div class="text-[11px] uppercase tracking-[0.2em] text-amber-200">이렇게 달라집니다</div>' +
-                            '<div class="mt-2 text-xs leading-6 text-slate-400">왜 이 방향이 더 안전한지 효과 중심으로 먼저 읽는 영역입니다.</div>' +
-                            '<div class="mt-3">' + renderComparisonSummaryList(effectSummary) + '</div>' +
+                            '<div class="text-[11px] uppercase tracking-[0.2em] text-amber-200">근거</div>' +
+                            '<div class="mt-2 text-xs leading-6 text-slate-400">변경 전과 변경 후를 비교해 승인 근거를 바로 읽는 영역입니다.</div>' +
+                            '<div class="mt-3 text-xs leading-6 text-amber-100">' + escapeHtml(copy.decisionFocus || '-') + '</div>' +
+                            '<div class="mt-3 space-y-3">' +
+                                renderStructureChangePreview(currentSnippet, recommendedSnippet) +
+                                renderComparisonSummaryList(effectSummary) +
+                            '</div>' +
                         '</div>' +
                     '</div>' +
                 '</div>';
             }).join('');
         }
 
+        function normalizeJudgmentText(value) {
+            return String(value == null ? '' : value).replace(/\s+/g, ' ').trim();
+        }
+
+        function localizeJudgmentDisplayText(value) {
+            let text = normalizeJudgmentText(value);
+            if (!text) return '';
+            [
+                [/Validation guard logic is distributed across layers/g, '검증 방어 로직이 여러 계층에 분산되어 있습니다'],
+                [/Repeated business predicate appears in multiple locations/g, '반복되는 업무 조건이 여러 위치에 나타납니다'],
+                [/State transition logic appears in multiple locations/g, '상태 전이 로직이 여러 위치에 나타납니다'],
+                [/contains validation, persistence, async_orchestration responsibilities/g, '검증, 저장, 비동기 오케스트레이션 책임이 함께 포함되어 있습니다'],
+                [/contains validation, persistence responsibilities/g, '검증과 저장 책임이 함께 포함되어 있습니다'],
+                [/validation guard logic/gi, '검증 방어 로직'],
+                [/repeated business predicate/gi, '반복되는 업무 조건'],
+                [/state transition logic/gi, '상태 전이 로직'],
+                [/async_orchestration/gi, '비동기 오케스트레이션'],
+                [/persistence responsibilities/gi, '저장 책임'],
+                [/validation responsibilities/gi, '검증 책임']
+            ].forEach(function (entry) {
+                text = text.replace(entry[0], entry[1]);
+            });
+            return text;
+        }
+
+        function textFromJudgmentItem(item) {
+            if (item == null) return '';
+            if (Array.isArray(item)) {
+                return item.map(textFromJudgmentItem).filter(Boolean).join(' ');
+            }
+            if (typeof item !== 'object') {
+                return localizeJudgmentDisplayText(item);
+            }
+            if (item.field || item.reason) {
+                return localizeJudgmentDisplayText([item.field || item.item || item.name, item.reason].filter(Boolean).join(': '));
+            }
+            const keys = [
+                'summary',
+                'title',
+                'decision',
+                'rationale',
+                'reason',
+                'claim',
+                'risk',
+                'impact',
+                'item',
+                'name',
+                'description',
+                'body',
+                'message',
+                'checkpoint',
+                'selection_reason',
+                'priority_reason',
+                'action',
+                'structure_summary'
+            ];
+            for (let i = 0; i < keys.length; i += 1) {
+                const value = localizeJudgmentDisplayText(item[keys[i]]);
+                if (value) return value;
+            }
+            return '';
+        }
+
+        function collectUniqueJudgmentTexts(values, limit, excludedTexts) {
+            const out = [];
+            const seen = {};
+            const excluded = {};
+            (excludedTexts || []).forEach(function (text) {
+                const key = normalizeJudgmentText(text).toLowerCase();
+                if (key) excluded[key] = true;
+            });
+            function push(value) {
+                if (Array.isArray(value)) {
+                    value.forEach(push);
+                    return;
+                }
+                const text = textFromJudgmentItem(value);
+                const key = text.toLowerCase();
+                if (!text || seen[key] || excluded[key]) return;
+                seen[key] = true;
+                out.push(text);
+            }
+            push(values);
+            return typeof limit === 'number' ? out.slice(0, limit) : out;
+        }
+
+        function firstJudgmentText(values, fallback) {
+            const texts = collectUniqueJudgmentTexts(values, 1);
+            return texts.length ? texts[0] : (fallback || '');
+        }
+
+        function renderJudgmentTextList(items, emptyMessage, accentClass) {
+            const values = collectUniqueJudgmentTexts(items, 5);
+            if (!values.length) {
+                return '<div class="rounded-2xl border border-dashed border-white/10 px-3 py-4 text-[13px] leading-6 text-slate-500 sm:px-4 sm:py-5 sm:text-sm">' + escapeHtml(emptyMessage || '판단에 필요한 정보가 부족합니다.') + '</div>';
+            }
+            return '<div class="space-y-2">' +
+                values.map(function (item) {
+                    return '<div class="break-words rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-[13px] leading-6 sm:px-4 sm:py-3 sm:text-sm sm:leading-7 ' + (accentClass || 'text-slate-200') + '">' + escapeHtml(item) + '</div>';
+                }).join('') +
+                '</div>';
+        }
+
+        function renderJudgmentPanel(label, title, bodyHtml, toneClass) {
+            return '<section class="rounded-[1.25rem] border px-4 py-4 sm:rounded-[1.5rem] sm:px-5 sm:py-5 ' + (toneClass || 'border-white/10 bg-black/20') + '">' +
+                '<div class="text-xs uppercase tracking-[0.22em] text-slate-500">' + escapeHtml(label) + '</div>' +
+                '<h4 class="mt-2 text-base font-semibold text-slate-100 sm:text-lg">' + escapeHtml(title) + '</h4>' +
+                '<div class="mt-4">' + bodyHtml + '</div>' +
+                '</section>';
+        }
+
+        function comparisonPointText(point) {
+            if (!point || typeof point !== 'object') return textFromJudgmentItem(point);
+            const label = normalizeJudgmentText(point.label || point.metric || point.name);
+            const value = normalizeJudgmentText(point.value || point.summary || point.decision || point.reason);
+            if (label && value) return label + ': ' + value;
+            return label || value || textFromJudgmentItem(point);
+        }
+
+        function buildJudgmentOptions(pkg) {
+            const sections = displaySections(pkg);
+            const displayItems = (((sections || {}).design_options || {}).items || []);
+            const design = (pkg || {}).design || {};
+            const rawItems = displayItems.length ? displayItems : ((pkg || {}).design_options || design.design_options || []);
+            const recommended = (pkg || {}).recommended_option || design.recommended_option || {};
+            const recommendedName = normalizeJudgmentText(recommended.name || recommended.title || recommended.option);
+            const candidates = rawItems.length ? rawItems : (recommendedName ? [recommended] : []);
+            return candidates.filter(function (item) {
+                return item && (typeof item !== 'object' || textFromJudgmentItem(item));
+            }).slice(0, 4).map(function (item, index) {
+                const name = normalizeJudgmentText(item.name || item.title || item.option || item.item || (recommendedName && index === 0 ? recommendedName : '선택지 ' + (index + 1)));
+                const decision = firstJudgmentText([
+                    item.decision,
+                    item.summary,
+                    item.structure_summary,
+                    item.description,
+                    item.action,
+                    item.selection_reason,
+                    recommended.decision,
+                    recommended.summary
+                ], '선택지 설명을 보강해야 합니다.');
+                const selected = item.recommended === true || (recommendedName && name.toLowerCase() === recommendedName.toLowerCase());
+                return {
+                    name: name,
+                    decision: decision,
+                    selected: selected,
+                    priority: normalizeJudgmentText(item.priority || item.confidence || ''),
+                    comparison: collectUniqueJudgmentTexts((item.comparison_points || []).map(comparisonPointText), 3),
+                    advantages: collectUniqueJudgmentTexts([item.advantages, item.benefits], 2),
+                    risks: collectUniqueJudgmentTexts([item.risks, item.tradeoffs, item.unchanged_consequence], 2),
+                    reason: firstJudgmentText([item.selection_reason, item.priority_reason, item.reason, item.action], '')
+                };
+            });
+        }
+
+        function renderJudgmentOptions(options) {
+            if (!options.length) {
+                return '<div class="rounded-2xl border border-dashed border-cyan-300/20 bg-cyan-500/5 px-4 py-6 text-sm text-cyan-100">비교 가능한 선택지가 아직 정규화되지 않았습니다. 근거가 충분해지면 선택지 비교가 이 영역에 표시됩니다.</div>';
+            }
+            return '<div class="grid gap-4 xl:grid-cols-2">' +
+                options.map(function (option) {
+                    const badge = option.selected
+                        ? '<span class="rounded-full border border-cyan-300/30 bg-cyan-500/20 px-3 py-1 text-xs text-cyan-100">권장</span>'
+                        : '<span class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300">비교</span>';
+                    const meta = option.priority ? '<span class="rounded-full border border-fuchsia-300/20 bg-fuchsia-500/10 px-3 py-1 text-xs text-fuchsia-100">' + escapeHtml(option.priority) + '</span>' : '';
+                    return '<article class="rounded-[1.25rem] border px-3 py-4 sm:rounded-[1.5rem] sm:px-5 sm:py-5 ' + (option.selected ? 'border-cyan-300/30 bg-cyan-500/10' : 'border-white/10 bg-black/20') + '">' +
+                        '<div class="flex flex-wrap items-center justify-between gap-3">' +
+                            '<h5 class="text-sm font-semibold leading-6 text-slate-100 sm:text-base">' + escapeHtml(option.name || '-') + '</h5>' +
+                            '<div class="flex flex-wrap gap-2">' + badge + meta + '</div>' +
+                        '</div>' +
+                        '<p class="mt-3 break-words text-sm leading-6 text-slate-200 sm:mt-4 sm:leading-7">' + escapeHtml(option.decision || '-') + '</p>' +
+                        (option.reason ? '<div class="mt-3 break-words rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-[12px] leading-6 text-slate-300 sm:text-xs">판단 이유: ' + escapeHtml(option.reason) + '</div>' : '') +
+                        '<div class="mt-4 grid gap-3 md:grid-cols-2">' +
+                            '<div><div class="text-[11px] uppercase tracking-[0.18em] text-emerald-200">장점</div>' + renderJudgmentTextList(option.advantages, '장점 정보 없음', 'text-slate-200') + '</div>' +
+                            '<div><div class="text-[11px] uppercase tracking-[0.18em] text-rose-200">주의점</div>' + renderJudgmentTextList(option.risks, '주의점 정보 없음', 'text-slate-200') + '</div>' +
+                        '</div>' +
+                        (option.comparison.length ? '<div class="mt-4"><div class="text-[11px] uppercase tracking-[0.18em] text-slate-500">비교 포인트</div><div class="mt-2">' + renderJudgmentTextList(option.comparison, '', 'text-slate-200') + '</div></div>' : '') +
+                        '</article>';
+                }).join('') +
+                '</div>';
+        }
+
+        function buildJudgmentBoardModel(pkg) {
+            const safePkg = pkg || {};
+            const project = safePkg.project || {};
+            const display = safePkg.display || {};
+            const hero = display.hero || {};
+            const sections = displaySections(safePkg);
+            const diagnosis = safePkg.diagnosis || {};
+            const auth = safePkg.authoritative_payload || {};
+            const structureSnapshot = auth.structure_snapshot || safePkg.structure_snapshot || {};
+            const diagnosisReport = auth.diagnosis_report || {};
+            const decisionSummary = auth.decision_summary || {};
+            const structureStats = [];
+            const componentCount = (structureSnapshot.components || structureSnapshot.objects || []).length;
+            const flowCount = (structureSnapshot.flows || structureSnapshot.steps || structureSnapshot.slices || []).length;
+            if (componentCount) structureStats.push('확인된 구성 요소 ' + componentCount + '개');
+            if (flowCount) structureStats.push('확인된 처리 흐름 ' + flowCount + '개');
+
+            const conclusion = firstJudgmentText([
+                safePkg.core_conclusion,
+                hero.headline,
+                ((safePkg.recommended_option || {}).decision),
+                ((safePkg.design || {}).recommended_option || {}).decision
+            ], '결론을 생성하려면 판단 근거가 더 필요합니다.');
+            const action = firstJudgmentText([
+                hero.priority_action,
+                (safePkg.recommended_directions || [])[0],
+                ((safePkg.recommended_option || {}).action),
+                ((safePkg.design || {}).recommended_option || {}).action
+            ], '후속 검증 항목을 먼저 정해야 합니다.');
+
+            const risks = collectUniqueJudgmentTexts([
+                ((sections.risks || {}).items || []),
+                diagnosis.risks || [],
+                diagnosisReport.risks || []
+            ], 5);
+            const missing = collectUniqueJudgmentTexts([
+                ((sections.risks || {}).missing_context_details || []),
+                diagnosis.missing_context_details || [],
+                safePkg.missing_context_details || []
+            ], 4);
+
+            const situation = collectUniqueJudgmentTexts([
+                safePkg.report_purpose,
+                project.goal,
+                safePkg.analysis_summary,
+                structureSnapshot.summary,
+                structureStats
+            ], 4, [conclusion]);
+            const problem = collectUniqueJudgmentTexts([
+                diagnosisReport.summary,
+                diagnosisReport.issues || [],
+                diagnosis.analysis_summary,
+                safePkg.primary_judgment_reason
+            ], 4, [conclusion].concat(situation));
+            const questions = collectUniqueJudgmentTexts([
+                safePkg.report_questions || [],
+                safePkg.user_question,
+                safePkg.question_axis ? '판단 축: ' + safePkg.question_axis : '',
+                safePkg.family_classification ? '분석 대상 성격에 맞춰 유지, 분리, 재구성 범위를 결정해야 하는가?' : ''
+            ], 3, [conclusion].concat(situation).concat(problem));
+            const criteria = collectUniqueJudgmentTexts([
+                decisionSummary.summary,
+                decisionSummary.decisions || [],
+                safePkg.primary_judgment_reason,
+                safePkg.retained_contracts || [],
+                safePkg.verification_checkpoints || []
+            ], 5, [conclusion].concat(situation).concat(problem).concat(questions));
+
+            return {
+                situation: situation,
+                problem: problem,
+                questions: questions,
+                options: buildJudgmentOptions(safePkg),
+                criteria: criteria,
+                conclusion: conclusion,
+                action: action,
+                confidence: firstJudgmentText([
+                    (safePkg.confidence || {}).level,
+                    safePkg.confidence,
+                    hero.confidence,
+                    safePkg.primary_judgment
+                ], ''),
+                risks: risks,
+                missing: missing
+            };
+        }
+
+        function renderJudgmentBoard(pkg, options) {
+            const model = buildJudgmentBoardModel(pkg);
+            const mode = (options || {}).mode || 'internal';
+            const situation = renderJudgmentTextList(model.situation, '상황과 목적을 판단할 구조 정보가 부족합니다.');
+            const problem = renderJudgmentTextList(model.problem, '문제 정의를 내리려면 진단 근거가 더 필요합니다.');
+            const questions = renderJudgmentTextList(model.questions.length ? model.questions : ['이 대상은 어떤 기준으로 유지, 분리, 재구성해야 하는가?'], '판단 질문을 생성하지 못했습니다.', 'text-cyan-100');
+            const criteria = renderJudgmentTextList(model.criteria, '선택지를 비교할 기준이 아직 충분히 정규화되지 않았습니다.');
+            const riskBody = '<div class="grid gap-4 xl:grid-cols-2">' +
+                '<div><div class="text-[11px] uppercase tracking-[0.18em] text-rose-200">주요 리스크</div><div class="mt-2">' + renderJudgmentTextList(model.risks, '정규화된 리스크가 부족합니다.', 'text-rose-100') + '</div></div>' +
+                '<div><div class="text-[11px] uppercase tracking-[0.18em] text-amber-200">확인 필요</div><div class="mt-2">' + renderJudgmentTextList(model.missing, '추가 확인 항목 없음', 'text-amber-100') + '</div></div>' +
+                '</div>';
+            const conclusionBody = '<div class="rounded-[1.25rem] border border-cyan-300/30 bg-cyan-500/10 px-4 py-4 sm:rounded-[1.5rem] sm:px-5 sm:py-5">' +
+                '<div class="break-words text-lg font-semibold leading-8 text-slate-50 sm:text-xl sm:leading-9">' + escapeHtml(model.conclusion) + '</div>' +
+                '<div class="mt-4 grid gap-3 md:grid-cols-2">' +
+                    '<div class="break-words rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-sm leading-6 text-slate-200 sm:px-4 sm:leading-7"><span class="text-emerald-200">다음 조치</span><br>' + escapeHtml(model.action) + '</div>' +
+                    '<div class="break-words rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-sm leading-6 text-slate-200 sm:px-4 sm:leading-7"><span class="text-slate-400">판단 상태</span><br>' + escapeHtml(model.confidence || (mode === 'external' ? '검토 필요' : '근거 기준 검토')) + '</div>' +
+                '</div>' +
+                '</div>';
+            return '<div class="grid gap-5">' +
+                renderJudgmentPanel('1. 상황 / 목적', '분석 대상과 이번 판단의 목적', situation, 'border-white/10 bg-black/20') +
+                renderJudgmentPanel('2. 문제 정의', '현재 판단을 어렵게 만드는 문제', problem, 'border-white/10 bg-black/20') +
+                renderJudgmentPanel('3. 판단 질문', '이 화면에서 답해야 할 질문', questions, 'border-cyan-300/20 bg-cyan-500/5') +
+                renderJudgmentPanel('4. 선택지 비교', '가능한 방향과 trade-off', renderJudgmentOptions(model.options), 'border-cyan-300/30 bg-cyan-500/10') +
+                renderJudgmentPanel('5. 판단 기준', '선택지를 비교한 기준', criteria, 'border-white/10 bg-black/20') +
+                renderJudgmentPanel('6. 결론', '짧게 확정할 판단', conclusionBody, 'border-cyan-300/30 bg-cyan-500/10') +
+                renderJudgmentPanel('7. 리스크', '결정 전 확인해야 할 위험', riskBody, 'border-rose-300/25 bg-rose-500/10') +
+                '</div>';
+        }
+
         function renderExternalSurface(pkg, explanation) {
             currentPackage = pkg;
             document.getElementById('loadingState').classList.add('hidden');
             renderProjectHeader(pkg);
+            applyOperationalSurfaceCopy(pkg);
+            document.getElementById('externalJudgmentBoardBox').innerHTML = renderJudgmentBoard(pkg || {}, { mode: 'external' });
+            const specializedFamily = usesSpecializedFamilySurface(pkg);
             const comparisonSection = document.getElementById('externalComparisonSection');
             const comparisonBox = document.getElementById('externalComparisonBox');
             const customerIntentSection = document.getElementById('externalCustomerIntentSection');
@@ -1518,7 +2154,7 @@
                 customerIntentSection.classList.add('hidden');
                 customerIntentBox.innerHTML = '';
             }
-            if (structureComparison.available && (structureComparison.items || []).length) {
+            if (!specializedFamily && structureComparison.available && (structureComparison.items || []).length) {
                 comparisonSection.classList.remove('hidden');
                 comparisonBox.innerHTML = renderExternalStructureComparisonPanel(structureComparison);
             } else {
@@ -1572,16 +2208,13 @@
         }
 
         function renderExecutiveSummary(pkg) {
-            const executive = (pkg || {}).executive_summary || {};
-            if (!executive.core_message) {
+            const hero = (((pkg || {}).display || {}).hero || {});
+            const executive = ((((pkg || {}).display || {}).sections || {}).executive || {});
+            const reasonLabel = executive.reason_label || '판단 근거';
+            const actionLabel = executive.action_label || '실행 조치';
+            if (!hero.headline) {
                 return '<div class="rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-4 text-sm text-rose-200">요약 정보 누락</div>';
             }
-            const humanizeExecutiveState = function (state) {
-                const normalized = String(state || '').trim().toLowerCase();
-                if (normalized === 'partial') return '초안';
-                if (normalized === 'pending') return '생성 중';
-                return '';
-            };
             const renderBulletGroup = function (title, items, accentClass) {
                 const values = (items && items.length) ? items : ['해당 없음'];
                 return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
@@ -1593,18 +2226,18 @@
                     '</div>' +
                     '</div>';
             };
-            const stateLabel = humanizeExecutiveState(executive.state);
-            return '<div>' +
-                (stateLabel
-                    ? '<div class="mb-4 inline-flex rounded-full border border-amber-300/20 bg-amber-500/10 px-3 py-1 text-xs text-amber-100">' + escapeHtml(stateLabel) + '</div>'
-                    : '') +
-                '<div class="mt-4 grid gap-4 xl:grid-cols-[1.05fr_1fr_1fr]">' +
-                    '<div class="rounded-2xl border border-cyan-300/20 bg-cyan-500/5 px-4 py-4">' +
-                    '<div class="text-xs uppercase tracking-[0.2em] text-cyan-200">결정 요약</div>' +
-                    '<div class="mt-3 text-sm leading-7 text-slate-100">' + escapeHtml(executive.core_message || '-') + '</div>' +
+            return '<div class="space-y-4">' +
+                '<div class="rounded-3xl border border-cyan-300/20 bg-cyan-500/10 px-5 py-5">' +
+                    '<div class="text-xs uppercase tracking-[0.2em] text-cyan-200">' + escapeHtml(hero.label || '한 줄 결론') + '</div>' +
+                    '<div class="mt-3 text-lg leading-8 text-slate-100">' + escapeHtml(hero.headline || '-') + '</div>' +
+                    '<div class="mt-4 grid gap-3 md:grid-cols-2">' +
+                        renderDecisionMetric('영향', hero.impact || '-', 'text-rose-200') +
+                        renderDecisionMetric('우선 조치', hero.priority_action || '-', 'text-emerald-200') +
                     '</div>' +
-                    renderBulletGroup('판단 근거', executive.summary_lines || [], 'text-slate-500') +
-                    renderBulletGroup('실행 조치', executive.next_steps || [], 'text-emerald-200') +
+                '</div>' +
+                '<div class="mt-4 grid gap-4 xl:grid-cols-2">' +
+                    renderBulletGroup(reasonLabel, executive.impact_lines || [], 'text-slate-500') +
+                    renderBulletGroup(actionLabel, executive.action_lines || [], 'text-emerald-200') +
                 '</div>' +
                 '</div>';
         }
@@ -1613,7 +2246,15 @@
             currentPackage = pkg;
             document.getElementById('loadingState').classList.add('hidden');
             renderProjectHeader(pkg);
+            applyOperationalSurfaceCopy(pkg);
+            document.getElementById('judgmentBoardBox').innerHTML = renderJudgmentBoard(pkg || {}, { mode: 'internal' });
             document.getElementById('executiveSummaryBox').innerHTML = renderExecutiveSummary(pkg || {});
+            const display = (pkg || {}).display || {};
+            const sections = displaySections(pkg);
+            const states = displayStates(pkg);
+            const analysisFirst = usesAnalysisFirstSurface(pkg);
+            const comparisonFirst = usesComparisonFirstSurface(pkg);
+            const specializedFamily = analysisFirst || comparisonFirst;
             const customerIntentSection = document.getElementById('customerIntentSection');
             const customerIntentBox = document.getElementById('customerIntentBox');
             const customerIntent = (pkg || {}).customer_intent || {};
@@ -1627,20 +2268,22 @@
             const structureComparisonSection = document.getElementById('structureComparisonSection');
             const structureComparisonBox = document.getElementById('structureComparisonBox');
             const structureComparison = (pkg || {}).structure_comparison || {};
-            if (structureComparison.available && (structureComparison.items || []).length) {
+            if (!specializedFamily && structureComparison.available && (structureComparison.items || []).length) {
                 structureComparisonSection.classList.remove('hidden');
                 structureComparisonBox.innerHTML = renderStructureComparisonPanel(structureComparison);
             } else {
                 structureComparisonSection.classList.add('hidden');
                 structureComparisonBox.innerHTML = '';
             }
-            document.getElementById('coreRulesBox').innerHTML = renderGroundedRules(pkg.grounded_business_rules || [], pkg.diagnosis.state || '결과 생성 중');
-            document.getElementById('optionsBox').innerHTML = renderOptions(pkg.design_options || [], pkg.design.state || '결과 생성 중');
-            document.getElementById('planBox').innerHTML = renderPlan(pkg.execution_plan || [], pkg.design.state || '결과 생성 중');
+            document.getElementById('coreRulesBox').innerHTML = renderGroundedRules(sections.grounded_rules || {});
+            document.getElementById('optionsBox').innerHTML = analysisFirst
+                ? renderOperationalFollowupChecks(pkg, sections.design_options || {})
+                : renderOptions(sections.design_options || {});
+            document.getElementById('planBox').innerHTML = renderPlan(sections.execution_plan || {});
 
             const diagnosisHtml = [];
-            diagnosisHtml.push('<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">리스크</div><div class="mt-3">' + listOrState(pkg.diagnosis.risks || [], pkg.diagnosis.state) + '</div></div>');
-            diagnosisHtml.push('<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">확인 필요 자료</div><div class="mt-3">' + renderMissing(pkg.diagnosis.missing_context_details || [], pkg.diagnosis.state) + '</div></div>');
+            diagnosisHtml.push('<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">리스크</div><div class="mt-3">' + listOrState(((sections.risks || {}).items || []), ((sections.risks || {}).empty_message || '리스크 범위를 다시 확인해야 합니다.')) + '</div></div>');
+            diagnosisHtml.push('<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">확인 필요 자료</div><div class="mt-3">' + renderMissing(((sections.risks || {}).missing_context_details || []), ((sections.risks || {}).missing_context_empty_message || '추가 확인 자료를 다시 정해야 합니다.')) + '</div></div>');
             document.getElementById('diagnosisBox').innerHTML = diagnosisHtml.join('');
 
             const design = pkg.design || {};
@@ -1664,50 +2307,52 @@
                     '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">문서 맥락</div>' +
                     '<div class="mt-3 text-sm text-slate-200">목적: ' + escapeHtml(String(pkg.report_purpose || '').trim() || '이 실행의 목적이 아직 정리되지 않았습니다.') + '</div>' +
                     '<div class="mt-4 grid gap-4 md:grid-cols-2">' +
-                        '<div><div class="text-[11px] text-slate-500">분석 범위</div><div class="mt-2">' + listOrState(pkg.report_scope || [], '해당 없음') + '</div></div>' +
-                        '<div><div class="text-[11px] text-slate-500">검증 질문</div><div class="mt-2">' + listOrState(pkg.report_questions || [], '해당 없음') + '</div></div>' +
+                        '<div><div class="text-[11px] text-slate-500">분석 범위</div><div class="mt-2">' + listOrState(pkg.report_scope || [], states.report_scope || '분석 범위를 다시 확인해야 합니다.') + '</div></div>' +
+                        '<div><div class="text-[11px] text-slate-500">검증 질문</div><div class="mt-2">' + listOrState(pkg.report_questions || [], states.report_questions || '검증 질문을 다시 정해야 합니다.') + '</div></div>' +
                     '</div>' +
                 '</div>'
             );
             appendixSections.push(
                 '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
                     '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">유지 계약</div>' +
-                    '<div class="mt-3">' + renderCardList(pkg.retained_contracts || [], pkg.diagnosis.state || '결과 생성 중', 'item', 'basis', '') + '</div>' +
-                '</div>'
-            );
-            appendixSections.push(
-                '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
-                    '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">분리 우선순위</div>' +
-                    '<div class="mt-3">' + renderPriority(pkg.priority_split_items || [], pkg.design.state || '결과 생성 중') + '</div>' +
+                    '<div class="mt-3">' + renderCardList(pkg.retained_contracts || [], states.retained_contracts || '유지 계약을 다시 정해야 합니다.', 'item', 'basis', '') + '</div>' +
                 '</div>'
             );
             appendixSections.push(
                 '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
                     '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">확인 필요 항목</div>' +
-                    '<div class="mt-3">' + renderCardList(pkg.verification_checkpoints || [], pkg.diagnosis.state || '결과 생성 중', 'item', 'reason', '') + '</div>' +
+                    '<div class="mt-3">' + renderCardList(pkg.verification_checkpoints || [], states.verification || '검증 항목을 다시 정해야 합니다.', 'item', 'reason', '') + '</div>' +
                 '</div>'
             );
-            appendixSections.push(
-                '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
-                    '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">설계 메모</div>' +
-                    '<div class="mt-3">' + listOrState(design.rebuild_strategy || [], design.state || '결과 생성 중') + '</div>' +
-                    '<div class="mt-4 grid gap-4 md:grid-cols-3">' +
-                        renderLayerSection('데이터 계약', layer.database) +
-                        renderLayerSection('API 및 정책', layer.backend) +
-                        renderLayerSection('화면 구조', layer.frontend) +
-                    '</div>' +
-                '</div>'
-            );
-            appendixSections.push(
-                '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
-                    '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">전환 초안</div>' +
-                    '<div class="mt-4 grid gap-4 md:grid-cols-3">' +
-                        renderLayerSection('database', recomposition.database) +
-                        renderLayerSection('backend', recomposition.backend) +
-                        renderLayerSection('frontend', recomposition.frontend) +
-                    '</div>' +
-                '</div>'
-            );
+            if (!analysisFirst && !comparisonFirst) {
+                appendixSections.push(
+                    '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
+                        '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">분리 우선순위</div>' +
+                        '<div class="mt-3">' + renderPriority(pkg.priority_split_items || [], states.priority_split || '작업 우선순위를 다시 정해야 합니다.') + '</div>' +
+                    '</div>'
+                );
+                appendixSections.push(
+                    '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
+                        '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">설계 메모</div>' +
+                        '<div class="mt-3">' + listOrState(design.rebuild_strategy || [], states.rebuild_strategy || '구조 전략을 다시 정해야 합니다.') + '</div>' +
+                        '<div class="mt-4 grid gap-4 md:grid-cols-3">' +
+                            renderLayerSection('데이터 계약', layer.database, states.rebuild_strategy || '데이터 계약 경계를 다시 정해야 합니다.') +
+                            renderLayerSection('API 및 정책', layer.backend, states.rebuild_strategy || 'API 경계를 다시 정해야 합니다.') +
+                            renderLayerSection('화면 구조', layer.frontend, states.rebuild_strategy || '화면 경계를 다시 정해야 합니다.') +
+                        '</div>' +
+                    '</div>'
+                );
+                appendixSections.push(
+                    '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
+                        '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">전환 초안</div>' +
+                        '<div class="mt-4 grid gap-4 md:grid-cols-3">' +
+                            renderLayerSection('database', recomposition.database, states.transition_draft || 'database 전환 초안을 다시 정해야 합니다.') +
+                            renderLayerSection('backend', recomposition.backend, states.transition_draft || 'backend 전환 초안을 다시 정해야 합니다.') +
+                            renderLayerSection('frontend', recomposition.frontend, states.transition_draft || 'frontend 전환 초안을 다시 정해야 합니다.') +
+                        '</div>' +
+                    '</div>'
+                );
+            }
             appendixSections.push(renderProvenance(provenance));
             appendixSections.push(renderScopeNotice(scopeNotice));
             appendixSections.push(
@@ -1729,12 +2374,20 @@
 
         async function bootstrap() {
             try {
-                const res = await fetch('/projects/' + encodeURIComponent(projectId) + '/result?format=json&surface_mode=' + encodeURIComponent(currentSurfaceMode), { headers: authHeaders() });
+                let resultUrl = '/projects/' + encodeURIComponent(projectId) + '/result?format=json&surface_mode=' + encodeURIComponent(currentSurfaceMode);
+                if (currentRunId) {
+                    resultUrl += '&run_id=' + encodeURIComponent(currentRunId);
+                }
+                const res = await fetch(resultUrl, { headers: authHeaders() });
                 if (!res.ok) throw new Error(res.status === 403 ? '프로젝트 접근 권한이 없습니다.' : '결과 패키지를 불러오지 못했습니다.');
                 const pkg = await res.json();
                 if (currentAccessPolicy.surfaceVariant === 'external_presentation') {
+                    let explanationUrl = '/projects/' + encodeURIComponent(projectId) + '/result/explanation?audience=manager&surface_mode=external';
+                    if (currentRunId) {
+                        explanationUrl += '&run_id=' + encodeURIComponent(currentRunId);
+                    }
                     const explanationRes = await fetch(
-                        '/projects/' + encodeURIComponent(projectId) + '/result/explanation?audience=manager&surface_mode=external',
+                        explanationUrl,
                         { headers: authHeaders() }
                     );
                     if (!explanationRes.ok) {
