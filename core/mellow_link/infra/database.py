@@ -270,6 +270,7 @@ class ModernizationProject(Base):
     run_id = Column(String(100), nullable=False, unique=True, index=True)
     project_name = Column(String(255), nullable=False)
     client_name = Column(String(255), nullable=False)
+    goal_text = Column(Text, nullable=False, default="")
     template_key = Column(String(100), nullable=False, default="default_modernization_v1")
     template_mode = Column(String(20), nullable=False, default="recommended")
     constraints_json = Column(Text, nullable=False, default="[]")
@@ -314,6 +315,19 @@ class ProjectRunHistory(Base):
     )
 
 
+class AnalysisContext(Base):
+    __tablename__ = "analysis_contexts"
+
+    context_id = Column(String(120), primary_key=True, index=True)
+    project_id = Column(String(40), ForeignKey("modernization_projects.id"), nullable=False, index=True)
+    run_id = Column(String(100), nullable=False, unique=True, index=True)
+    safe_bundle_id = Column(String(100), nullable=False, default="", index=True)
+    input_fingerprint = Column(String(64), nullable=False, index=True)
+    schema_version = Column(String(50), nullable=False, default="analysis_context_v1")
+    payload_json = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 # =========================
 # Helper Functions
 # =========================
@@ -328,6 +342,7 @@ def init_db():
         "ALTER TABLE chat_messages ADD COLUMN evolution_payload TEXT",
         "ALTER TABLE agent_runs ADD COLUMN module_id VARCHAR(100) NOT NULL DEFAULT 'engine'",
         "ALTER TABLE agent_runs ADD COLUMN run_kind VARCHAR(100) NOT NULL DEFAULT 'generic'",
+        "ALTER TABLE modernization_projects ADD COLUMN goal_text TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE temp_resources ADD COLUMN user_id INTEGER",
         "ALTER TABLE temp_resources ADD COLUMN temp_file_id VARCHAR(100)",
         "ALTER TABLE temp_resources ADD COLUMN original_filename VARCHAR(500) DEFAULT ''",
@@ -357,6 +372,9 @@ def init_db():
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_project_assets_source_file ON project_assets(source_temp_file_id)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_project_run_history_project_sequence ON project_run_history(project_id, sequence_no)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_project_run_history_project_created ON project_run_history(project_id, created_at)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_analysis_contexts_project ON analysis_contexts(project_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_analysis_contexts_input_fingerprint ON analysis_contexts(input_fingerprint)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_analysis_contexts_safe_bundle ON analysis_contexts(safe_bundle_id)"))
             conn.commit()
     except Exception:
         pass  # index already exists
