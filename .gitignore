@@ -190,3 +190,4 @@ core/mellow_link/keys/
 core/mellow_link/moltbook_api_key*.txt
 core/mellow_link/**/moltbook_api_key*.json
 core/mellow_link/**/MOLTBOOK_API_KEY*.json
+outputs/ppt_judgment_analysis/
