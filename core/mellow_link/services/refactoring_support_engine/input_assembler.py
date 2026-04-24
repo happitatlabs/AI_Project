@@ -4,9 +4,11 @@ import os
 import re
 from typing import Any
 
-from mellow_link.modules.rebuild_assistant.schemas import RebuildAssetsPayload
+from mellow_link.modules.rebuild_assistant.schemas import AssetPresenceSummary, RebuildAssetsPayload
 
+from .analysis_context_builder import AnalysisContextBuilder
 from .schemas import (
+    AnalysisContextBundle,
     AssetInventoryItem,
     IntentInput,
     MissingContextItem,
@@ -87,9 +89,27 @@ class InputAssembler:
         safe_bundle,
         constraints: list[str] | None = None,
     ) -> PreparedRebuildInput:
-        asset_presence = legacy_service._build_asset_presence_from_safe_bundle(safe_bundle)
-        asset_name_by_id = {asset.asset_id: asset.name for asset in safe_bundle.asset_summary}
-        intent_files: dict[str, list[str]] = {}
+        analysis_context = AnalysisContextBuilder().build(
+            project_id=getattr(safe_bundle, "project_id", ""),
+            run_id="runless",
+            safe_bundle=safe_bundle,
+            goal=goal,
+            constraints=constraints or [],
+        )
+        prepared = self.prepare_analysis_context_input(
+            legacy_service,
+            analysis_context=analysis_context,
+        )
+        prepared.safe_bundle = safe_bundle
+        return prepared
+
+    def prepare_analysis_context_input(
+        self,
+        legacy_service: Any,
+        *,
+        analysis_context: AnalysisContextBundle,
+    ) -> PreparedRebuildInput:
+        asset_presence = self._build_asset_presence_from_context(analysis_context)
         source_code_blocks: list[str] = []
         schema_blocks: list[str] = []
         sql_blocks: list[str] = []
@@ -98,15 +118,11 @@ class InputAssembler:
         accounting_input = None
         accounting_asset_name = ""
         accounting_input_error = ""
-        for source in safe_bundle.sources:
-            content = (source.content or "").strip()
+        for source in analysis_context.source_blocks:
+            content = (source.content or source.excerpt or "").strip()
             if not content:
                 continue
-            asset_name = asset_name_by_id.get(source.asset_id, "")
-            intent_slot = self._intent_slot_for_asset_name(asset_name)
-            if intent_slot:
-                intent_files.setdefault(intent_slot, []).append(content)
-                continue
+            asset_name = source.asset_name or source.locator or source.asset_id
             if legacy_service._looks_like_accounting_payload_asset(asset_name, content):
                 if accounting_input is not None or accounting_input_error:
                     accounting_input_error = "multiple accounting payload assets found"
@@ -116,21 +132,22 @@ class InputAssembler:
                 accounting_asset_name = asset_name
                 continue
             block = f"[SAFE SOURCE: {source.asset_id} | {asset_name or '-'}]\n{content}"
-            if legacy_service._is_schema_asset_name(asset_name, content):
+            asset_type = (source.asset_type or "").strip().lower()
+            if asset_type == "schema" or legacy_service._is_schema_asset_name(asset_name, content):
                 schema_blocks.append(block)
-            elif legacy_service._is_sql_asset_name(asset_name, content):
+            elif asset_type == "sql" or legacy_service._is_sql_asset_name(asset_name, content):
                 sql_blocks.append(block)
-            elif legacy_service._is_ui_asset_name(asset_name):
+            elif asset_type == "ui" or legacy_service._is_ui_asset_name(asset_name):
                 ui_blocks.append(block)
-            elif legacy_service._is_doc_asset_name(asset_name):
+            elif asset_type == "doc" or legacy_service._is_doc_asset_name(asset_name):
                 doc_blocks.append(block)
-            elif legacy_service._is_framework_asset_name(asset_name):
+            elif asset_type == "framework" or legacy_service._is_framework_asset_name(asset_name):
                 continue
             else:
                 source_code_blocks.append(block)
         structures = "\n\n".join(
             legacy_service._render_structure_block(structure)
-            for structure in safe_bundle.structures
+            for structure in analysis_context.seed_structures
             if structure.nodes or structure.edges
         )
         supporting_docs = "\n\n".join(doc_blocks)
@@ -139,23 +156,18 @@ class InputAssembler:
             database_schema="\n\n".join(schema_blocks),
             sql_queries="\n\n".join(sql_blocks),
             ui_template="\n\n".join(part for part in [structures, "\n\n".join(ui_blocks)] if part),
-            framework_info=legacy_service._build_framework_hint(safe_bundle, asset_presence),
-        )
-        intent = self.normalize_intent_inputs(
-            goal=goal,
-            constraints=constraints,
-            file_intents=intent_files,
+            framework_info=self._build_context_framework_hint(asset_presence),
         )
         prepared = self.prepare_input(
             legacy_service,
-            goal=intent.goal,
+            goal=analysis_context.intent.goal,
             assets=assets,
-            constraints=intent.constraints,
-            temp_context=intent.scenario,
+            constraints=analysis_context.intent.constraints,
+            temp_context=analysis_context.intent.scenario,
         )
         prepared.asset_presence = asset_presence
-        prepared.safe_bundle = safe_bundle
-        prepared.intent = intent
+        prepared.analysis_context = analysis_context
+        prepared.intent = analysis_context.intent
         prepared.supporting_docs = supporting_docs
         if supporting_docs:
             prepared.legacy_bundle = "\n\n".join(
@@ -171,6 +183,10 @@ class InputAssembler:
         prepared.accounting_input = accounting_input
         prepared.accounting_asset_name = accounting_asset_name
         prepared.accounting_input_error = accounting_input_error
+        analysis_context.trust.missing_context = list(prepared.missing_context or [])
+        analysis_context.analysis_frame.concept_signals = list(prepared.signals.concepts or [])
+        analysis_context.analysis_frame.primary_feature_mode = prepared.signals.primary_feature_mode
+        analysis_context.analysis_frame.scope_limited = bool(prepared.scope_limited)
         return prepared
 
     def normalize_intent_inputs(
@@ -214,6 +230,7 @@ class InputAssembler:
         )
 
     def assemble(self, prepared: Any) -> RefactoringAnalysisInput:
+        analysis_context = getattr(prepared, "analysis_context", None)
         safe_bundle = getattr(prepared, "safe_bundle", None)
         constraints = [str(item).strip() for item in list(getattr(prepared, "constraints", []) or []) if str(item).strip()]
         intent = getattr(prepared, "intent", None)
@@ -223,7 +240,37 @@ class InputAssembler:
                 constraints=constraints,
                 scenario=str(getattr(prepared, "temp_context", "") or ""),
             )
-        if safe_bundle is not None:
+        if analysis_context is not None:
+            asset_inventory = [
+                AssetInventoryItem(
+                    asset_id=asset.asset_id,
+                    name=asset.name,
+                    asset_type=asset.asset_type,
+                    size=asset.size,
+                    language=asset.language,
+                    kind_hint=asset.asset_type,
+                )
+                for asset in analysis_context.assets
+                if asset.asset_type not in self._NON_ANALYSIS_ASSET_TYPES
+            ]
+            source_blocks = [
+                SourceBlock(
+                    block_id=source.block_id,
+                    asset_id=source.asset_id,
+                    asset_name=source.asset_name or source.locator or source.asset_id,
+                    asset_type=source.asset_type,
+                    locator=source.locator,
+                    excerpt=source.excerpt,
+                    content=source.content,
+                    fingerprint=source.fingerprint,
+                )
+                for source in analysis_context.source_blocks
+                if source.asset_type not in self._NON_ANALYSIS_ASSET_TYPES
+            ]
+            seed_structures = list(analysis_context.seed_structures or [])
+            safe_bundle_id = analysis_context.trust.safe_bundle_id
+            input_fingerprint = analysis_context.run.input_fingerprint
+        elif safe_bundle is not None:
             content_by_asset_id = {source.asset_id: source.content or "" for source in safe_bundle.sources}
             asset_presence = getattr(prepared, "asset_presence", None)
             schema_asset_names = {
@@ -307,10 +354,12 @@ class InputAssembler:
                 )
             seed_structures = list(safe_bundle.structures or [])
             safe_bundle_id = safe_bundle.bundle_id
+            input_fingerprint = ""
         else:
             asset_inventory, source_blocks = self._assemble_without_bundle(prepared)
             seed_structures = []
             safe_bundle_id = ""
+            input_fingerprint = ""
         missing_context = list(getattr(prepared, "missing_context_details", []) or [])
         if not missing_context:
             missing_context = [
@@ -329,7 +378,64 @@ class InputAssembler:
             source_blocks=source_blocks,
             seed_structures=seed_structures,
             missing_context=missing_context,
+            input_fingerprint=input_fingerprint,
         )
+
+    def _build_asset_presence_from_context(self, analysis_context: AnalysisContextBundle) -> AssetPresenceSummary:
+        source_names: list[str] = []
+        ui_names: list[str] = []
+        schema_names: list[str] = []
+        sql_names: list[str] = []
+        framework_names: list[str] = []
+        doc_names: list[str] = []
+        for asset in analysis_context.assets:
+            asset_type = (asset.asset_type or "").strip().lower()
+            if asset_type == "ui":
+                ui_names.append(asset.name)
+            elif asset_type == "schema":
+                schema_names.append(asset.name)
+            elif asset_type == "sql":
+                sql_names.append(asset.name)
+            elif asset_type == "framework":
+                framework_names.append(asset.name)
+            elif asset_type == "doc":
+                doc_names.append(asset.name)
+            elif asset_type != "intent":
+                source_names.append(asset.name)
+        return AssetPresenceSummary(
+            has_source_code=bool(source_names),
+            has_ui_asset=bool(ui_names),
+            has_schema_asset=bool(schema_names),
+            has_sql_asset=bool(sql_names),
+            has_framework_hint=bool(framework_names),
+            has_docs=bool(doc_names),
+            framework_runtime_hints=self._framework_runtime_hints(framework_names),
+            source_asset_names=source_names,
+            ui_asset_names=ui_names,
+            schema_asset_names=schema_names,
+            sql_asset_names=sql_names,
+            framework_asset_names=framework_names,
+            doc_asset_names=doc_names,
+        )
+
+    def _build_context_framework_hint(self, asset_presence: AssetPresenceSummary) -> str:
+        lines: list[str] = []
+        if asset_presence.framework_asset_names:
+            lines.append("Framework assets: " + ", ".join(asset_presence.framework_asset_names))
+        if asset_presence.framework_runtime_hints:
+            lines.append("Runtime hints: " + ", ".join(asset_presence.framework_runtime_hints))
+        return "\n".join(lines)
+
+    def _framework_runtime_hints(self, framework_asset_names: list[str]) -> list[str]:
+        hints: list[str] = []
+        joined = " ".join(name.lower() for name in framework_asset_names)
+        if "pom.xml" in joined or "gradle" in joined:
+            hints.append("java")
+        if "package.json" in joined:
+            hints.append("node")
+        if "requirements.txt" in joined or "pyproject.toml" in joined:
+            hints.append("python")
+        return self._dedupe_preserving_order(hints)
 
     def _asset_type_from_presence(
         self,
