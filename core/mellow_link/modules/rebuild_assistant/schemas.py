@@ -194,7 +194,46 @@ class ExecutionPlanWeek(BaseModel):
     deliverables: list[str] = Field(default_factory=list)
 
 
+class CanonicalRequestContext(BaseModel):
+    goal: str = ""
+    constraints: list[str] = Field(default_factory=list)
+    scope_limited: bool = False
+
+
+class CanonicalFunctionClassification(BaseModel):
+    primary_judgment: str = ""
+    template_judgment: str = ""
+    structural_judgment: str = ""
+    narrative_axis: str = ""
+    feature_signal_mode: str = ""
+    pattern_candidates: list[PatternCandidate] = Field(default_factory=list)
+
+
+class CanonicalRebuildPayload(BaseModel):
+    request_context: CanonicalRequestContext = Field(default_factory=CanonicalRequestContext)
+    function_classification: CanonicalFunctionClassification = Field(default_factory=CanonicalFunctionClassification)
+    structure_snapshot: dict[str, Any] = Field(default_factory=dict)
+    diagnosis_report: dict[str, Any] = Field(default_factory=dict)
+    decision_summary: dict[str, Any] = Field(default_factory=dict)
+    analysis_summary: list[str] = Field(default_factory=list)
+    core_business_rules: list[str] = Field(default_factory=list)
+    grounded_business_rules: list[GroundedBusinessRule] = Field(default_factory=list)
+    decision_items: list[DecisionItem] = Field(default_factory=list)
+    retained_contracts: list[RetainedContract] = Field(default_factory=list)
+    design_options: list[DesignOption] = Field(default_factory=list)
+    recommended_option: RecommendedOption | None = None
+    execution_plan: list[ExecutionPlanWeek] = Field(default_factory=list)
+    recommended_directions: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    missing_context_details: list[MissingContextItem] = Field(default_factory=list)
+    appendix: dict[str, Any] = Field(default_factory=dict)
+
+
 class StructuredRebuildResult(BaseModel):
+    context_id: str = ""
+    input_fingerprint: str = ""
+    safe_bundle_id: str = ""
+    evidence_refs: list[str] = Field(default_factory=list)
     primary_judgment: str = ""
     template_judgment: str = ""
     structural_judgment: str = ""
@@ -232,6 +271,7 @@ class StructuredRebuildResult(BaseModel):
     decision_summary: dict[str, Any] = Field(default_factory=dict)
     improvement_plan_bundle: dict[str, Any] = Field(default_factory=dict)
     appendix: dict[str, Any] = Field(default_factory=dict)
+    canonical_payload: CanonicalRebuildPayload | None = None
 
     @field_validator("confidence", mode="before")
     @classmethod
