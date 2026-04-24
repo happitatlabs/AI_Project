@@ -16,9 +16,12 @@ from mellow_link.infra.run_events import (
 )
 from mellow_link.services.anonymization import build_debug_anonymization_report_from_bundle
 from mellow_link.services.anonymization.schemas import SafeAnalysisBundle
+from mellow_link.services.refactoring_support_engine.analysis_context_builder import AnalysisContextBuilder
+from mellow_link.services.refactoring_support_engine.input_assembler import InputAssembler
 from mellow_link.services.refactoring_support_engine.narrative_augmentation import (
     NarrativeAugmentationService,
 )
+from mellow_link.services.refactoring_support_engine.schemas import AnalysisContextBundle
 from mellow_link.services.refactoring_support_engine.template_support import TemplateSupport
 
 from .service import RebuildAssistantService
@@ -204,16 +207,31 @@ def start_rebuild_assistant_safe_bundle_run(
     goal: str,
     safe_bundle: SafeAnalysisBundle,
     constraints: list[str] | None = None,
+    analysis_context: AnalysisContextBundle | None = None,
 ) -> None:
+    if analysis_context is None:
+        analysis_context = AnalysisContextBuilder().build(
+            project_id=safe_bundle.project_id,
+            run_id=run_id,
+            safe_bundle=safe_bundle,
+            goal=goal,
+            constraints=constraints or [],
+        )
+
+    def _prepare(service: RebuildAssistantService):
+        prepared = InputAssembler().prepare_analysis_context_input(service, analysis_context=analysis_context)
+        prepared.safe_bundle = safe_bundle
+        return prepared
+
     _spawn_rebuild_run(
         run_id=run_id,
         session_id=session_id,
         goal=goal,
-        prepare_input=lambda service: service.prepare_safe_bundle_input(
-            goal=goal,
-            safe_bundle=safe_bundle,
-            constraints=constraints,
-        ),
-        run_meta={"safe_bundle_id": safe_bundle.bundle_id},
+        prepare_input=_prepare,
+        run_meta={
+            "safe_bundle_id": safe_bundle.bundle_id,
+            "context_id": analysis_context.context_id,
+            "input_fingerprint": analysis_context.run.input_fingerprint,
+        },
         safe_bundle=safe_bundle,
     )

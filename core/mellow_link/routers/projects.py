@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from mellow_link import app_state
 from mellow_link.infra import (
     AgentRun,
+    AnalysisContext,
     ModernizationProject,
     ProjectAsset,
     ProjectRunHistory,
@@ -29,7 +30,7 @@ from mellow_link.infra import (
     get_db,
 )
 from mellow_link.infra.run_events import get_run_events, get_run_snapshot
-from mellow_link.modules.rebuild_assistant.api import create_project_wrapped_run, start_project_wrapped_run
+from mellow_link.modules.rebuild_assistant.api import create_project_wrapped_run, resolve_project_goal, start_project_wrapped_run
 from mellow_link.modules.rebuild_assistant.decision_document import build_decision_brief, render_decision_brief_markdown
 from mellow_link.modules.rebuild_assistant.manifest import MANIFEST as REBUILD_ASSISTANT_MANIFEST, MODULE_VERSION
 from mellow_link.modules.rebuild_assistant.schemas import (
@@ -45,6 +46,9 @@ from mellow_link.modules.rebuild_assistant.schemas import (
 )
 from mellow_link.services import DocumentRequest, DocumentType
 from mellow_link.services.anonymization import AnonymizationAsset, AnonymizationRunRequest, AnonymizationService, MaskingLevel
+from mellow_link.services.refactoring_support_engine.analysis_context_builder import AnalysisContextBuilder
+from mellow_link.services.refactoring_support_engine.input_assembler import InputAssembler
+from mellow_link.services.refactoring_support_engine.schemas import AnalysisContextBundle
 from mellow_link.services.project_assets import (
     build_temp_context,
     cleanup_project_asset_dir,
@@ -473,6 +477,29 @@ def _project_domain_warnings(project: ModernizationProject, db: Session) -> list
     )
 
 
+def _resolved_project_goal(
+    project: ModernizationProject,
+    *,
+    safe_bundle,
+    db: Session,
+) -> str:
+    stored_goal = _project_text(project, "goal_text")
+    if stored_goal:
+        return stored_goal
+    resolved_goal = resolve_project_goal(
+        inline_goal="",
+        safe_bundle=safe_bundle,
+        project_name=_project_text(project, "project_name"),
+        client_name=_project_text(project, "client_name"),
+    )
+    if resolved_goal and resolved_goal != stored_goal:
+        project.goal_text = resolved_goal
+        db.add(project)
+        db.commit()
+        db.refresh(project)
+    return resolved_goal
+
+
 def _history_sequence_next(project_id: str, db: Session) -> int:
     rows = _project_history_rows(project_id, db)
     if not rows:
@@ -600,6 +627,67 @@ def _build_safe_bundle_for_project(project: ModernizationProject, db: Session):
         assets=assets,
     )
     return AnonymizationService().run_anonymization_pipeline(request).safe_bundle
+
+
+def _constraint_strings(values: list[Any]) -> list[str]:
+    return [str(item).strip() for item in values if str(item or "").strip()]
+
+
+def _persist_analysis_context(context: AnalysisContextBundle, db: Session) -> AnalysisContext:
+    payload_json = json.dumps(context.model_dump(mode="json"), ensure_ascii=False, sort_keys=True)
+    row = db.query(AnalysisContext).filter(AnalysisContext.run_id == context.run.run_id).first()
+    if row is None:
+        row = AnalysisContext(
+            context_id=context.context_id,
+            project_id=context.project.project_id,
+            run_id=context.run.run_id,
+            safe_bundle_id=context.trust.safe_bundle_id,
+            input_fingerprint=context.run.input_fingerprint,
+            schema_version=context.schema_version,
+            payload_json=payload_json,
+        )
+        db.add(row)
+    else:
+        row.context_id = context.context_id
+        row.project_id = context.project.project_id
+        row.safe_bundle_id = context.trust.safe_bundle_id
+        row.input_fingerprint = context.run.input_fingerprint
+        row.schema_version = context.schema_version
+        row.payload_json = payload_json
+        db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def _build_and_store_analysis_context(
+    project: ModernizationProject,
+    *,
+    run_id: str,
+    safe_bundle,
+    goal: str,
+    constraints: list[Any],
+    db: Session,
+) -> AnalysisContextBundle:
+    context = AnalysisContextBuilder().build(
+        project_id=project.id,
+        run_id=run_id,
+        safe_bundle=safe_bundle,
+        goal=goal,
+        constraints=_constraint_strings(constraints),
+        project_name=project.project_name,
+        client_name=project.client_name,
+        template_key=project.template_key,
+        warnings=_project_domain_warnings(project, db),
+    )
+    service = RebuildAssistantService()
+    prepared = InputAssembler().prepare_analysis_context_input(service, analysis_context=context)
+    context.trust.missing_context = list(prepared.missing_context or [])
+    context.analysis_frame.concept_signals = list(prepared.signals.concepts or [])
+    context.analysis_frame.primary_feature_mode = prepared.signals.primary_feature_mode
+    context.analysis_frame.scope_limited = bool(prepared.scope_limited)
+    _persist_analysis_context(context, db)
+    return context
 
 
 def _validate_reanalysis_assets(
@@ -2200,15 +2288,40 @@ async def create_project(
         ]
         app_state.TEMP_CONTEXT_STORE[payload.upload_session_id] = build_temp_context(context_parts)
         safe_bundle = _build_safe_bundle_for_project(project, db) if project else None
+        resolved_goal = resolve_project_goal(
+            inline_goal=payload.goal,
+            safe_bundle=safe_bundle,
+            project_name=payload.project_name,
+            client_name=payload.client_name,
+        )
+        if project is not None:
+            project.goal_text = resolved_goal
+            db.add(project)
+            db.commit()
+            db.refresh(project)
+        analysis_context = (
+            _build_and_store_analysis_context(
+                project,
+                run_id=run_id,
+                safe_bundle=safe_bundle,
+                goal=resolved_goal,
+                constraints=payload.constraints,
+                db=db,
+            )
+            if project is not None and safe_bundle is not None
+            else None
+        )
         start_project_wrapped_run(
             run_id=run_id,
             session_id=session_id,
             project_name=payload.project_name,
             client_name=payload.client_name,
+            goal=resolved_goal,
             upload_session_id=payload.upload_session_id,
             constraints=payload.constraints,
             asset_manifest=payload.asset_manifest,
             safe_bundle=safe_bundle,
+            analysis_context=analysis_context,
         )
     except Exception as exc:
         project = db.query(ModernizationProject).filter(ModernizationProject.id == project_id).first()
@@ -2325,15 +2438,27 @@ async def reanalyze_project(
     status = "running"
     try:
         safe_bundle = _build_safe_bundle_for_project(project, db)
+        project_goal = _resolved_project_goal(project, safe_bundle=safe_bundle, db=db)
+        project_constraints = _parse_json_list(project.constraints_json)
+        analysis_context = _build_and_store_analysis_context(
+            project,
+            run_id=new_run_id,
+            safe_bundle=safe_bundle,
+            goal=project_goal,
+            constraints=project_constraints,
+            db=db,
+        )
         start_project_wrapped_run(
             run_id=new_run_id,
             session_id=new_session_id,
             project_name=project.project_name,
             client_name=project.client_name,
+            goal=project_goal,
             upload_session_id=project.upload_session_id,
-            constraints=_parse_json_list(project.constraints_json),
+            constraints=project_constraints,
             asset_manifest=[ProjectAssetItem.model_validate(item) for item in _parse_json_list(project.asset_manifest_json)],
             safe_bundle=safe_bundle,
+            analysis_context=analysis_context,
         )
     except Exception as exc:
         project = db.query(ModernizationProject).filter(ModernizationProject.id == project.id).first()
@@ -2394,15 +2519,27 @@ async def run_project_analysis(
     status = "running"
     try:
         safe_bundle = _build_safe_bundle_for_project(project, db)
+        project_goal = _resolved_project_goal(project, safe_bundle=safe_bundle, db=db)
+        project_constraints = _parse_json_list(project.constraints_json)
+        analysis_context = _build_and_store_analysis_context(
+            project,
+            run_id=new_run_id,
+            safe_bundle=safe_bundle,
+            goal=project_goal,
+            constraints=project_constraints,
+            db=db,
+        )
         start_project_wrapped_run(
             run_id=new_run_id,
             session_id=new_session_id,
             project_name=project.project_name,
             client_name=project.client_name,
+            goal=project_goal,
             upload_session_id=project.upload_session_id,
-            constraints=_parse_json_list(project.constraints_json),
+            constraints=project_constraints,
             asset_manifest=[ProjectAssetItem.model_validate(item) for item in _parse_json_list(project.asset_manifest_json)],
             safe_bundle=safe_bundle,
+            analysis_context=analysis_context,
         )
     except Exception as exc:
         project = db.query(ModernizationProject).filter(ModernizationProject.id == project.id).first()
