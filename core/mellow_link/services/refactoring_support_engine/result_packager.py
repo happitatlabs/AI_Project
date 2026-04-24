@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 import re
+from copy import deepcopy
 from typing import Any
 
-from mellow_link.modules.rebuild_assistant.schemas import StructuredRebuildResult
+from mellow_link.modules.rebuild_assistant.schemas import (
+    CanonicalFunctionClassification,
+    CanonicalRebuildPayload,
+    CanonicalRequestContext,
+    MissingContextItem,
+    StructuredRebuildResult,
+)
 
 from .narrative_fallback import DeterministicNarrativeBuilder
 from .schemas import (
@@ -34,7 +41,9 @@ class ResultPackager:
         confidence = legacy_service.estimate_confidence(prepared)
         grounding_profile = self._build_recommendation_grounding_profile(prepared, diagnosis, decisions, confidence)
         constraint_filters = self._constraint_filters(prepared)
+        diagnosis = self._degrade_unverified_claims(diagnosis)
         improvement = self._apply_recommendation_grounding(improvement, grounding_profile)
+        context_linkage = self._build_context_linkage(prepared, diagnosis)
         governance_extension = self._build_governance_extension(
             prepared=prepared,
             diagnosis=diagnosis,
@@ -59,9 +68,16 @@ class ResultPackager:
             diagnosis_report=diagnosis.diagnosis_report,
             decision_summary=decisions.decision_summary,
             improvement_plan_bundle=improvement.improvement_plan_bundle,
-            appendix={"evidence_index": [item.model_dump() for item in diagnosis.evidence_index]},
+            appendix={
+                "evidence_index": [item.model_dump() for item in diagnosis.evidence_index],
+                "context_linkage": context_linkage,
+            },
         )
         result = StructuredRebuildResult(
+            context_id=context_linkage["context_id"],
+            input_fingerprint=context_linkage["input_fingerprint"],
+            safe_bundle_id=context_linkage["safe_bundle_id"],
+            evidence_refs=context_linkage["evidence_refs"],
             primary_judgment=decisions.primary_judgment,
             template_judgment=decisions.template_judgment or decisions.primary_judgment,
             structural_judgment=decisions.structural_judgment,
@@ -142,7 +158,115 @@ class ResultPackager:
         )
         result = self._soften_supporting_sentences(result)
         result = legacy_service._apply_accounting_bottom_sections(prepared, result)
+        result_appendix = deepcopy(result.appendix if isinstance(result.appendix, dict) else {})
+        result_appendix["context_linkage"] = context_linkage
+        result = result.model_copy(
+            update={
+                "context_id": context_linkage["context_id"],
+                "input_fingerprint": context_linkage["input_fingerprint"],
+                "safe_bundle_id": context_linkage["safe_bundle_id"],
+                "evidence_refs": context_linkage["evidence_refs"],
+                "appendix": result_appendix,
+                "canonical_payload": CanonicalRebuildPayload(
+                    request_context=CanonicalRequestContext(
+                        goal=str(getattr(prepared, "goal", "") or ""),
+                        constraints=list(getattr(prepared, "constraints", []) or []),
+                        scope_limited=bool(getattr(prepared, "scope_limited", False)),
+                    ),
+                    function_classification=CanonicalFunctionClassification(
+                        primary_judgment=result.primary_judgment,
+                        template_judgment=result.template_judgment,
+                        structural_judgment=result.structural_judgment,
+                        narrative_axis=result.narrative_axis,
+                        feature_signal_mode=result.feature_signal_mode,
+                        pattern_candidates=list(result.pattern_candidates),
+                    ),
+                    structure_snapshot=deepcopy(result.structure_snapshot),
+                    diagnosis_report=deepcopy(result.diagnosis_report),
+                    decision_summary=deepcopy(result.decision_summary),
+                    analysis_summary=list(result.analysis_summary),
+                    core_business_rules=list(result.core_business_rules),
+                    grounded_business_rules=list(result.grounded_business_rules),
+                    decision_items=list(result.decision_items),
+                    retained_contracts=list(result.retained_contracts),
+                    design_options=list(result.design_options),
+                    recommended_option=result.recommended_option,
+                    execution_plan=list(result.execution_plan),
+                    recommended_directions=list(result.recommended_directions),
+                    risks=list(result.risks),
+                    missing_context_details=list(result.missing_context_details),
+                    appendix=deepcopy(result_appendix),
+                ),
+            }
+        )
         return legacy_service._sanitize_structured_result(result)
+
+    def _build_context_linkage(self, prepared: Any, diagnosis: DiagnosisArtifacts) -> dict[str, Any]:
+        context = getattr(prepared, "analysis_context", None)
+        evidence_refs = [item.evidence_id for item in diagnosis.evidence_index]
+        if context is not None:
+            context_refs = [item.evidence_id for item in context.evidence_index]
+            evidence_refs = context_refs or evidence_refs
+        # v1 evidence_refs are evidence_id[] and may stay empty when evidence has not
+        # been normalized enough to support a specific claim linkage.
+        if context is None:
+            return {
+                "context_id": "",
+                "input_fingerprint": "",
+                "safe_bundle_id": str(getattr(getattr(prepared, "safe_bundle", None), "bundle_id", "") or ""),
+                "evidence_refs": evidence_refs,
+            }
+        return {
+            "context_id": context.context_id,
+            "input_fingerprint": context.run.input_fingerprint,
+            "safe_bundle_id": context.trust.safe_bundle_id,
+            "evidence_refs": evidence_refs,
+        }
+
+    def _degrade_unverified_claims(self, diagnosis: DiagnosisArtifacts) -> DiagnosisArtifacts:
+        degraded = False
+        rules = []
+        for rule in diagnosis.grounded_business_rules:
+            has_evidence = bool(getattr(rule, "evidence", []) or [])
+            confidence = str(getattr(rule, "confidence", "") or "").strip()
+            if has_evidence or confidence != "확정":
+                rules.append(rule)
+                continue
+            degraded = True
+            reason = str(getattr(rule, "confidence_reason", "") or "").strip()
+            if "missing_decision_driving_evidence" not in reason:
+                reason = (
+                    f"{reason} / missing_decision_driving_evidence"
+                    if reason
+                    else "missing_decision_driving_evidence"
+                )
+            rules.append(
+                rule.model_copy(
+                    update={
+                        "confidence": "가정",
+                        "confidence_reason": reason,
+                        "needs_verification": True,
+                    }
+                )
+            )
+        if not degraded:
+            return diagnosis
+        missing_context = list(diagnosis.missing_context_details or [])
+        if not any(item.reason == "missing_decision_driving_evidence" for item in missing_context):
+            missing_context.append(
+                MissingContextItem(
+                    required_material="결정 근거 evidence",
+                    reason="missing_decision_driving_evidence",
+                )
+            )
+        # Degradation is applied at claim/decision/plan item level and is not propagated
+        # as a whole-run failure.
+        return diagnosis.model_copy(
+            update={
+                "grounded_business_rules": rules,
+                "missing_context_details": missing_context,
+            }
+        )
 
     def _build_review_diff(
         self,

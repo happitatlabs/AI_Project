@@ -103,6 +103,16 @@ class RebuildAssistantService:
             constraints=constraints,
         )
 
+    def prepare_analysis_context_input(
+        self,
+        *,
+        analysis_context: AnalysisContextBundle,
+    ) -> PreparedRebuildInput:
+        return InputAssembler().prepare_analysis_context_input(
+            self,
+            analysis_context=analysis_context,
+        )
+
     def is_scope_limited(self, goal: str) -> bool:
         text = (goal or "").strip().lower()
         return bool(text) and any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in self.SCOPE_LIMIT_PATTERNS)

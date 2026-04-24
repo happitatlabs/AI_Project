@@ -27,6 +27,32 @@ from mellow_link.services.refactoring_support_engine.template_support import Tem
 from .service import RebuildAssistantService
 
 
+def _context_linkage(prepared: object, result: object | None = None) -> dict:
+    context = getattr(prepared, "analysis_context", None)
+    if context is None:
+        return {
+            "context_id": getattr(result, "context_id", "") if result is not None else "",
+            "input_fingerprint": getattr(result, "input_fingerprint", "") if result is not None else "",
+            "safe_bundle_id": getattr(result, "safe_bundle_id", "") if result is not None else "",
+            "evidence_refs": list(getattr(result, "evidence_refs", []) or []) if result is not None else [],
+        }
+    result_refs = list(getattr(result, "evidence_refs", []) or []) if result is not None else []
+    if not result_refs:
+        result_refs = [item.evidence_id for item in context.evidence_index]
+    return {
+        "context_id": context.context_id,
+        "input_fingerprint": context.run.input_fingerprint,
+        "safe_bundle_id": context.trust.safe_bundle_id,
+        "evidence_refs": result_refs,
+    }
+
+
+def _apply_context_linkage(result: object, linkage: dict) -> None:
+    for key in ("context_id", "input_fingerprint", "safe_bundle_id", "evidence_refs"):
+        if hasattr(result, key):
+            setattr(result, key, linkage.get(key, [] if key == "evidence_refs" else ""))
+
+
 def _rebuild_todos() -> list[dict[str, str]]:
     return [
         {"todo_id": "B1", "title": "입력 정규화", "status": "pending"},
@@ -93,6 +119,7 @@ def _spawn_rebuild_run(
                     "message": "rebuild input prepared",
                     "scope_limited": prepared.scope_limited,
                     "missing_context_count": len(prepared.missing_context),
+                    **_context_linkage(prepared),
                 },
             )
             emit_event(run_id, EVENT_TYPE_TODO_DONE, {**todos[0], "detail": "입력 검증, 업로드 문맥 수집, 범위 제한 여부를 확인했습니다."})
@@ -128,6 +155,8 @@ def _spawn_rebuild_run(
                 llm_service=getattr(app_state, "llm_service", None),
             )
             result = service._sanitize_structured_result(result)
+            context_linkage = _context_linkage(prepared, result)
+            _apply_context_linkage(result, context_linkage)
             polish_bundle = service.build_polish_bundle(
                 result,
                 audience="manager",
@@ -159,6 +188,7 @@ def _spawn_rebuild_run(
                 EVENT_TYPE_RUN_FINISHED,
                 {
                     "success": True,
+                    **context_linkage,
                     "summary": summary[:4000],
                     "structured_result": result.model_dump(),
                     "authoritative_payload": {
