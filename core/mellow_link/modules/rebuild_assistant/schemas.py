@@ -229,6 +229,61 @@ class CanonicalRebuildPayload(BaseModel):
     appendix: dict[str, Any] = Field(default_factory=dict)
 
 
+class InputFamilyClassification(BaseModel):
+    family: str = ""
+    confidence: float = 0.0
+    decision_basis: list[str] = Field(default_factory=list)
+    secondary_signals: list[str] = Field(default_factory=list)
+    display_strategy: str = ""
+    internal_strategy: str = ""
+
+    @field_validator("family")
+    @classmethod
+    def validate_family(cls, value: str) -> str:
+        normalized = (value or "").strip()
+        allowed = {
+            "",
+            "operational_source",
+            "redesign_review",
+            "migration_transition",
+            "document_consulting",
+            "option_comparison",
+        }
+        if normalized not in allowed:
+            raise ValueError("unsupported family")
+        return normalized
+
+    @field_validator("secondary_signals")
+    @classmethod
+    def validate_secondary_signals(cls, value: list[str]) -> list[str]:
+        allowed = {
+            "operational_source",
+            "redesign_review",
+            "migration_transition",
+            "document_consulting",
+            "option_comparison",
+        }
+        normalized: list[str] = []
+        for item in value or []:
+            candidate = str(item or "").strip()
+            if not candidate:
+                continue
+            if candidate not in allowed:
+                raise ValueError("unsupported secondary family")
+            if candidate not in normalized:
+                normalized.append(candidate)
+        return normalized
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def clamp_confidence(cls, value: float) -> float:
+        try:
+            numeric = float(value)
+        except Exception:
+            numeric = 0.0
+        return max(0.0, min(1.0, numeric))
+
+
 class StructuredRebuildResult(BaseModel):
     context_id: str = ""
     input_fingerprint: str = ""
