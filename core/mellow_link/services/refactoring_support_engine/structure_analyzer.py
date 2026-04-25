@@ -17,6 +17,7 @@ from .schemas import (
     make_stable_id,
     normalize_fingerprint_text,
 )
+from .runtime_contracts import assert_stage_action
 
 
 class ComponentCollector:
@@ -724,7 +725,18 @@ class StructureAnalyzer:
         self.feature_slice_extractor = FeatureSliceExtractor()
         self.hotspot_scorer = HotspotScorer()
 
-    def analyze(self, analysis_input: RefactoringAnalysisInput) -> StructureAnalysisResult:
+    def analyze(
+        self,
+        analysis_input: RefactoringAnalysisInput,
+        *,
+        stage_control: dict[str, object] | None = None,
+    ) -> StructureAnalysisResult:
+        assert_stage_action(
+            stage_control,
+            expected_stage="analysis",
+            action="generate_structure_snapshot",
+            goal=str(getattr(analysis_input, "goal", "") or ""),
+        )
         seed_structures = list(analysis_input.seed_structures or [])
         components, component_text_map, component_asset_map, component_name_map, component_responsibility_map = self.component_collector.collect(analysis_input)
         dependencies, table_usage_map = self.dependency_resolver.resolve(

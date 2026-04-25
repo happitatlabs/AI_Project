@@ -52,7 +52,23 @@ class JudgmentSynthesizer:
                 )
             )
         ordered = sorted(applied, key=lambda item: item.score, reverse=True)
-        if self.helper._has_workflow_pattern(prepared):
+        if self.helper._has_fx_fifo_domain(prepared):
+            priority = {
+                "validation": 0,
+                "amount_threshold": 1,
+                "query_filter": 2,
+                "state_transition": 3,
+                "workflow": 4,
+                "access_control": 5,
+            }
+            ordered = sorted(
+                ordered,
+                key=lambda item: (
+                    priority.get(item.template_id, 99),
+                    -item.score,
+                ),
+            )
+        elif self.helper._has_workflow_pattern(prepared):
             workflow = next((item for item in ordered if item.template_id == "workflow"), None)
             if workflow:
                 ordered = [workflow] + [item for item in ordered if item.template_id != "workflow"]
@@ -172,6 +188,24 @@ class JudgmentSynthesizer:
         pattern_candidates: list[PatternCandidate],
     ) -> tuple[str, str, list[PatternCandidate]]:
         candidate_map = {item.name: item for item in pattern_candidates}
+        family = str(getattr(getattr(prepared, "family_classification", None), "family", "") or "").strip()
+        asset_presence = getattr(prepared, "asset_presence", None)
+        document_only = bool(
+            getattr(asset_presence, "has_docs", False)
+            and not any(
+                (
+                    getattr(asset_presence, "has_source_code", False),
+                    getattr(asset_presence, "has_ui_asset", False),
+                    getattr(asset_presence, "has_schema_asset", False),
+                    getattr(asset_presence, "has_sql_asset", False),
+                    bool(getattr(getattr(prepared, "assets", None), "source_code", "") or ""),
+                    bool(getattr(getattr(prepared, "assets", None), "ui_template", "") or ""),
+                    bool(getattr(getattr(prepared, "assets", None), "database_schema", "") or ""),
+                    bool(getattr(getattr(prepared, "assets", None), "sql_queries", "") or ""),
+                )
+            )
+        )
+        prefer_neutral_fallback = family in {"document_consulting", "option_comparison"} or document_only
 
         def choose(name: str, reason: str) -> tuple[str, str]:
             return name, reason
@@ -183,7 +217,33 @@ class JudgmentSynthesizer:
         access_control = candidate_map.get("access_control")
         validation = candidate_map.get("validation")
 
-        if workflow and workflow.matched:
+        if self.helper._has_fx_fifo_domain(prepared):
+            if amount_threshold and amount_threshold.matched and float(amount_threshold.score) >= float(validation.score if validation else 0.0) + 0.35:
+                selected_name, selected_reason = choose(
+                    "amount_threshold",
+                    "외화 입출금 FIFO 도메인에서는 lot별 금액/환율 경계가 핵심이라 amount_threshold를 우선 선택했습니다.",
+                )
+            elif validation and validation.matched:
+                selected_name, selected_reason = choose(
+                    "validation",
+                    "외화 입출금 FIFO 도메인에서는 lot 소진, 환차손익, 전표 반영 검증 흐름이 핵심이라 validation을 우선 선택했습니다.",
+                )
+            elif query_filter and query_filter.matched:
+                selected_name, selected_reason = choose(
+                    "query_filter",
+                    "외화 입출금 FIFO 도메인 guard가 적용되어 workflow 대신 query_filter를 후순위 대안으로 선택했습니다.",
+                )
+            elif state_transition and state_transition.matched:
+                selected_name, selected_reason = choose(
+                    "state_transition",
+                    "외화 입출금 FIFO 도메인 guard가 적용되어 workflow 대신 state_transition을 후순위 대안으로 선택했습니다.",
+                )
+            else:
+                selected_name, selected_reason = choose(
+                    "validation",
+                    "외화 입출금 FIFO 도메인 guard가 적용되어 workflow/access_control 대신 validation을 기본 fallback으로 선택했습니다.",
+                )
+        elif workflow and workflow.matched:
             selected_name, selected_reason = choose(
                 "workflow",
                 "승인 주체, 단계 구조, 의사결정 게이트가 성립해 workflow를 우선 선택했습니다.",
@@ -219,10 +279,16 @@ class JudgmentSynthesizer:
                 "다른 패턴 최소 조건이 부족해 validation을 fallback으로 선택했습니다.",
             )
         else:
-            selected_name, selected_reason = choose(
-                "validation",
-                "강한 패턴 후보가 없어 validation을 기본 fallback으로 선택했습니다.",
-            )
+            if prefer_neutral_fallback:
+                selected_name, selected_reason = choose(
+                    "",
+                    "문서형 입력에서는 source-grounded 질문은 확보됐지만 특정 운영 템플릿을 고정할 근거가 부족해 중립 판단으로 유지했습니다.",
+                )
+            else:
+                selected_name, selected_reason = choose(
+                    "validation",
+                    "강한 패턴 후보가 없어 validation을 기본 fallback으로 선택했습니다.",
+                )
 
         annotated: list[PatternCandidate] = []
         for item in pattern_candidates:
@@ -234,7 +300,11 @@ class JudgmentSynthesizer:
             elif item.name == "access_control" and item.matched and selected_name == "workflow":
                 rejected_reason = "승인 흐름의 단계성과 게이트가 더 강해 workflow를 우선 선택했습니다."
             elif item.matched:
-                rejected_reason = f"{selected_name} 우선 규칙이 적용되어 탈락했습니다."
+                rejected_reason = (
+                    f"{selected_name} 우선 규칙이 적용되어 탈락했습니다."
+                    if selected_name
+                    else "문서형 입력에서는 특정 운영 템플릿을 고정할 근거가 부족해 후순위로 남겼습니다."
+                )
             else:
                 rejected_reason = "최소 성립 조건 부족으로 탈락했습니다."
             annotated.append(item.model_copy(update={"rejected_reason": rejected_reason}))
@@ -270,6 +340,11 @@ class JudgmentSynthesizer:
     ) -> list[AppliedJudgmentTemplate]:
         if not applied_templates:
             return []
+        if self.helper._has_fx_fifo_domain(prepared):
+            for template_id in ("validation", "amount_threshold", "query_filter"):
+                forced = next((item for item in applied_templates if item.template_id == template_id), None)
+                if forced:
+                    return [forced]
         if grounded_rules and self.helper._should_force_access_control_narrative(grounded_rules):
             forced = next((item for item in applied_templates if item.template_id == "access_control"), None)
             if forced:

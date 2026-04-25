@@ -8,6 +8,18 @@ import pytest
 
 MELLOW_LINK_ROOT = Path(__file__).resolve().parents[1]
 
+_SYNTHETIC_UPLOAD_SESSION_PREFIXES = (
+    "phase1-",
+    "upload_large_structured",
+    "upload_customer_intent",
+)
+
+_SYNTHETIC_UPLOAD_SESSION_EXACT = {
+    "fallback-session",
+    "history-session",
+    "anonymization-session",
+}
+
 try:
     from fastapi.testclient import TestClient
     _has_fastapi = True
@@ -42,6 +54,96 @@ def client():
     if app is None:
         pytest.skip(_skip_reason or "FastAPI app not available")
     return TestClient(app)
+
+
+def _synthetic_upload_session_filters(column):
+    filters = [column.like(f"{prefix}%") for prefix in _SYNTHETIC_UPLOAD_SESSION_PREFIXES]
+    filters.append(column.in_(sorted(_SYNTHETIC_UPLOAD_SESSION_EXACT)))
+    return filters
+
+
+def _purge_synthetic_phase1_rows():
+    from sqlalchemy import or_
+
+    from mellow_link.infra import (
+        AgentRun,
+        AgentRunEvent,
+        ModernizationProject,
+        ProjectAsset,
+        ProjectRunHistory,
+        TempResource,
+    )
+    from mellow_link.infra.database import SessionLocal
+
+    with SessionLocal() as db:
+        projects = db.query(ModernizationProject.id, ModernizationProject.run_id).filter(
+            or_(*_synthetic_upload_session_filters(ModernizationProject.upload_session_id))
+        ).all()
+        project_ids = [row.id for row in projects]
+        run_ids = [row.run_id for row in projects if row.run_id]
+
+        if project_ids:
+            db.query(ProjectRunHistory).filter(
+                ProjectRunHistory.project_id.in_(project_ids)
+            ).delete(synchronize_session=False)
+            db.query(ProjectAsset).filter(ProjectAsset.project_id.in_(project_ids)).delete(
+                synchronize_session=False
+            )
+            db.query(ModernizationProject).filter(
+                ModernizationProject.id.in_(project_ids)
+            ).delete(synchronize_session=False)
+
+        if run_ids:
+            db.query(AgentRunEvent).filter(AgentRunEvent.run_id.in_(run_ids)).delete(
+                synchronize_session=False
+            )
+            db.query(AgentRun).filter(AgentRun.run_id.in_(run_ids)).delete(
+                synchronize_session=False
+            )
+
+        temp_resource_filters = list(_synthetic_upload_session_filters(TempResource.temp_session_id))
+        if project_ids:
+            temp_resource_filters.append(TempResource.promoted_to_project_id.in_(project_ids))
+        db.query(TempResource).filter(or_(*temp_resource_filters)).delete(
+            synchronize_session=False
+        )
+        db.commit()
+
+
+def _build_isolated_session_factory(tmp_path: Path):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from mellow_link.infra.database import Base
+
+    db_path = (tmp_path / f"phase1_isolated_{uuid.uuid4().hex}.db").resolve()
+    engine = create_engine(
+        f"sqlite:///{db_path.as_posix()}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(bind=engine)
+    return sessionmaker(autocommit=False, autoflush=False, bind=engine), engine
+
+
+def _seed_isolated_user(db, *, username_prefix: str):
+    from mellow_link.infra import User, UserRole
+
+    user = User(
+        username=f"{username_prefix}_{uuid.uuid4().hex[:8]}",
+        hashed_password="test-hash",
+        role=UserRole.USER.value,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@pytest.fixture(autouse=True)
+def cleanup_synthetic_phase1_rows():
+    _purge_synthetic_phase1_rows()
+    yield
+    _purge_synthetic_phase1_rows()
 
 
 def _register(client, username_prefix="phase1"):
@@ -117,6 +219,29 @@ def _upload_temp_asset(
     return body
 
 
+def _build_review_pptx_bytes(tmp_path: Path) -> bytes:
+    from pptx import Presentation
+
+    pptx_path = tmp_path / f"review_{uuid.uuid4().hex[:8]}.pptx"
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[1])
+    slide.shapes.title.text = "차세대 ERP 구축 사업"
+    slide.placeholders[1].text = "\n".join(
+        [
+            "고객사: 한국전력공사",
+            "기관명: 산업통상자원부",
+            "담당자: 홍길동 PM",
+            "프로젝트명: Project Apollo Modernization",
+            "이메일: hgd@example.com",
+            "한국지역난방공사와 공동 추진",
+        ]
+    )
+    notes = slide.notes_slide.notes_text_frame
+    notes.text = "계약명: 2026 ERP 통합 고도화 계약"
+    prs.save(pptx_path)
+    return pptx_path.read_bytes()
+
+
 def _create_persisted_project(
     client,
     user: dict,
@@ -127,6 +252,7 @@ def _create_persisted_project(
     content: bytes,
     project_name: str,
     client_name: str,
+    goal: str = "",
 ) -> tuple[str, dict]:
     from mellow_link.routers import projects as projects_router
 
@@ -144,6 +270,7 @@ def _create_persisted_project(
         json={
             "project_name": project_name,
             "client_name": client_name,
+            "goal": goal,
             "upload_session_id": upload_session_id,
             "asset_manifest": [{"name": filename, "temp_file_id": upload["temp_file_id"], "size": len(content)}],
             "template_key": "default_modernization_v1",
@@ -269,6 +396,100 @@ def _project_result_archive_dir(project_id: str, run_id: str) -> Path:
     return MELLOW_LINK_ROOT.parents[1] / "data" / "outputs" / "final" / "project_results" / project_id / run_id
 
 
+def _create_project_with_history(
+    user: dict,
+    *,
+    project_name: str = "히스토리 프로젝트",
+    latest_status: str = "running",
+    historical_manifest: list[dict] | None = None,
+    latest_manifest: list[dict] | None = None,
+    upload_session_id: str = "history-session",
+) -> tuple[str, str, str]:
+    from mellow_link.infra import ModernizationProject, ProjectRunHistory, User
+    from mellow_link.infra.database import SessionLocal
+    from mellow_link.infra.run_events import create_run, emit_event, EVENT_TYPE_RUN_STARTED, EVENT_TYPE_RUN_FINISHED
+    from mellow_link.routers.runs import _resolve_run_session_id
+
+    historical_manifest = historical_manifest or [
+        {"name": "legacy.jsp", "temp_file_id": "legacy-jsp", "size": 777}
+    ]
+    latest_manifest = latest_manifest or [
+        {"name": "legacy.jsp", "temp_file_id": "legacy-jsp", "size": 777},
+        {"name": "schema.sql", "temp_file_id": "schema-sql", "size": 555},
+    ]
+    structured_result, polish_bundle = _build_large_rebuild_result_with_polish_bundle()
+
+    with SessionLocal() as db:
+        db_user = db.query(User).filter(User.username == user["username"]).first()
+        session_id = _resolve_run_session_id(db, db_user, None)
+        historical_run_id = create_run(session_id=session_id, db=db, module_id="rebuild_assistant", run_kind="rebuild_plan")
+        latest_run_id = create_run(session_id=session_id, db=db, module_id="rebuild_assistant", run_kind="rebuild_plan")
+        emit_event(historical_run_id, EVENT_TYPE_RUN_STARTED, {"user_input": "history", "mode": "fast", "session_id": session_id}, db=db)
+        emit_event(
+            historical_run_id,
+            EVENT_TYPE_RUN_FINISHED,
+            {
+                "success": True,
+                "summary": "history",
+                "structured_result": structured_result,
+                "polish_bundle": polish_bundle,
+                "primary_feature_mode": "save_validation",
+                "module_id": "rebuild_assistant",
+                "run_kind": "rebuild_plan",
+            },
+            db=db,
+        )
+        emit_event(latest_run_id, EVENT_TYPE_RUN_STARTED, {"user_input": "latest", "mode": "fast", "session_id": session_id}, db=db)
+        if latest_status in ("completed", "failed"):
+            emit_event(
+                latest_run_id,
+                EVENT_TYPE_RUN_FINISHED,
+                {
+                    "success": latest_status == "completed",
+                    "summary": latest_status,
+                },
+                db=db,
+            )
+        project = ModernizationProject(
+            id=f"proj_{uuid.uuid4().hex[:12]}",
+            user_id=db_user.id,
+            session_id=session_id,
+            run_id=latest_run_id,
+            project_name=project_name,
+            client_name="OO카드",
+            template_key="default_modernization_v1",
+            template_mode="recommended",
+            constraints_json="[]",
+            upload_session_id=upload_session_id,
+            asset_manifest_json=json.dumps(latest_manifest, ensure_ascii=False),
+            status=latest_status,
+        )
+        db.add(project)
+        db.flush()
+        db.add_all(
+            [
+                ProjectRunHistory(
+                    id=f"prh_{uuid.uuid4().hex[:12]}",
+                    project_id=project.id,
+                    run_id=historical_run_id,
+                    sequence_no=1,
+                    trigger_kind="initial",
+                    asset_manifest_json=json.dumps(historical_manifest, ensure_ascii=False),
+                ),
+                ProjectRunHistory(
+                    id=f"prh_{uuid.uuid4().hex[:12]}",
+                    project_id=project.id,
+                    run_id=latest_run_id,
+                    sequence_no=2,
+                    trigger_kind="reanalysis",
+                    asset_manifest_json=json.dumps(latest_manifest, ensure_ascii=False),
+                ),
+            ]
+        )
+        db.commit()
+        return project.id, historical_run_id, latest_run_id
+
+
 
 def test_root_redirects_to_project_create(client):
     res = client.get("/", follow_redirects=False)
@@ -385,6 +606,157 @@ def test_user_console_run_redirects_historical_project_run_to_workspace(client):
     assert res.headers["location"] == f"/projects/{project_id}"
 
 
+def test_projects_list_exposes_recent_entries_with_run_specific_result_urls(client):
+    user = _register(client, "phase1_recent_entries")
+    project_id, historical_run_id, latest_run_id = _create_project_with_history(
+        user,
+        project_name="최근 목록 실행 분리",
+        latest_status="running",
+        upload_session_id="real-history-list",
+    )
+
+    res = client.get("/projects?format=json", headers=user["headers"])
+
+    assert res.status_code == 200, res.text
+    payload = res.json()
+    entries = [item for item in payload["recent_entries"] if item["project_id"] == project_id]
+    assert [item["run_id"] for item in entries] == [latest_run_id, historical_run_id]
+    assert entries[0]["status"] == "running"
+    assert entries[0]["result_url"] is None
+    assert entries[1]["status"] == "completed"
+    assert entries[1]["result_url"] == f"/projects/{project_id}/result?run_id={historical_run_id}"
+
+
+def test_projects_list_hides_synthetic_test_rows(client, monkeypatch):
+    user = _register(client, "phase1_hide_synthetic")
+    visible_project_id, _ = _create_persisted_project(
+        client,
+        user,
+        monkeypatch,
+        upload_session_id="real-user-list",
+        filename="legacy.sql",
+        content=b"select 1;",
+        project_name="실제 사용자 프로젝트",
+        client_name="실사용고객",
+    )
+    hidden_project_id = _create_fallback_project(user, project_name="숨김 synthetic", status="completed")
+
+    res = client.get("/projects?format=json", headers=user["headers"])
+
+    assert res.status_code == 200, res.text
+    payload = res.json()
+    project_ids = [item["id"] for item in payload["projects"]]
+    recent_project_ids = [item["project_id"] for item in payload["recent_entries"]]
+    assert visible_project_id in project_ids
+    assert visible_project_id in recent_project_ids
+    assert hidden_project_id not in project_ids
+    assert hidden_project_id not in recent_project_ids
+
+
+def test_projects_list_shows_synthetic_test_rows_for_admin(client):
+    admin = _register_admin(client, "phase1_show_synthetic_admin")
+    hidden_project_id = _create_fallback_project(admin, project_name="관리자 synthetic", status="completed")
+
+    res = client.get("/projects?format=json", headers=admin["headers"])
+
+    assert res.status_code == 200, res.text
+    payload = res.json()
+    project_ids = [item["id"] for item in payload["projects"]]
+    recent_project_ids = [item["project_id"] for item in payload["recent_entries"]]
+    assert hidden_project_id in project_ids
+    assert hidden_project_id in recent_project_ids
+
+
+def test_projects_list_marks_unstarted_synthetic_rows_as_pending_for_admin(client):
+    from mellow_link.infra import ModernizationProject, User
+    from mellow_link.infra.database import SessionLocal
+    from mellow_link.infra.run_events import create_run
+
+    admin = _register_admin(client, "phase1_pending_admin")
+
+    with SessionLocal() as db:
+        db_user = db.query(User).filter(User.username == admin["username"]).first()
+        assert db_user is not None
+        run_id = create_run(session_id="sess_customer_intent_pending", db=db, module_id="rebuild_assistant", run_kind="rebuild_plan")
+        project = ModernizationProject(
+            id=f"proj_customer_intent_pending_{uuid.uuid4().hex[:8]}",
+            user_id=db_user.id,
+            session_id="sess_customer_intent_pending",
+            run_id=run_id,
+            project_name="고객 요청 노출 확인",
+            client_name="OO",
+            template_key="default_modernization_v1",
+            template_mode="recommended",
+            constraints_json="[]",
+            upload_session_id=f"upload_customer_intent_{uuid.uuid4().hex[:8]}",
+            asset_manifest_json="[]",
+            status="running",
+        )
+        db.add(project)
+        db.commit()
+        project_id = project.id
+
+    res = client.get("/projects?format=json", headers=admin["headers"])
+
+    assert res.status_code == 200, res.text
+    payload = res.json()
+    entry = next(item for item in payload["recent_entries"] if item["project_id"] == project_id)
+    assert entry["status"] == "pending"
+    assert entry["status_bucket"] == "pending"
+
+
+def test_project_result_supports_historical_run_id_and_historical_assets(client):
+    user = _register(client, "phase1_historical_result")
+    project_id, historical_run_id, _latest_run_id = _create_project_with_history(
+        user,
+        project_name="히스토리 결과 조회",
+        latest_status="running",
+        historical_manifest=[
+            {"name": "legacy.jsp", "temp_file_id": "legacy-jsp", "size": 777},
+        ],
+        latest_manifest=[
+            {"name": "legacy.jsp", "temp_file_id": "legacy-jsp", "size": 777},
+            {"name": "schema.sql", "temp_file_id": "schema-sql", "size": 555},
+        ],
+        upload_session_id="real-history-detail",
+    )
+
+    historical = client.get(
+        f"/projects/{project_id}/result",
+        params={"format": "json", "run_id": historical_run_id},
+        headers=user["headers"],
+    )
+    assert historical.status_code == 200, historical.text
+    historical_body = historical.json()
+    assert historical_body["provenance"]["run_id"] == historical_run_id
+    assert [item["temp_file_id"] for item in historical_body["provenance"]["input_assets"]] == ["legacy-jsp"]
+
+    explanation = client.get(
+        f"/projects/{project_id}/result/explanation",
+        params={"run_id": historical_run_id, "audience": "manager", "surface_mode": "external"},
+        headers=user["headers"],
+    )
+    assert explanation.status_code == 200, explanation.text
+
+    detail = client.get(f"/projects/{project_id}?format=json", headers=user["headers"])
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["project"]["status"] == "running"
+
+
+def test_project_detail_bootstraps_initial_history_for_legacy_project(client):
+    user = _register(client, "phase1_detail_history_bootstrap")
+    project_id = _create_fallback_project(user, project_name="레거시 상세 부트스트랩", status="completed")
+
+    res = client.get(f"/projects/{project_id}?format=json", headers=user["headers"])
+
+    assert res.status_code == 200, res.text
+    history = res.json()["run_history"]
+    assert len(history) == 1
+    assert history[0]["sequence_no"] == 1
+    assert history[0]["trigger_kind"] == "initial"
+    assert history[0]["is_latest"] is True
+
+
 def test_run_surfaces_include_project_redirect_context(client):
     user = _register(client, "phase1_run_surface_project")
     admin = _register_admin(client, "phase1_run_surface_project_admin")
@@ -423,15 +795,666 @@ def test_projects_create_page_supports_goal_and_constraints_autofill(client):
     assert "applyAssetAutofill" in text
     assert "goal.txt" in text
     assert "constraints.txt" in text
+    assert 'id="goal"' in text
     assert 'id="customerIntent"' in text
     assert "customer_request.txt" in text
     assert "customer_intent.txt" in text
     assert "preferred_direction.txt" in text
     assert "buildConstraintPayload" in text
-    assert "프로젝트명 자동 채움" in text
+    assert 'id="anonymizationReviewSection"' in text
+    assert "입력 익명화 리뷰" in text
+    assert "refreshAnonymizationReview" in text
+    assert "await refreshAnonymizationReview();" in text
+    assert "/projects/anonymization-review" in text
+    assert "Safe Preview" in text
+    assert "Role Token 요약" in text
+    assert "감지된 원문 유형" in text
+    assert "high_risk_detected" in text
+    assert "label_less_risk_count" in text
+    assert "display_review_report" in text
+    assert "Source Question Guard" in text
+    assert 'id="sourceQuestionCandidates"' in text
+    assert 'id="guardedUserQuestions"' in text
+    assert "/static/anonymization_display.js" in text
+    assert "표시 안내: [PERSON], [ORG], [PROJECT], [TERM] 등은 익명 처리된 민감정보입니다." in text
+    assert "분석 목표 자동 채움" in text
     assert "제약 조건 자동 병합" in text
     assert "고객 요청 자동 채움" in text
 
+
+def test_projects_anonymization_review_preview_returns_safe_report(client):
+    user = _register(client, "phase1_review")
+    session_id = f"phase1-review-{uuid.uuid4().hex[:8]}"
+    sml = "\n".join(
+        [
+            "[SML v1]",
+            "presentation_file: review_deck.pptx",
+            "slide_count: 2",
+            "",
+            "[SLIDE 1]",
+            "title: 차세대 ERP 구축 사업",
+            "texts:",
+            "- 고객사: 한국전력공사",
+            "- 기관명: 산업통상자원부",
+            "- 담당자: 홍길동 PM",
+            "- 프로젝트명: Project Apollo Modernization",
+            "- 이메일: hgd@example.com",
+            "",
+            "[SLIDE 2]",
+            "title: 정산 통합 사업",
+            "texts:",
+            "- 한국지역난방공사와 공동 추진",
+            "- API /finance/payments",
+        ]
+    )
+    upload = _upload_temp_asset(
+        client,
+        session_id=session_id,
+        filename="review.txt",
+        content=sml.encode("utf-8"),
+        headers=user["headers"],
+    )
+
+    res = client.post(
+        "/projects/anonymization-review",
+        headers={**user["headers"], "Content-Type": "application/json"},
+        json={
+            "upload_session_id": session_id,
+            "asset_manifest": [
+                {
+                    "name": "review.txt",
+                    "temp_file_id": upload["temp_file_id"],
+                    "size": len(sml.encode("utf-8")),
+                }
+            ],
+        },
+    )
+
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["high_risk_detected"] is True
+    assert body["label_less_risk_count"] >= 1
+    assert body["label_less_warning_count"] >= 1
+    assert body["question_guard_summary"]["guard_input_source_count"] >= 1
+    assert body["question_guard_summary"]["guard_input_total_chars"] > 0
+    assert body["question_guard_summary"]["source_question_candidate_count"] >= 1
+    assert body["source_question_candidates"]
+
+    report = body["review_report"]
+    display_report = body["display_review_report"]
+    assert report is not None
+    assert display_report is not None
+    assert report["status"] == "blocked"
+    preview_text = report["asset_previews"][0]["preview_text"]
+    display_preview_text = display_report["asset_previews"][0]["preview_text"]
+    assert "[CLIENT]" in preview_text
+    assert "[ORG]" in preview_text
+    assert "[PERSON]" in preview_text
+    assert "[PROJECT]" in preview_text
+    assert "[EMAIL]" in preview_text
+    assert "[RISK_ORG_CANDIDATE]" in preview_text
+    assert "[WARNING_BUSINESS_CANDIDATE]" in preview_text
+    assert "[ORG]" in display_preview_text
+    assert "[BUSINESS]" in display_preview_text
+    assert "[RISK_ORG_CANDIDATE]" not in display_preview_text
+    assert "[WARNING_BUSINESS_CANDIDATE]" not in display_preview_text
+
+    serialized = json.dumps(body, ensure_ascii=False)
+    for raw_value in (
+        "한국전력공사",
+        "산업통상자원부",
+        "홍길동",
+        "Project Apollo Modernization",
+        "hgd@example.com",
+        "한국지역난방공사",
+        "정산 통합 사업",
+    ):
+        assert raw_value not in serialized
+
+
+def test_projects_anonymization_review_preview_returns_source_question_guard_summary(client):
+    user = _register(client, "phase1_question_guard_preview")
+    session_id = f"phase1-question-guard-{uuid.uuid4().hex[:8]}"
+    sml = "\n".join(
+        [
+            "[SML v1]",
+            "presentation_file: cost_consulting_deck.pptx",
+            "slide_count: 1",
+            "",
+            "[SLIDE 1]",
+            "title: [CLIENT] 원가 컨설팅 개요",
+            "texts:",
+            "- 현행 원가체계 분석",
+            "- 원가분석 및 원가계산 개선 방향",
+            "- 재료비, 노무비, 제조경비 배부기준 검토",
+            "- 손익분석 확장 검토",
+        ]
+    )
+    upload = _upload_temp_asset(
+        client,
+        session_id=session_id,
+        filename="cost_guard.txt",
+        content=sml.encode("utf-8"),
+        headers=user["headers"],
+    )
+
+    res = client.post(
+        "/projects/anonymization-review",
+        headers={**user["headers"], "Content-Type": "application/json"},
+        json={
+            "upload_session_id": session_id,
+            "goal": "제품 저장 전 검증 로직을 어떻게 강화할 것인가?",
+            "constraints": ["SQL 파라미터 검증을 어떻게 설계할 것인가?"],
+            "asset_manifest": [
+                {
+                    "name": "cost_guard.txt",
+                    "temp_file_id": upload["temp_file_id"],
+                    "size": len(sml.encode("utf-8")),
+                }
+            ],
+        },
+    )
+
+    assert res.status_code == 200, res.text
+    body = res.json()
+    questions = [item["question"] for item in body["source_question_candidates"]]
+    blocked = {(item["question"], item["blocked_reason"]) for item in body["blocked_user_questions"]}
+
+    assert "현행 원가체계의 한계는 무엇인가?" in questions
+    assert "문서가 제안하는 원가계산 개선 방향은 무엇인가?" in questions
+    assert (
+        "제품 저장 전 검증 로직을 어떻게 강화할 것인가?",
+        "source_domain_mismatch",
+    ) in blocked
+    assert (
+        "SQL 파라미터 검증을 어떻게 설계할 것인가?",
+        "source_domain_mismatch",
+    ) in blocked
+    assert body["question_guard_summary"]["preferred_question_axis"] == "processing_flow"
+
+
+def test_projects_anonymization_review_preview_supports_pptx_upload(client, tmp_path: Path):
+    user = _register(client, "phase1_pptx_preview")
+    session_id = f"phase1-pptx-preview-{uuid.uuid4().hex[:8]}"
+    pptx_bytes = _build_review_pptx_bytes(tmp_path)
+
+    upload = _upload_temp_asset(
+        client,
+        session_id=session_id,
+        filename="review_deck.pptx",
+        content=pptx_bytes,
+        headers=user["headers"],
+        content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    )
+
+    assert "[SML v1]" in upload["extracted_text"]
+    assert "presentation_file: review_deck.pptx" in upload["extracted_text"]
+    assert "[SLIDE 1]" in upload["extracted_text"]
+
+    res = client.post(
+        "/projects/anonymization-review",
+        headers={**user["headers"], "Content-Type": "application/json"},
+        json={
+            "upload_session_id": session_id,
+            "asset_manifest": [
+                {
+                    "name": "review_deck.pptx",
+                    "temp_file_id": upload["temp_file_id"],
+                    "size": len(pptx_bytes),
+                }
+            ],
+        },
+    )
+
+    assert res.status_code == 200, res.text
+    body = res.json()
+    report = body["review_report"]
+    display_report = body["display_review_report"]
+    preview_text = report["asset_previews"][0]["preview_text"]
+    display_preview_text = display_report["asset_previews"][0]["preview_text"]
+    serialized = json.dumps(body, ensure_ascii=False)
+
+    assert body["high_risk_detected"] is True
+    assert body["label_less_risk_count"] >= 1
+    assert isinstance(body["label_less_warning_count"], int)
+    assert body["question_guard_summary"]["guard_input_source_count"] >= 1
+    assert body["question_guard_summary"]["sml_text_length"] > 0
+    assert body["question_guard_summary"]["source_question_candidate_count"] >= 1
+    assert len(body["source_question_candidates"]) >= 1
+    assert report["status"] == "blocked"
+    assert report["llm_send_allowed"] is False
+    assert "[CLIENT]" in preview_text
+    assert "[ORG]" in preview_text
+    assert "[PERSON]" in preview_text
+    assert "[PROJECT]" in preview_text
+    assert "[EMAIL]" in preview_text
+    assert "[RISK_ORG_CANDIDATE]" in preview_text
+    assert "[ORG]" in display_preview_text
+    assert "[RISK_ORG_CANDIDATE]" not in display_preview_text
+
+    for raw_value in (
+        "한국전력공사",
+        "산업통상자원부",
+        "홍길동",
+        "Project Apollo Modernization",
+        "hgd@example.com",
+        "한국지역난방공사",
+        "차세대 ERP 구축 사업",
+        "2026 ERP 통합 고도화 계약",
+    ):
+        assert raw_value not in preview_text
+        assert raw_value not in serialized
+
+
+def test_projects_anonymization_review_preview_returns_generic_fallback_questions_when_domain_specific_is_absent(client):
+    user = _register(client, "phase1_generic_question_preview")
+    session_id = f"phase1-generic-question-{uuid.uuid4().hex[:8]}"
+    sml = "\n".join(
+        [
+            "[SML v1]",
+            "presentation_file: generic_strategy_deck.pptx",
+            "slide_count: 1",
+            "",
+            "[SLIDE 1]",
+            "title: 개선 전략 검토",
+            "texts:",
+            "- 현행 프로세스의 한계",
+            "- 개선 방향 검토",
+            "- 추가 확인이 필요한 항목",
+            "- 판단 기준 정리",
+        ]
+    )
+    upload = _upload_temp_asset(
+        client,
+        session_id=session_id,
+        filename="generic_strategy.txt",
+        content=sml.encode("utf-8"),
+        headers=user["headers"],
+    )
+
+    res = client.post(
+        "/projects/anonymization-review",
+        headers={**user["headers"], "Content-Type": "application/json"},
+        json={
+            "upload_session_id": session_id,
+            "asset_manifest": [
+                {
+                    "name": "generic_strategy.txt",
+                    "temp_file_id": upload["temp_file_id"],
+                    "size": len(sml.encode("utf-8")),
+                }
+            ],
+        },
+    )
+
+    assert res.status_code == 200, res.text
+    body = res.json()
+    questions = [item["question"] for item in body["source_question_candidates"]]
+    summary = body["question_guard_summary"]
+
+    assert "이 문서는 어떤 문제를 해결하려는가?" in questions
+    assert "현행 구조의 한계는 무엇인가?" in questions
+    assert summary["guard_input_source_count"] >= 1
+    assert summary["guard_input_total_chars"] >= 120
+    assert "no_domain_terms_detected" in summary["no_candidate_reasons"]
+
+
+def test_project_create_keeps_high_risk_as_warning_and_passes_anonymized_sml_bundle(
+    client,
+    monkeypatch,
+    tmp_path: Path,
+):
+    from mellow_link.routers import projects as projects_router
+
+    user = _register(client, "phase1_pptx_create")
+    session_id = f"phase1-pptx-create-{uuid.uuid4().hex[:8]}"
+    pptx_bytes = _build_review_pptx_bytes(tmp_path)
+    upload = _upload_temp_asset(
+        client,
+        session_id=session_id,
+        filename="review_deck.pptx",
+        content=pptx_bytes,
+        headers=user["headers"],
+        content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    )
+
+    preview_res = client.post(
+        "/projects/anonymization-review",
+        headers={**user["headers"], "Content-Type": "application/json"},
+        json={
+            "upload_session_id": session_id,
+            "asset_manifest": [
+                {
+                    "name": "review_deck.pptx",
+                    "temp_file_id": upload["temp_file_id"],
+                    "size": len(pptx_bytes),
+                }
+            ],
+        },
+    )
+    assert preview_res.status_code == 200, preview_res.text
+    preview_body = preview_res.json()
+    assert preview_body["high_risk_detected"] is True
+
+    captured: dict[str, object] = {}
+
+    def _capture_start(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(projects_router, "start_project_wrapped_run", _capture_start)
+
+    create_res = client.post(
+        "/projects",
+        headers={**user["headers"], "Content-Type": "application/json"},
+        json={
+            "project_name": "PPTX high risk create",
+            "client_name": "OO금융",
+            "goal": "PPT 기반 레거시 기능 분석",
+            "upload_session_id": session_id,
+            "asset_manifest": [
+                {
+                    "name": "review_deck.pptx",
+                    "temp_file_id": upload["temp_file_id"],
+                    "size": len(pptx_bytes),
+                }
+            ],
+            "template_key": "default_modernization_v1",
+            "constraints": [],
+        },
+    )
+
+    assert create_res.status_code == 200, create_res.text
+    assert create_res.json()["status"] == "pending"
+    assert captured.get("safe_bundle") is not None
+
+    safe_bundle = captured["safe_bundle"]
+    canonical = "\n\n".join(source.content for source in safe_bundle.sources)
+    stats = safe_bundle.sources[0].replacement_stats
+
+    assert "[SML v1]" in canonical
+    assert "[SLIDE 1]" in canonical
+    assert "CLIENT_001" in canonical
+    assert "ORG_001" in canonical
+    assert "PERSON_001" in canonical
+    assert "PROJECT_001" in canonical
+    assert "EMAIL_001" in canonical
+    assert "[RISK_ORG_CANDIDATE]" in canonical
+    assert stats["organization_name"] == 1
+
+    for raw_value in (
+        "한국전력공사",
+        "산업통상자원부",
+        "홍길동",
+        "Project Apollo Modernization",
+        "hgd@example.com",
+        "한국지역난방공사",
+        "2026 ERP 통합 고도화 계약",
+    ):
+        assert raw_value not in canonical
+
+
+
+def test_project_create_preserves_consulting_terms_while_masking_label_less_person_candidates(
+    client,
+    monkeypatch,
+):
+    from mellow_link.routers import projects as projects_router
+
+    user = _register(client, "phase1_person_filter_create")
+    session_id = f"phase1-person-filter-{uuid.uuid4().hex[:8]}"
+    sml = "\n".join(
+        [
+            "[SML v1]",
+            "presentation_file: person_filter_deck.pptx",
+            "slide_count: 1",
+            "",
+            "[SLIDE 1]",
+            "title: 분석 범위 검토",
+            "texts:",
+            "- 원가 분석 시스템 구축",
+            "- 업무 흐름도 및 데이터 처리 구조",
+            "- 담당 홍길동",
+            "- 문의: 홍길동 / hgd@example.com",
+            "- ABC컨설팅",
+            "- 홍길동 분석 시스템 구축",
+        ]
+    )
+    upload = _upload_temp_asset(
+        client,
+        session_id=session_id,
+        filename="person_filter.txt",
+        content=sml.encode("utf-8"),
+        headers=user["headers"],
+    )
+
+    preview_res = client.post(
+        "/projects/anonymization-review",
+        headers={**user["headers"], "Content-Type": "application/json"},
+        json={
+            "upload_session_id": session_id,
+            "asset_manifest": [
+                {
+                    "name": "person_filter.txt",
+                    "temp_file_id": upload["temp_file_id"],
+                    "size": len(sml.encode("utf-8")),
+                }
+            ],
+        },
+    )
+    assert preview_res.status_code == 200, preview_res.text
+    assert preview_res.json()["high_risk_detected"] is True
+
+    captured: dict[str, object] = {}
+
+    def _capture_start(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(projects_router, "start_project_wrapped_run", _capture_start)
+
+    create_res = client.post(
+        "/projects",
+        headers={**user["headers"], "Content-Type": "application/json"},
+        json={
+            "project_name": "Label-less person filter create",
+            "client_name": "OO금융",
+            "goal": "문서형 익명화 의미 보존 확인",
+            "upload_session_id": session_id,
+            "asset_manifest": [
+                {
+                    "name": "person_filter.txt",
+                    "temp_file_id": upload["temp_file_id"],
+                    "size": len(sml.encode("utf-8")),
+                }
+            ],
+            "template_key": "default_modernization_v1",
+            "constraints": [],
+        },
+    )
+
+    assert create_res.status_code == 200, create_res.text
+    assert create_res.json()["status"] == "pending"
+
+    safe_bundle = captured["safe_bundle"]
+    canonical = "\n\n".join(source.content for source in safe_bundle.sources)
+    stats = safe_bundle.sources[0].replacement_stats
+
+    assert "원가 분석 시스템 구축" in canonical
+    assert "업무 흐름도 및 데이터 처리 구조" in canonical
+    assert "홍길동 분석 시스템 구축" in canonical
+    assert "[LOW_CONF_TERM_CANDIDATE]" not in canonical
+    assert "담당 [RISK_PERSON_CANDIDATE]" in canonical
+    assert "문의: [RISK_PERSON_CANDIDATE] / EMAIL_001" in canonical
+    assert "[RISK_ORG_CANDIDATE]" in canonical
+    assert "ABC컨설팅" not in canonical
+    assert stats.get("person_name", 0) == 0
+    assert stats.get("organization_name", 0) == 0
+    assert stats["email"] == 1
+
+
+def test_project_create_masks_contextual_org_alias_in_preview_and_safe_bundle(client, monkeypatch):
+    from mellow_link.routers import projects as projects_router
+
+    user = _register(client, "phase1_org_alias_create")
+    session_id = f"phase1-org-alias-{uuid.uuid4().hex[:8]}"
+    sml = "\n".join(
+        [
+            "[SML v1]",
+            "presentation_file: busan_milk_deck.pptx",
+            "slide_count: 1",
+            "",
+            "[SLIDE 1]",
+            "title: 부산우유 컨설팅 개요",
+            "texts:",
+            "- 고객사: 부산우유 주식회사",
+            "- 부산우유의 비전",
+            "- 부산우유 기초설계서",
+            "- 부산우유 원가 시스템 개선",
+        ]
+    )
+    upload = _upload_temp_asset(
+        client,
+        session_id=session_id,
+        filename="busan_milk.txt",
+        content=sml.encode("utf-8"),
+        headers=user["headers"],
+    )
+
+    preview_res = client.post(
+        "/projects/anonymization-review",
+        headers={**user["headers"], "Content-Type": "application/json"},
+        json={
+            "upload_session_id": session_id,
+            "asset_manifest": [
+                {
+                    "name": "busan_milk.txt",
+                    "temp_file_id": upload["temp_file_id"],
+                    "size": len(sml.encode("utf-8")),
+                }
+            ],
+        },
+    )
+    assert preview_res.status_code == 200, preview_res.text
+    preview_body = preview_res.json()
+    raw_preview_text = preview_body["review_report"]["asset_previews"][0]["preview_text"]
+    preview_text = preview_body["display_review_report"]["asset_previews"][0]["preview_text"]
+    assert "부산우유" not in raw_preview_text
+    assert "부산우유" not in preview_text
+    assert "[CLIENT]" in raw_preview_text
+    assert "[CLIENT]" in preview_text
+
+    captured: dict[str, object] = {}
+
+    def _capture_start(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(projects_router, "start_project_wrapped_run", _capture_start)
+
+    create_res = client.post(
+        "/projects",
+        headers={**user["headers"], "Content-Type": "application/json"},
+        json={
+            "project_name": "부산우유 alias masking",
+            "client_name": "부산우유",
+            "goal": "명확한 조직 alias masking 확인",
+            "upload_session_id": session_id,
+            "asset_manifest": [
+                {
+                    "name": "busan_milk.txt",
+                    "temp_file_id": upload["temp_file_id"],
+                    "size": len(sml.encode("utf-8")),
+                }
+            ],
+            "template_key": "default_modernization_v1",
+            "constraints": [],
+        },
+    )
+
+    assert create_res.status_code == 200, create_res.text
+    assert create_res.json()["status"] == "pending"
+
+    safe_bundle = captured["safe_bundle"]
+    canonical = "\n\n".join(source.content for source in safe_bundle.sources)
+    stats = safe_bundle.sources[0].replacement_stats
+
+    assert "부산우유" not in canonical
+    assert "CLIENT_001" in canonical
+    assert "CLIENT_001의 비전" in canonical
+    assert "CLIENT_001 기초설계서" in canonical
+    assert "CLIENT_001 원가 시스템 개선" in canonical
+    assert stats["client_name"] == 1
+
+
+def test_project_create_uses_source_question_guard_for_analysis_input(client, monkeypatch):
+    from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
+    from mellow_link.routers import projects as projects_router
+
+    user = _register(client, "phase1_question_guard_create")
+    session_id = f"phase1-question-guard-create-{uuid.uuid4().hex[:8]}"
+    sml = "\n".join(
+        [
+            "[SML v1]",
+            "presentation_file: cost_consulting_deck.pptx",
+            "slide_count: 1",
+            "",
+            "[SLIDE 1]",
+            "title: [CLIENT] 원가 컨설팅 개요",
+            "texts:",
+            "- 현행 원가체계 분석",
+            "- 원가분석 및 원가계산 개선 방향",
+            "- 재료비, 노무비, 제조경비 배부기준 검토",
+            "- 손익분석 확장 검토",
+        ]
+    )
+    upload = _upload_temp_asset(
+        client,
+        session_id=session_id,
+        filename="cost_guard_create.txt",
+        content=sml.encode("utf-8"),
+        headers=user["headers"],
+    )
+
+    captured: dict[str, object] = {}
+
+    def _capture_start(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(projects_router, "start_project_wrapped_run", _capture_start)
+
+    create_res = client.post(
+        "/projects",
+        headers={**user["headers"], "Content-Type": "application/json"},
+        json={
+            "project_name": "질문 가드 create",
+            "client_name": "OO우유",
+            "goal": "제품 저장 전 검증 로직을 어떻게 강화할 것인가?",
+            "upload_session_id": session_id,
+            "asset_manifest": [
+                {
+                    "name": "cost_guard_create.txt",
+                    "temp_file_id": upload["temp_file_id"],
+                    "size": len(sml.encode("utf-8")),
+                }
+            ],
+            "template_key": "default_modernization_v1",
+            "constraints": [
+                "SQL 파라미터 검증을 어떻게 설계할 것인가?",
+                "전면 재구축해야 하는가?",
+            ],
+        },
+    )
+
+    assert create_res.status_code == 200, create_res.text
+    assert create_res.json()["status"] == "pending"
+    assert any("질문 중 일부가 소스 근거 부족으로 분석 입력에서 제외되었습니다." in item for item in create_res.json()["warnings"])
+
+    analysis_context = captured["analysis_context"]
+    prepared = RebuildAssistantService().prepare_analysis_context_input(analysis_context=analysis_context)
+
+    assert prepared.goal == "현행 원가체계의 한계는 무엇인가?"
+    assert prepared.question_axis == "processing_flow"
+    assert any(item.blocked_reason == "source_domain_mismatch" for item in prepared.blocked_user_questions)
+    assert any(item.blocked_reason == "conclusion_forcing" for item in prepared.review_user_questions)
+    assert prepared.question_guard_summary.selected_questions[0] == "현행 원가체계의 한계는 무엇인가?"
 
 
 def test_runtime_console_pages_are_exposed(client):
@@ -518,18 +1541,14 @@ def test_project_result_markdown_download_external_surface(client, monkeypatch):
     res = client.get(f"/projects/{project_id}/result?format=md&surface_mode=external", headers=user["headers"])
     assert res.status_code == 200, res.text
     assert "text/markdown" in res.headers.get("content-type", "")
-    assert "## 핵심 판단" in res.text
-    assert "## 왜 이 방향인가" in res.text
-    assert "## 다음 단계" in res.text
-    assert "## 즉시 결정 필요" not in res.text
+    assert res.text.startswith("# 컨설팅 결과 - 외부 설명 패키지")
+    assert "## 컨설팅 개요" in res.text
+    assert "## 컨설팅 비전" in res.text
+    assert "## 핵심 판단" not in res.text
     assert "Review Diff" not in res.text
     assert "synthetic_signal_detected" not in res.text
     assert "severity" not in res.text.lower()
     assert "blast radius" not in res.text.lower()
-    assert "Decision Brief" not in res.text
-    assert "ready" not in res.text.lower()
-    assert "DEC-" not in res.text
-    assert "필요합니다" not in res.text
     assert "filename*=UTF-8''%EC%99%B8%EB%B6%80_%EC%84%A4%EB%AA%85_%ED%8C%A8%ED%82%A4%EC%A7%80_external_result.md" in res.headers.get("content-disposition", "")
 
 
@@ -647,6 +1666,111 @@ def test_create_project_returns_domain_mismatch_warning(client, monkeypatch):
     assert detail_payload["warnings"]
 
 
+def test_create_project_preserves_explicit_goal_and_reuses_it_for_rerun_paths(client, monkeypatch):
+    from mellow_link.routers import projects as projects_router
+
+    captured_calls = []
+
+    def _capture_start(*args, **kwargs):
+        captured_calls.append(dict(kwargs))
+
+    monkeypatch.setattr(projects_router, "start_project_wrapped_run", _capture_start)
+
+    user = _register(client, "phase1_goal_preserve")
+    upload_session_id = f"phase1-goal-preserve-{uuid.uuid4().hex[:8]}"
+    upload = _upload_temp_asset(
+        client,
+        upload_session_id,
+        "legacy_proc.sql",
+        b"CREATE OR REPLACE PROCEDURE p_fx_fifo AS BEGIN NULL; END;",
+        headers=user["headers"],
+    )
+    explicit_goal = "이 SQL/프로시저가 실제로 어떤 처리 흐름과 계산 규칙으로 동작하는지 분석해줘."
+
+    create_res = client.post(
+        "/projects",
+        headers={**user["headers"], "Content-Type": "application/json"},
+        json={
+            "project_name": "선입선출 분석",
+            "client_name": "OO은행",
+            "goal": explicit_goal,
+            "upload_session_id": upload_session_id,
+            "asset_manifest": [{"name": "legacy_proc.sql", "temp_file_id": upload["temp_file_id"], "size": 58}],
+            "template_key": "default_modernization_v1",
+            "constraints": [],
+        },
+    )
+    assert create_res.status_code == 200, create_res.text
+    project_id = create_res.json()["project_id"]
+    assert captured_calls
+    assert captured_calls[-1]["goal"] == explicit_goal
+
+    detail_res = client.get(f"/projects/{project_id}?format=json", headers=user["headers"])
+    assert detail_res.status_code == 200, detail_res.text
+    assert detail_res.json()["project"]["goal"] == explicit_goal
+
+    captured_calls.clear()
+    rerun_res = client.post(f"/projects/{project_id}/run", headers=user["headers"])
+    assert rerun_res.status_code == 200, rerun_res.text
+    assert captured_calls
+    assert captured_calls[-1]["goal"] == explicit_goal
+
+    captured_calls.clear()
+    reanalysis_res = client.post(
+        f"/projects/{project_id}/reanalysis",
+        headers={**user["headers"], "Content-Type": "application/json"},
+        json={"new_asset_manifest": []},
+    )
+    assert reanalysis_res.status_code == 200, reanalysis_res.text
+    assert captured_calls
+    assert captured_calls[-1]["goal"] == explicit_goal
+
+
+def test_create_project_uses_goal_txt_when_inline_goal_is_blank(client, monkeypatch):
+    from mellow_link.routers import projects as projects_router
+
+    captured_calls = []
+
+    def _capture_start(*args, **kwargs):
+        captured_calls.append(dict(kwargs))
+
+    monkeypatch.setattr(projects_router, "start_project_wrapped_run", _capture_start)
+
+    user = _register(client, "phase1_goal_txt")
+    upload_session_id = f"phase1-goal-txt-{uuid.uuid4().hex[:8]}"
+    goal_text = "이 SQL/프로시저의 FIFO lot 처리 흐름과 계산 규칙을 분석해줘."
+    uploads = [
+        ("goal.txt", goal_text.encode("utf-8")),
+        ("legacy_proc.sql", b"CREATE OR REPLACE PROCEDURE p_fifo AS BEGIN NULL; END;"),
+    ]
+    asset_manifest = []
+    for filename, content in uploads:
+        uploaded = _upload_temp_asset(client, upload_session_id, filename, content, headers=user["headers"])
+        asset_manifest.append({"name": filename, "temp_file_id": uploaded["temp_file_id"], "size": len(content)})
+
+    create_res = client.post(
+        "/projects",
+        headers={**user["headers"], "Content-Type": "application/json"},
+        json={
+            "project_name": "FIFO 분석",
+            "client_name": "OO증권",
+            "goal": "",
+            "upload_session_id": upload_session_id,
+            "asset_manifest": asset_manifest,
+            "template_key": "default_modernization_v1",
+            "constraints": [],
+        },
+    )
+    assert create_res.status_code == 200, create_res.text
+    project_id = create_res.json()["project_id"]
+    assert captured_calls
+    assert captured_calls[-1]["goal"] == goal_text
+
+    detail_res = client.get(f"/projects/{project_id}?format=json", headers=user["headers"])
+    assert detail_res.status_code == 200, detail_res.text
+    assert detail_res.json()["project"]["goal"] == goal_text
+
+
 def test_temp_upload_returns_extracted_text_for_autofill(client):
     body = _upload_temp_asset(
         client,
@@ -685,8 +1809,10 @@ def test_project_result_docx_download(client, monkeypatch, tmp_path):
         async def generate(self, request):
             assert request.output_type.value == "docx"
             assert request.filename == "DOCX_결과_패키지_result.docx"
-            assert "## 결정 요약" in request.content
-            assert "## 설계 선택지" in request.content
+            assert request.content.startswith("# 컨설팅 결과 - DOCX 결과 패키지")
+            assert "## 컨설팅 개요" in request.content
+            assert "## 컨설팅 설계" in request.content
+            assert "## 참고 구조 비교" not in request.content
             return SimpleNamespace(output_path=output_path)
 
     monkeypatch.setattr(app_state, "doc_service", FakeDocService(), raising=False)
@@ -724,11 +1850,11 @@ def test_project_result_docx_download_external_surface(client, monkeypatch, tmp_
         async def generate(self, request):
             assert request.output_type.value == "docx"
             assert request.filename == "DOCX_외부_설명_패키지_external_result.docx"
-            assert "## 핵심 판단" in request.content
-            assert "## 왜 이 방향인가" in request.content
-            assert "## 다음 단계" in request.content
-            assert "## Executive Summary" not in request.content
+            assert request.content.startswith("# 컨설팅 결과 - DOCX 외부 설명 패키지")
+            assert "## 컨설팅 개요" in request.content
+            assert "## 컨설팅 비전" in request.content
             assert "Review Diff" not in request.content
+            assert "synthetic_signal_detected" not in request.content
             return SimpleNamespace(output_path=output_path)
 
     monkeypatch.setattr(app_state, "doc_service", FakeDocService(), raising=False)
@@ -766,8 +1892,11 @@ def test_project_result_pptx_download(client, monkeypatch, tmp_path):
         async def generate(self, request):
             assert request.output_type.value == "pptx"
             assert request.filename == "PPTX_결과_패키지_result.pptx"
-            assert "## 결정 요약" in request.content
-            assert "## 실행 계획" in request.content
+            assert request.content == ""
+            assert request.style_options["renderer"] == "slide_schema"
+            assert request.payload["schema_version"] == "slide_schema.v1"
+            assert request.payload["surface_mode"] == "internal"
+            assert any(slide.get("title") == "컨설팅 개요" for slide in request.payload["slides"])
             return SimpleNamespace(output_path=output_path)
 
     monkeypatch.setattr(app_state, "doc_service", FakeDocService(), raising=False)
@@ -805,11 +1934,11 @@ def test_project_result_pptx_download_external_surface(client, monkeypatch, tmp_
         async def generate(self, request):
             assert request.output_type.value == "pptx"
             assert request.filename == "PPTX_외부_설명_패키지_external_result.pptx"
-            assert "## 핵심 판단" in request.content
-            assert "## 왜 이 방향인가" in request.content
-            assert "## 다음 단계" in request.content
-            assert "## Decision Result" not in request.content
-            assert "Review Diff" not in request.content
+            assert request.content == ""
+            assert request.style_options["renderer"] == "slide_schema"
+            assert request.payload["schema_version"] == "slide_schema.v1"
+            assert request.payload["surface_mode"] == "external"
+            assert any(slide.get("title") == "컨설팅 개요" for slide in request.payload["slides"])
             return SimpleNamespace(output_path=output_path)
 
     monkeypatch.setattr(app_state, "doc_service", FakeDocService(), raising=False)
@@ -953,6 +2082,8 @@ def test_project_html_templates_include_asset_metadata_and_access_states(client)
     assert "생성 이력" in result.text
     assert "실행 ID" in result.text
     assert "모듈 버전" in result.text
+    assert "/static/anonymization_display.js" in result.text
+    assert "표시 안내: [PERSON], [ORG], [PROJECT], [TERM] 등은 익명 처리된 민감정보입니다." in result.text
     assert "검토용 DOCX" in result.text
     assert "검토용 PPTX" in result.text
     assert "설명용 내보내기" in result.text
@@ -995,14 +2126,12 @@ def test_project_result_markdown_includes_provenance_section(client, monkeypatch
         project_name="마크다운 provenance",
         client_name="OO금융",
     )
-    res = client.get(f"/projects/{project_id}/result?format=md", headers=user["headers"])
+    res = client.get(f"/projects/{project_id}/result?format=md&internal_export_mode=full", headers=user["headers"])
     assert res.status_code == 200, res.text
-    assert "## 결정 요약" in res.text
-    assert "## 판단 근거" in res.text
-    assert "## 실행 조치" in res.text
-    assert "## 설계 선택지" in res.text
-    assert "## 실행 계획" in res.text
+    assert res.text.startswith("# 결과 패키지 - 마크다운 provenance")
+    assert "## 컨설팅 개요" in res.text
     assert "## 참고 구조 비교" in res.text
+    assert "참고 구조 비교 데이터가 부족해 변경 근거를 다시 모아야 합니다." in res.text
     assert "Run ID:" in res.text
     assert "앱 버전:" in res.text
     assert "모듈 버전:" in res.text
@@ -1227,10 +2356,10 @@ def test_build_result_package_condition_summary_uses_rule_title_fallback_for_bro
     assert any("대리점 채널의 고액 주문은 본사 승인 조건을 충족해야 처리되도록 제한" in card["condition_summary"] for card in cards)
 
 
-def test_run_finished_preserves_large_structured_result_and_result_package_becomes_ready():
+def test_run_finished_preserves_large_structured_result_and_result_package_becomes_ready(tmp_path):
     import uuid
 
-    from mellow_link.infra import ModernizationProject, SessionLocal
+    from mellow_link.infra import ModernizationProject
     from mellow_link.infra.run_events import (
         EVENT_TYPE_RUN_FINISHED,
         create_run,
@@ -1307,57 +2436,100 @@ def test_run_finished_preserves_large_structured_result_and_result_package_becom
     project_id = f"proj_large_structured_{uuid.uuid4().hex[:8]}"
     upload_session_id = f"upload_large_structured_{uuid.uuid4().hex[:8]}"
 
-    with SessionLocal() as db:
-        run_id = create_run(session_id="sess_large_structured", db=db, module_id="rebuild_assistant", run_kind="rebuild_plan")
-        project = ModernizationProject(
-            id=project_id,
-            user_id=1,
-            session_id="sess_large_structured",
-            run_id=run_id,
-            project_name="대형 structured result",
-            client_name="OO",
-            template_key="default_modernization_v1",
-            template_mode="recommended",
-            constraints_json="[]",
-            upload_session_id=upload_session_id,
-            asset_manifest_json="[]",
-            status="completed",
-        )
-        db.add(project)
-        db.commit()
-        emit_event(
-            run_id,
-            EVENT_TYPE_RUN_FINISHED,
-            {
-                "success": True,
-                "summary": "summary " * 300,
-                "structured_result": result.model_dump(),
-                "primary_feature_mode": "status_permissions",
-                "secondary_feature_mode": "save_validation",
-                "confidence": result.confidence,
-                "needs_more_input": False,
-                "scope_limited": False,
-                "module_id": "rebuild_assistant",
-                "run_kind": "rebuild_plan",
-            },
-            db=db,
-        )
-        events = get_run_events(run_id, db=db)
-        run_finished = next(event for event in events if event["type"] == "run_finished")
-        assert isinstance(run_finished["payload"]["structured_result"], dict)
+    isolated_session, engine = _build_isolated_session_factory(tmp_path)
+    try:
+        with isolated_session() as db:
+            user = _seed_isolated_user(db, username_prefix="phase1_large_structured")
+            run_id = create_run(
+                session_id="sess_large_structured",
+                db=db,
+                module_id="rebuild_assistant",
+                run_kind="rebuild_plan",
+            )
+            project = ModernizationProject(
+                id=project_id,
+                user_id=user.id,
+                session_id="sess_large_structured",
+                run_id=run_id,
+                project_name="대형 structured result",
+                client_name="OO",
+                template_key="default_modernization_v1",
+                template_mode="recommended",
+                constraints_json="[]",
+                upload_session_id=upload_session_id,
+                asset_manifest_json="[]",
+                status="completed",
+            )
+            db.add(project)
+            db.commit()
+            emit_event(
+                run_id,
+                EVENT_TYPE_RUN_FINISHED,
+                {
+                    "success": True,
+                    "summary": "summary " * 300,
+                    "structured_result": result.model_dump(),
+                    "primary_feature_mode": "status_permissions",
+                    "secondary_feature_mode": "save_validation",
+                    "confidence": result.confidence,
+                    "needs_more_input": False,
+                    "scope_limited": False,
+                    "module_id": "rebuild_assistant",
+                    "run_kind": "rebuild_plan",
+                },
+                db=db,
+            )
+            events = get_run_events(run_id, db=db)
+            run_finished = next(event for event in events if event["type"] == "run_finished")
+            assert isinstance(run_finished["payload"]["structured_result"], dict)
 
-        extracted = _extract_structured_result(events)
-        assert extracted is not None
-        assert extracted.one_line_conclusion == result.one_line_conclusion
-        pkg = build_result_package(project, {"status": "completed", "run_id": run_id}, extracted, assets=[], app_version="0.1.0")
-        assert pkg["executive_summary"]["state"] == "ready"
-        assert pkg["core_conclusion"] == result.one_line_conclusion
-        assert pkg["confidence"] == result.confidence
+            extracted = _extract_structured_result(events)
+            assert extracted is not None
+            assert extracted.one_line_conclusion == result.one_line_conclusion
+            pkg = build_result_package(
+                project,
+                {"status": "completed", "run_id": run_id},
+                extracted,
+                assets=[],
+                app_version="0.1.0",
+            )
+            assert pkg["executive_summary"]["state"] == "ready"
+            assert pkg["core_conclusion"] == result.one_line_conclusion
+            assert pkg["confidence"] == result.confidence
+    finally:
+        engine.dispose()
 
 
-def test_build_result_package_exposes_customer_intent_separately():
+def test_extract_project_insights_falls_back_to_rebuild_strategy_for_sparse_structured_result():
+    from mellow_link.modules.rebuild_assistant.schemas import StructuredRebuildResult
+    from mellow_link.routers.projects import _extract_project_insights
+
+    result = StructuredRebuildResult(
+        one_line_conclusion="주문 마감 기능을 분리합니다.",
+        analysis_summary=["현행 분석 요약"],
+        rebuild_strategy=[
+            "주문 마감 정책을 별도 서비스로 분리합니다.",
+            "상태 전이 검증을 API 경계 밖으로 이동합니다.",
+            "기존 상태 코드는 유지합니다.",
+        ],
+    )
+
+    insights = _extract_project_insights(
+        [{"type": "run_finished", "payload": {"primary_feature_mode": "status_permissions"}}],
+        result,
+    )
+
+    assert insights["feature_mode"] == "권한 및 상태 규칙"
+    assert insights["findings"] == ["현행 분석 요약"]
+    assert insights["rules"] == [
+        "주문 마감 정책을 별도 서비스로 분리합니다.",
+        "상태 전이 검증을 API 경계 밖으로 이동합니다.",
+        "기존 상태 코드는 유지합니다.",
+    ]
+
+
+def test_build_result_package_exposes_customer_intent_separately(tmp_path):
     from mellow_link.infra import ModernizationProject
-    from mellow_link.infra.database import SessionLocal
     from mellow_link.infra.run_events import create_run
     from mellow_link.modules.rebuild_assistant.schemas import StructuredRebuildResult
     from mellow_link.routers.projects import build_result_package
@@ -1367,38 +2539,54 @@ def test_build_result_package_exposes_customer_intent_separately():
         confidence=0.72,
     )
 
-    with SessionLocal() as db:
-        run_id = create_run(session_id="sess_customer_intent", db=db, module_id="rebuild_assistant", run_kind="rebuild_plan")
-        project = ModernizationProject(
-            id=f"proj_customer_intent_{uuid.uuid4().hex[:8]}",
-            user_id=1,
-            session_id="sess_customer_intent",
-            run_id=run_id,
-            project_name="고객 요청 노출 확인",
-            client_name="OO",
-            template_key="default_modernization_v1",
-            template_mode="recommended",
-            constraints_json=json.dumps(
-                [
-                    "기존 DB 계약 유지",
-                    "고객 요청: 화면은 최대한 유지하고 백엔드만 분리",
-                    "고객 요청: 단계적 전환을 원함",
-                ],
-                ensure_ascii=False,
-            ),
-            upload_session_id=f"upload_customer_intent_{uuid.uuid4().hex[:8]}",
-            asset_manifest_json="[]",
-            status="completed",
-        )
-        db.add(project)
-        db.commit()
+    isolated_session, engine = _build_isolated_session_factory(tmp_path)
+    try:
+        with isolated_session() as db:
+            user = _seed_isolated_user(db, username_prefix="phase1_customer_intent")
+            run_id = create_run(
+                session_id="sess_customer_intent",
+                db=db,
+                module_id="rebuild_assistant",
+                run_kind="rebuild_plan",
+            )
+            project = ModernizationProject(
+                id=f"proj_customer_intent_{uuid.uuid4().hex[:8]}",
+                user_id=user.id,
+                session_id="sess_customer_intent",
+                run_id=run_id,
+                project_name="고객 요청 노출 확인",
+                client_name="OO",
+                template_key="default_modernization_v1",
+                template_mode="recommended",
+                constraints_json=json.dumps(
+                    [
+                        "기존 DB 계약 유지",
+                        "고객 요청: 화면은 최대한 유지하고 백엔드만 분리",
+                        "고객 요청: 단계적 전환을 원함",
+                    ],
+                    ensure_ascii=False,
+                ),
+                upload_session_id=f"upload_customer_intent_{uuid.uuid4().hex[:8]}",
+                asset_manifest_json="[]",
+                status="completed",
+            )
+            db.add(project)
+            db.commit()
 
-        pkg = build_result_package(project, {"status": "completed", "run_id": run_id}, result, assets=[], app_version="0.1.0")
-        assert pkg["customer_intent"]["available"] is True
-        assert pkg["customer_intent"]["items"] == [
-            "화면은 최대한 유지하고 백엔드만 분리",
-            "단계적 전환을 원함",
-        ]
+            pkg = build_result_package(
+                project,
+                {"status": "completed", "run_id": run_id},
+                result,
+                assets=[],
+                app_version="0.1.0",
+            )
+            assert pkg["customer_intent"]["available"] is True
+            assert pkg["customer_intent"]["items"] == [
+                "화면은 최대한 유지하고 백엔드만 분리",
+                "단계적 전환을 원함",
+            ]
+    finally:
+        engine.dispose()
 
 
 def test_run_finished_storage_preserves_polish_bundle_dict_without_emit_mock(client):
@@ -1836,10 +3024,10 @@ def test_result_html_does_not_fallback_scope_notice(client):
     assert result.status_code == 200
     assert "STATIC_SCOPE_NOTICE" not in result.text
     assert "범위 안내 누락" in result.text
-    assert "결정 요약" in result.text
-    assert "결정 요약" in result.text
+    assert "한 줄 결론" in result.text
+    assert "우선 조치" in result.text
     assert "판단 근거" in result.text
-    assert "실행 조치" in result.text
+    assert "실행 단계" in result.text
     assert "요약 정보 누락" in result.text
     assert 'id="optionsDetails"' in result.text
     assert 'id="planDetails"' in result.text
@@ -1978,13 +3166,13 @@ def test_project_reanalysis_without_new_assets_creates_new_run_and_history(clien
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["promoted_asset_count"] == 0
-    assert body["status"] == "running"
+    assert body["status"] == "pending"
 
     detail = client.get(f"/projects/{project_id}?format=json", headers=user["headers"])
     assert detail.status_code == 200, detail.text
     payload = detail.json()
     assert payload["project"]["run_id"] == body["run_id"]
-    assert payload["project"]["status"] == "running"
+    assert payload["project"]["status"] == "pending"
     history = payload["run_history"]
     assert len(history) == 2
     assert [item["sequence_no"] for item in history] == [1, 2]

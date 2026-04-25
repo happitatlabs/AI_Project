@@ -22,6 +22,14 @@ from .schemas import PreparedRebuildInput
 
 
 class TemplateSupport:
+    DOCUMENT_DOMAIN_GROUPS = (
+        ("원가", ("원가", "원가체계", "원가분석", "원가계산", "재료비", "노무비", "제조경비", "배부", "배부기준", "손익", "손익분석", "기준정보")),
+        ("업무프로세스", ("업무프로세스", "프로세스", "통합재무", "인적자원", "기금", "이행계획", "변화관리", "요구사항", "bpr", "ismp")),
+        ("수용가", ("수용가", "민원", "요금", "자재", "자산", "예산", "회계")),
+        ("선박", ("선박", "영업", "운항", "장비", "재무", "총무", "협력업체", "해운")),
+    )
+    DOCUMENT_GENERIC_TERMS = ("현행", "개선", "구조", "계획", "방향", "요구사항", "비교", "기준")
+
     def _active_narrative_judgment(self, prepared: PreparedRebuildInput) -> str:
             return (
                 (prepared.selected_narrative_judgment or "").strip()
@@ -49,6 +57,75 @@ class TemplateSupport:
                 prepared,
                 applied_templates,
                 grounded_rules,
+            )
+
+    def _is_document_only_input(self, prepared: PreparedRebuildInput) -> bool:
+            asset_presence = getattr(prepared, "asset_presence", None)
+            has_docs = bool(
+                getattr(asset_presence, "has_docs", False)
+                or (getattr(prepared, "supporting_docs", "") or "").strip()
+            )
+            has_operational_assets = any(
+                (
+                    getattr(asset_presence, "has_source_code", False),
+                    getattr(asset_presence, "has_ui_asset", False),
+                    getattr(asset_presence, "has_schema_asset", False),
+                    getattr(asset_presence, "has_sql_asset", False),
+                    bool((prepared.assets.source_code or "").strip()),
+                    bool((prepared.assets.database_schema or "").strip()),
+                    bool((prepared.assets.sql_queries or "").strip()),
+                )
+            )
+            return has_docs and not has_operational_assets
+
+    def _document_source_text(self, prepared: PreparedRebuildInput) -> str:
+            return " ".join(
+                [
+                    " ".join(prepared.asset_presence.doc_asset_names),
+                    prepared.supporting_docs,
+                ]
+            ).lower()
+
+    def _document_domain_terms(self, prepared: PreparedRebuildInput) -> list[str]:
+            text = self._document_source_text(prepared)
+            if not text.strip():
+                return []
+            group_matches: list[tuple[int, str, list[str]]] = []
+            for anchor, keywords in self.DOCUMENT_DOMAIN_GROUPS:
+                group_hits = [keyword for keyword in keywords if keyword.lower() in text]
+                if group_hits:
+                    group_matches.append((len(group_hits), anchor, group_hits))
+            matched: list[str] = []
+            if group_matches:
+                _, anchor, group_hits = max(group_matches, key=lambda item: (item[0], len(item[1])))
+                matched.append(anchor)
+                for keyword in group_hits:
+                    if keyword not in matched:
+                        matched.append(keyword)
+                for keyword in self.DOCUMENT_GENERIC_TERMS:
+                    if keyword.lower() in text and keyword not in matched:
+                        matched.append(keyword)
+                return matched[:8]
+            for keyword in self.DOCUMENT_GENERIC_TERMS:
+                if keyword.lower() in text and keyword not in matched:
+                    matched.append(keyword)
+            return matched[:6]
+
+    def _document_focus_terms(self, prepared: PreparedRebuildInput) -> list[str]:
+            terms = [term for term in self._document_domain_terms(prepared) if str(term or "").strip()]
+            if terms:
+                return terms[:4]
+            return ["현행 구조", "판단 기준", "개선 방향"]
+
+    def _uses_document_neutral_template_fallback(
+        self,
+        prepared: PreparedRebuildInput,
+        applied_templates: list[AppliedJudgmentTemplate],
+    ) -> bool:
+            family = str(getattr(getattr(prepared, "family_classification", None), "family", "") or "").strip()
+            return not applied_templates and (
+                self._is_document_only_input(prepared)
+                or family in {"document_consulting", "option_comparison"}
             )
 
     def infer_target_architecture(self, prepared: PreparedRebuildInput) -> list[str]:
@@ -149,6 +226,23 @@ class TemplateSupport:
             applied_templates: list[AppliedJudgmentTemplate] | None = None,
         ) -> LayeredListResult:
             concept = self._primary_concept(prepared)
+            if self._has_fx_fifo_domain(prepared):
+                return LayeredListResult(
+                    database=[
+                        f"예시: {concept} 입금 lot 원장과 출금 lot 소진 이력을 분리해 FIFO 계산 경계를 명확히 합니다.",
+                        "예시: lot 잔량(RMN_FAMT/RMN_AMT), 취득 환율, 출금 환율, GAP_AMT를 같은 계산 키로 연결합니다.",
+                        "예시: 전표 기준번호와 GL_INTERFACE 적재 컬럼을 lot 계산 결과와 같은 거래 키로 연결합니다.",
+                    ],
+                    backend=[
+                        f"예시: {concept} lot 소진 계산 API와 환차손익 계산 API를 분리해 계산 단계를 명확히 합니다.",
+                        "예시: FIFO lot 선택, GAP_AMT 계산, 전표 생성, GL 적재를 순차 서비스로 분리합니다.",
+                        "예시: 출금 처리 서비스는 계산 결과를 받아 TN_FOROUD, TN_BKCHIT, GL_INTERFACE 반영만 담당합니다.",
+                    ],
+                    frontend=[
+                        f"예시: {concept} 화면은 입금/출금 내역, 소진 lot, 환차손익, 전표 반영 결과를 분리해 표시합니다.",
+                        "예시: lot 소진 상세와 환차손익 계산 근거를 같은 거래 기준번호로 조회합니다.",
+                    ],
+                )
             primary = prepared.signals.primary_feature_mode
             secondary = prepared.signals.secondary_feature_mode
             primary_template = self._primary_template(prepared, applied_templates or [])
@@ -354,6 +448,1356 @@ class TemplateSupport:
                 and not self._has_explicit_state_transition_signal(prepared)
                 and prepared.signals.primary_feature_mode != "search_filters"
             )
+
+    def _fx_fifo_signal_text(self, prepared: PreparedRebuildInput) -> str:
+            return " ".join(
+                [
+                    prepared.goal,
+                    " ".join(prepared.constraints),
+                    " ".join(prepared.asset_presence.source_asset_names),
+                    " ".join(prepared.asset_presence.ui_asset_names),
+                    " ".join(prepared.asset_presence.schema_asset_names),
+                    " ".join(prepared.asset_presence.sql_asset_names),
+                    prepared.assets.source_code,
+                    prepared.assets.ui_template,
+                    prepared.assets.sql_queries,
+                    prepared.assets.database_schema,
+                ]
+            ).lower()
+
+    def _fx_fifo_signal_buckets(self, prepared: PreparedRebuildInput) -> set[str]:
+            text = self._fx_fifo_signal_text(prepared)
+            bucket_keywords = {
+                "currency": ("외화", "currency", "currency_code", "mney_unit", "환율", "exch_rate"),
+                "fifo_lot": ("fifo", "선입선출", "lot", "tn_forins", "tn_forout", "tn_foroud", "rmn_famt", "outf_amt"),
+                "gain_loss": ("환차손익", "환차", "exchange p/l", "gap_amt", "gain_loss", "out_amt0"),
+                "voucher": ("전표", "voucher", "journal", "gl_interface", "glintf", "user_je_source_name", "user_je_category_name", "reference4", "reference6"),
+                "gl": ("gl", "ledger", "set_of_books_id", "code_combination", "segment1", "segment2", "segment3", "entered_dr", "entered_cr"),
+                "flow": ("입금", "출금", "deposit", "payment", "forins", "forout"),
+            }
+            return {
+                bucket
+                for bucket, keywords in bucket_keywords.items()
+                if any(keyword in text for keyword in keywords)
+            }
+
+    def _has_fx_fifo_domain(self, prepared: PreparedRebuildInput) -> bool:
+            buckets = self._fx_fifo_signal_buckets(prepared)
+            return (
+                len(buckets) >= 3
+                and "fifo_lot" in buckets
+                and ("gain_loss" in buckets or "currency" in buckets)
+                and ("voucher" in buckets or "gl" in buckets)
+            )
+
+    def _has_explicit_redesign_request(self, prepared: PreparedRebuildInput) -> bool:
+            text = " ".join([prepared.goal, " ".join(prepared.constraints)]).lower()
+            keywords = (
+                "redesign",
+                "re-architect",
+                "rewrite",
+                "migration",
+                "migrate",
+                "replatform",
+                "service split",
+                "service separation",
+                "service decomposition",
+                "layer separation",
+                "재설계",
+                "마이그레이션",
+                "전환",
+                "재플랫폼",
+                "서비스 분리",
+                "서비스 분해",
+                "계층 분리",
+                "재구성 로드맵",
+            )
+            for keyword in keywords:
+                if keyword not in text:
+                    continue
+                escaped = re.escape(keyword)
+                negative_patterns = (
+                    rf"(?:not|without|exclude|excluding|defer|later|instead of)[^.\n]{{0,24}}{escaped}",
+                    rf"{escaped}[^.\n]{{0,24}}(?:하지\s*마|말라|아니|제외|배제|후속|보조|나중|보다|밀지\s*마|쓰지\s*마|피하)",
+                    rf"(?:현행|운영|분석|복원)[^.\n]{{0,24}}우선[^.\n]{{0,24}}{escaped}",
+                )
+                if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in negative_patterns):
+                    continue
+                return True
+            return False
+
+    def _operational_sql_object_count(self, prepared: PreparedRebuildInput) -> int:
+            text = self._fx_fifo_signal_text(prepared)
+            patterns = (
+                r"\bcreate\s+(?:or\s+replace\s+)?table\b",
+                r"\bcreate\s+(?:or\s+replace\s+)?procedure\b",
+                r"\bcreate\s+(?:or\s+replace\s+)?trigger\b",
+                r"\binsert\s+into\b",
+                r"\bupdate\s+[a-z_][a-z0-9_]*\s+set\b",
+                r"\bdelete\s+from\b",
+            )
+            return sum(1 for pattern in patterns if re.search(pattern, text, flags=re.IGNORECASE))
+
+    def _operational_domain_keyword_count(self, prepared: PreparedRebuildInput) -> int:
+            text = self._fx_fifo_signal_text(prepared)
+            keyword_groups = (
+                ("fifo", "lot", "선입선출"),
+                ("환차", "gain_loss", "gap_amt", "exchange p/l"),
+                ("전표", "voucher", "journal"),
+                ("gl", "gl_interface", "ledger", "interface"),
+                ("history", "posting", "reverse", "cancel", "delete"),
+                ("입금", "출금", "deposit", "withdraw", "forins", "forout"),
+            )
+            return sum(1 for group in keyword_groups if any(keyword in text for keyword in group))
+
+    def _interface_linkage_signal_buckets(self, prepared: PreparedRebuildInput) -> set[str]:
+            text = self._fx_fifo_signal_text(prepared)
+            bucket_keywords = {
+                "staging": (
+                    "ib_bulk_tran_add",
+                    "staging",
+                    "bulk_tran",
+                    "file_date",
+                    "file_num",
+                    "file_seq",
+                    "wif_file_key",
+                ),
+                "daily_add": (
+                    "ib_acctall_tr_dd_add",
+                    "acctall_tr_dd_add",
+                    "acct_seq",
+                    "tr_date_seq",
+                    "last_upd_date",
+                    "last_upd_time",
+                ),
+                "ack_status": (
+                    "tran_status",
+                    "tran_result_cd",
+                    "erp_rcv_flag",
+                    "cnf_yn",
+                    "ack",
+                    "confirm",
+                    "status",
+                ),
+                "retry_fail": (
+                    "retry",
+                    "react_cd",
+                    "errlog",
+                    "fail",
+                    "error",
+                    "back_yn",
+                    "reprocess",
+                    "tn_if_retry_his",
+                ),
+                "snapshot": (
+                    "ib_acctall_tr_dd_lst",
+                    "latest",
+                    "snapshot",
+                    "last table",
+                    "lst",
+                ),
+                "pay_order": (
+                    "tn_pay_order_dtl",
+                    "pay_order",
+                    "pay_date",
+                    "pay_no",
+                    "pay_stat",
+                    "pay_hang",
+                    "out_acnt_nox",
+                ),
+                "interface_proc": (
+                    "p_fundih",
+                    "t_fndi",
+                    "interface",
+                    "send",
+                    "receive",
+                    "rcv",
+                    "batch",
+                ),
+            }
+            return {
+                bucket
+                for bucket, keywords in bucket_keywords.items()
+                if any(keyword in text for keyword in keywords)
+            }
+
+    def _interface_linkage_signal_score(self, prepared: PreparedRebuildInput) -> int:
+            buckets = self._interface_linkage_signal_buckets(prepared)
+            required = {"staging", "daily_add", "ack_status"}
+            return len(buckets) + (1 if required.issubset(buckets) else 0)
+
+    def _has_interface_linkage_domain(self, prepared: PreparedRebuildInput) -> bool:
+            buckets = self._interface_linkage_signal_buckets(prepared)
+            return (
+                {"staging", "daily_add", "ack_status"}.issubset(buckets)
+                and len(buckets) >= 4
+            )
+
+    def _settlement_journal_signal_buckets(self, prepared: PreparedRebuildInput) -> set[str]:
+            text = self._fx_fifo_signal_text(prepared)
+            bucket_keywords = {
+                "settlement": (
+                    "settle",
+                    "settlement",
+                    "stl_",
+                    "stlno",
+                    "stl_no",
+                    "stl_date",
+                    "pay_order",
+                    "tn_pay_order_dtl",
+                ),
+                "voucher_header": (
+                    "tn_bkchno",
+                    "ac_chitno",
+                    "ac_date",
+                    "invoice_no",
+                    "chk",
+                    "header",
+                ),
+                "voucher_line": (
+                    "tn_bkchit",
+                    "dc_flag",
+                    "acnt_cd",
+                    "chit_amt",
+                    "journal",
+                    "voucher",
+                    "line_amt",
+                ),
+                "gl": (
+                    "gl_interface",
+                    "glintf",
+                    "user_je",
+                    "entered_dr",
+                    "entered_cr",
+                    "reference4",
+                    "reference6",
+                    "ledger",
+                ),
+                "reverse_cancel": (
+                    "cancel",
+                    "reverse",
+                    "delete",
+                    "back_yn",
+                    "can_yn",
+                    "reverse_yn",
+                    "oac_chitno",
+                ),
+                "posting_proc": (
+                    "posting",
+                    "post",
+                    "p_stlpost",
+                    "t_settle_hdr",
+                    "t_settle_hd",
+                    "settle_hdr",
+                    "settle_dtl",
+                ),
+            }
+            return {
+                bucket
+                for bucket, keywords in bucket_keywords.items()
+                if any(keyword in text for keyword in keywords)
+            }
+
+    def _settlement_journal_signal_score(self, prepared: PreparedRebuildInput) -> int:
+            buckets = self._settlement_journal_signal_buckets(prepared)
+            required = {"voucher_header", "voucher_line"}
+            return len(buckets) + (1 if required.issubset(buckets) else 0)
+
+    def _has_settlement_journal_domain(self, prepared: PreparedRebuildInput) -> bool:
+            buckets = self._settlement_journal_signal_buckets(prepared)
+            return (
+                {"voucher_header", "voucher_line"}.issubset(buckets)
+                and (
+                    "settlement" in buckets
+                    or "gl" in buckets
+                    or "reverse_cancel" in buckets
+                )
+                and len(buckets) >= 4
+            )
+
+    def _has_operational_source_dominance(self, prepared: PreparedRebuildInput) -> bool:
+            asset_presence = prepared.asset_presence
+            assets = prepared.assets
+            operational_count = sum(
+                1
+                for present in (
+                    bool(asset_presence.has_source_code or (assets.source_code or "").strip()),
+                    bool(asset_presence.has_schema_asset or (assets.database_schema or "").strip()),
+                    bool(asset_presence.has_sql_asset or (assets.sql_queries or "").strip()),
+                )
+                if present
+            )
+            descriptive_count = sum(
+                1
+                for present in (
+                    bool(asset_presence.has_ui_asset or (assets.ui_template or "").strip()),
+                    bool(asset_presence.has_framework_hint or (assets.framework_info or "").strip()),
+                    bool(asset_presence.has_docs),
+                )
+                if present
+            )
+            procedural_assets = sum(
+                1
+                for name in (
+                    list(asset_presence.source_asset_names)
+                    + list(asset_presence.schema_asset_names)
+                    + list(asset_presence.sql_asset_names)
+                )
+                if re.search(r"\.(?:sql|ddl|dml|prc|proc|trg|trigger|pkb|pks|fnc)$", str(name or ""), flags=re.IGNORECASE)
+            )
+            return operational_count + min(procedural_assets, 2) >= max(2, descriptive_count + 1)
+
+    def resolve_question_axis(
+            self,
+            prepared: PreparedRebuildInput | None,
+            *,
+            family: str = "",
+            narrative_axis: str = "",
+        ) -> str:
+            if prepared is None:
+                return ""
+            explicit = str(getattr(prepared, "question_axis", "") or "").strip()
+            if explicit:
+                return explicit
+            resolved_family = str(
+                family
+                or getattr(getattr(prepared, "family_classification", None), "family", "")
+                or ""
+            ).strip()
+            if resolved_family and resolved_family != "operational_source":
+                return ""
+            domain = str(narrative_axis or "").strip()
+            if not domain:
+                if self._has_fx_fifo_domain(prepared):
+                    domain = "fx_fifo"
+                elif self._has_interface_linkage_domain(prepared) and self._interface_linkage_signal_score(prepared) >= self._settlement_journal_signal_score(prepared):
+                    domain = "interface_linkage"
+                elif self._has_settlement_journal_domain(prepared):
+                    domain = "settlement_journal"
+                else:
+                    domain = "operational_source"
+            text = self._operational_question_axis_text(prepared)
+            axis = self._classify_operational_question_axis(text=text, domain=domain)
+            prepared.question_axis = axis
+            return axis
+
+    def _operational_question_axis_text(self, prepared: PreparedRebuildInput) -> str:
+            parts = [
+                str(getattr(prepared, "goal", "") or ""),
+                str(getattr(getattr(prepared, "intent", None), "scenario", "") or ""),
+            ]
+            return re.sub(r"\s+", " ", " ".join(part for part in parts if str(part or "").strip())).strip().lower()
+
+    def _classify_operational_question_axis(self, *, text: str, domain: str) -> str:
+            normalized = str(text or "").strip().lower()
+            if not normalized:
+                return "journal_linkage" if domain == "settlement_journal" else "processing_flow"
+            journal_terms = (
+                "전표",
+                "분개",
+                "journal",
+                "gl",
+                "회계 연계",
+                "회계 흐름",
+                "회계 반영",
+                "posting",
+                "기준번호",
+                "reference",
+                "거래 키",
+                "연계 키",
+                "voucher",
+            )
+            calculation_terms = (
+                "계산 규칙",
+                "계산",
+                "산출",
+                "환율",
+                "환차손익",
+                "금액 기준",
+                "소진 기준",
+                "평가 기준",
+                "원가",
+                "차이",
+                "rate",
+                "amount",
+            )
+            flow_terms = (
+                "흐름",
+                "처리 흐름",
+                "처리 순서",
+                "순서",
+                "어떻게 동작",
+                "어떻게 이어",
+                "복원",
+                "연계 흐름",
+                "flow",
+                "chain",
+                "process",
+            )
+            journal_score = sum(1 for term in journal_terms if term in normalized)
+            calculation_score = sum(1 for term in calculation_terms if term in normalized)
+            flow_score = sum(1 for term in flow_terms if term in normalized)
+            if "전표 연계" in normalized or "gl 연결" in normalized or "거래 키" in normalized:
+                journal_score += 2
+            if "계산 규칙" in normalized or "환차손익" in normalized:
+                calculation_score += 2
+            if "처리 흐름" in normalized or "동작하는지" in normalized:
+                flow_score += 2
+            if journal_score and journal_score >= max(calculation_score, flow_score):
+                return "journal_linkage"
+            if flow_score and calculation_score:
+                if journal_score == 0 and calculation_score >= flow_score + 3:
+                    return "calculation_rule"
+                return "processing_flow"
+            if calculation_score > flow_score:
+                return "calculation_rule"
+            if flow_score:
+                return "processing_flow"
+            return "journal_linkage" if domain == "settlement_journal" else "processing_flow"
+
+    def operational_analysis_profile(self, prepared: PreparedRebuildInput) -> dict[str, object]:
+            explicit_redesign = self._has_explicit_redesign_request(prepared)
+            dominant_operational_assets = self._has_operational_source_dominance(prepared)
+            fx_fifo = self._has_fx_fifo_domain(prepared)
+            interface_linkage = self._has_interface_linkage_domain(prepared)
+            settlement_journal = self._has_settlement_journal_domain(prepared)
+            sql_object_count = self._operational_sql_object_count(prepared)
+            domain_keyword_count = self._operational_domain_keyword_count(prepared)
+            interface_score = self._interface_linkage_signal_score(prepared)
+            settlement_score = self._settlement_journal_signal_score(prepared)
+            if fx_fifo:
+                domain = "fx_fifo"
+            elif interface_linkage and interface_score >= settlement_score:
+                domain = "interface_linkage"
+            elif settlement_journal:
+                domain = "settlement_journal"
+            else:
+                domain = "operational_source"
+            active = (
+                not explicit_redesign
+                and dominant_operational_assets
+                and (
+                    fx_fifo
+                    or interface_linkage
+                    or settlement_journal
+                    or (sql_object_count >= 2 and domain_keyword_count >= 4)
+                )
+            )
+            question_axis = self.resolve_question_axis(prepared, family="operational_source", narrative_axis=domain)
+            metadata = self._operational_domain_metadata(domain, question_axis=question_axis)
+            object_inventory = self._operational_object_inventory(prepared, domain=domain, question_axis=question_axis, limit=8)
+            return {
+                "active": active,
+                "domain": domain,
+                "question_axis": question_axis,
+                "explicit_redesign": explicit_redesign,
+                "dominant_operational_assets": dominant_operational_assets,
+                "sql_object_count": sql_object_count,
+                "domain_keyword_count": domain_keyword_count,
+                "interface_score": interface_score,
+                "settlement_score": settlement_score,
+                "object_names": [str(item.get("name") or "").strip() for item in object_inventory if str(item.get("name") or "").strip()],
+                "object_inventory": object_inventory,
+                "object_section_intro": self._operational_object_section_intro(domain, object_inventory, question_axis=question_axis),
+                "object_section_lines": self._operational_object_section_lines(object_inventory[:5]),
+                **metadata,
+            }
+
+    def _has_operational_source_analysis_priority(self, prepared: PreparedRebuildInput) -> bool:
+            return bool(self.operational_analysis_profile(prepared).get("active"))
+
+    def _operational_domain_metadata(self, domain: str, *, question_axis: str = "") -> dict[str, object]:
+            mapping: dict[str, dict[str, object]] = {
+                "fx_fifo": {
+                    "report_purpose": "외화 입금, 출금, FIFO lot 소진, 환차손익 계산, 전표 및 GL 흐름을 분석하기 위한 보고서입니다.",
+                    "report_scope": ["입금 lot 원장", "출금 lot 소진", "환차손익 계산", "전표 및 GL 흐름"],
+                    "report_questions": [
+                        "어떤 lot 순서로 출금이 소진되는가?",
+                        "환차손익은 어떤 환율과 금액 기준으로 계산되는가?",
+                        "계산 결과는 전표와 GL 인터페이스에 어떻게 반영되는가?",
+                    ],
+                    "identity_sentence": "본 자산은 외화 입금, 외화 출금, 선입선출 lot 소진, 환차손익 계산, 전표 반영까지 이어지는 회계 처리 소스 묶음입니다.",
+                    "flow_sentence": "외화 입금이 원장에 적재되고, 출금 시 선입선출 기준으로 lot이 소진되며, 환차손익 계산과 전표 반영이 이어집니다.",
+                    "rule_sentence": "입금 잔량 유지, 선입선출 소진 순서, 환율 비교 기준, 회계 반영 키 일치가 핵심입니다.",
+                    "risk_sentence": "lot 소진 순서 변경, 환율 기준 불일치, 취소 시 역처리 누락, 회계 연계 누락 가능성을 점검해야 합니다.",
+                    "primary_reason": "입력 자산이 외화 입출금 FIFO 운영 소스이므로 현재 단계에서는 현행 업무 규칙과 회계 처리 흐름 복원이 우선입니다.",
+                    "follow_up_lines": [
+                        "취소와 역처리 시 lot 잔량과 환차손익이 같은 거래 기준으로 유지되는지 추가 확인합니다.",
+                        "전표 반영과 회계 연계가 같은 기준번호를 유지하는지 점검합니다.",
+                        "현행 계산 기준을 운영 점검표로 정리합니다.",
+                    ],
+                    "flow_terms": ["외화 입금", "외화 출금", "FIFO lot", "환차손익", "전표", "GL interface"],
+                    "risk_terms": ["FIFO 소진 순서", "환차손익 기준", "전표-GL 연계", "취소 역분개", "정합성"],
+                    "identity_anchor": "회계 처리 소스 묶음",
+                },
+                "interface_linkage": {
+                    "report_purpose": "외부 거래 파일 수신, 인터페이스 적재, 상태 확정, 재처리 흐름을 분석하기 위한 보고서입니다.",
+                    "report_scope": ["수신 적재", "상태 확정", "재처리 이력", "후속 업무 연계"],
+                    "report_questions": [
+                        "어떤 상태값과 파일 키로 수신 적재가 후속 업무 흐름으로 이어지는가?",
+                        "확정 응답과 최신 상태본은 어떤 순서로 갱신되는가?",
+                        "재처리 실패 흐름과 후속 지급 연계는 어디서 보장되는가?",
+                    ],
+                    "identity_sentence": "본 자산은 외부 거래 파일 수신, 인터페이스 적재, 상태 확정, 재처리, 업무 연계까지 이어지는 인터페이스 운영 소스 묶음입니다.",
+                    "flow_sentence": "파일 수신 이후 임시 적재가 이뤄지고, 상태 확정과 응답 반영을 거쳐 최신 상태 갱신과 후속 업무 연계가 이어집니다.",
+                    "rule_sentence": "파일 키 기준 중복 방지, 상태 전이 순서, 최신 상태 갱신, 후속 업무 연결 키 유지가 핵심입니다.",
+                    "risk_sentence": "중복 적재, 응답 상태 불일치, 재처리 누락, 최신 상태 갱신 누락, 후속 업무 연계 누락 가능성을 점검해야 합니다.",
+                    "primary_reason": "입력 자산이 파일 수신, staging 적재, ACK 상태 전이, retry/실패 처리, downstream 연계를 포함한 인터페이스 운영 소스이므로 현행 연계 흐름 복원이 우선입니다.",
+                    "follow_up_lines": [
+                        "중복 수신과 재처리 시 최신 상태가 어떻게 보정되는지 추가 확인합니다.",
+                        "응답 확정과 후속 지급 연계가 같은 거래 키를 유지하는지 점검합니다.",
+                        "상태 갱신 순서를 운영 점검표로 정리합니다.",
+                    ],
+                    "flow_terms": ["수신 적재", "상태 확정", "ACK", "재처리", "최신 상태본", "후속 지급 연계"],
+                    "risk_terms": ["중복 적재", "ACK/status 불일치", "재처리 누락", "최신 상태본 누락", "후속 지급 연계 누락"],
+                    "identity_anchor": "인터페이스 운영 소스 묶음",
+                },
+                "settlement_journal": {
+                    "report_purpose": "정산 확정, 전표 헤더/라인 생성, GL 인터페이스 적재, 취소 역처리 흐름을 분석하기 위한 보고서입니다.",
+                    "report_scope": ["정산 헤더/상세", "전표 헤더/라인", "GL 인터페이스", "취소·역처리"],
+                    "report_questions": [
+                        "정산 확정은 어떤 기준으로 전표 헤더와 라인 생성으로 이어지는가?",
+                        "전표 라인과 회계 연계 reference는 어떤 거래 키로 묶이는가?",
+                        "취소·역처리 시 reverse posting과 지급 상태는 어떻게 맞춰지는가?",
+                    ],
+                    "identity_sentence": "본 자산은 정산 확정, 전표 헤더·라인 생성, 회계 연계 적재, 취소 역처리까지 이어지는 회계 운영 소스 묶음입니다.",
+                    "flow_sentence": "정산이 확정되면 전표 헤더와 라인이 생성되고, 회계 연계 적재와 취소 역처리가 같은 체인으로 이어집니다.",
+                    "rule_sentence": "정산번호와 회계 기준번호 매핑, 차변·대변 균형, 회계 연계 키 일치, 취소 시 역처리 키 유지가 핵심입니다.",
+                    "risk_sentence": "정산-전표 불일치, 헤더·라인 누락, 회계 연계 누락, 취소 역처리 누락, 지급 상태 미동기화 가능성을 점검해야 합니다.",
+                    "primary_reason": "입력 자산이 정산 확정부터 전표/GL 반영과 취소 역처리까지 이어지는 운영 소스이므로 현행 회계 처리 체인과 정합성 점검이 우선입니다.",
+                    "follow_up_lines": [
+                        "취소와 역분개가 같은 정산 기준번호를 유지하는지 추가 확인합니다.",
+                        "정산 확정과 전표·회계 반영이 같은 회계 기준을 따르는지 점검합니다.",
+                        "현행 정산 기준을 운영 점검표로 정리합니다.",
+                    ],
+                    "flow_terms": ["정산 확정", "전표 헤더", "전표 라인", "회계 인터페이스", "취소 역처리"],
+                    "risk_terms": ["정산-전표 불일치", "차변/대변 불균형", "GL 적재 누락", "취소 역분개", "지급 상태 미동기화"],
+                    "identity_anchor": "회계 운영 소스 묶음",
+                },
+                "operational_source": {
+                    "report_purpose": "현행 운영 로직, 데이터 흐름, 처리 순서를 분석하기 위한 보고서입니다.",
+                    "report_scope": ["핵심 데이터 흐름", "후속 반영 흐름", "처리 순서", "운영 리스크"],
+                    "report_questions": [
+                        "어떤 저장 흐름과 후속 반영 흐름이 한 처리 체인으로 연결되는가?",
+                        "데이터 반영 순서와 인터페이스 연결은 어떤 계약으로 유지되는가?",
+                        "재처리·취소·정합성 위험은 어느 구간에서 발생하는가?",
+                    ],
+                    "identity_sentence": "본 자산은 데이터 저장, 후속 반영, 자동 처리 구간이 연결된 현행 운영 소스 묶음입니다.",
+                    "flow_sentence": "데이터 반영 순서와 자동 처리 구간, 외부 연계 관계를 먼저 복원해야 합니다.",
+                    "rule_sentence": "핵심 처리 순서, 상태 갱신 조건, 유지 계약을 실제 소스 기준으로 정리해야 합니다.",
+                    "risk_sentence": "재처리 누락, 연계 정합성 불일치, 취소/삭제 시 역처리 누락 가능성을 점검해야 합니다.",
+                    "primary_reason": "입력 자산이 실제 운영 처리와 후속 반영을 담당하는 현행 자산이므로 현재 단계에서는 현행 업무 규칙과 처리 흐름 복원이 우선입니다.",
+                    "follow_up_lines": [
+                        "취소, 삭제, 재처리 시 데이터 반영 순서가 유지되는지 추가 확인합니다.",
+                        "후속 연계가 같은 거래 기준을 유지하는지 점검합니다.",
+                        "현행 처리 기준을 운영 점검표로 정리합니다.",
+                    ],
+                    "flow_terms": ["데이터 흐름", "처리 순서", "트리거/프로시저 연계"],
+                    "risk_terms": ["재처리 누락", "연계 정합성", "취소/삭제 역처리"],
+                    "identity_anchor": "운영 소스 묶음",
+                },
+            }
+            base = dict(mapping.get(domain, mapping["operational_source"]))
+            return self._operational_question_axis_metadata(domain=domain, question_axis=question_axis, base=base)
+
+    def _operational_question_axis_metadata(
+            self,
+            *,
+            domain: str,
+            question_axis: str,
+            base: dict[str, object],
+        ) -> dict[str, object]:
+            axis = str(question_axis or "").strip() or "processing_flow"
+            if axis == "journal_linkage":
+                overrides: dict[str, dict[str, object]] = {
+                    "fx_fifo": {
+                        "report_purpose": "외화 입출금 결과와 전표/GL 연결 사이의 기준 불일치 가능성과 회계 영향을 진단하기 위한 보고서입니다.",
+                        "report_scope": ["전표 생성 기준 불일치 가능성", "GL 연결 누락 가능성", "거래 기준번호 정합성", "취소·역처리 영향"],
+                        "report_questions": [
+                            "어디서 전표 생성 기준과 GL 연결 기준이 어긋날 수 있는가?",
+                            "거래 기준번호가 유지되지 않으면 어떤 회계 영향이 발생하는가?",
+                            "취소·역처리 시 어떤 불일치 가능성을 확인해야 하는가?",
+                        ],
+                        "identity_sentence": "진단 대상은 외화 입출금 결과와 전표/GL 연결 사이의 기준 일치 여부입니다.",
+                        "flow_sentence": "전표 생성 기준, GL 전달 기준, 거래 기준번호 유지 여부를 진단 관점으로 확인해야 합니다.",
+                        "rule_sentence": "전표 생성 기준과 회계 전달 기준이 같은 거래 기준을 유지하는지가 핵심입니다.",
+                        "primary_reason": "질문 축이 전표 연계 중심이므로 현재 단계에서는 기준 불일치 가능성과 회계 영향을 먼저 진단합니다.",
+                        "follow_up_lines": [
+                            "전표 생성과 GL 연결이 같은 거래 기준번호를 유지하는지 추가 확인합니다.",
+                            "lot 소진 결과와 환차손익이 어떤 전표 기준으로 이어지는지 점검합니다.",
+                            "취소·역처리 시 같은 회계 키가 유지되는지 운영 점검표로 정리합니다.",
+                        ],
+                    },
+                    "settlement_journal": {
+                        "report_purpose": "정산 결과가 어떤 전표 기준, 회계 reference, 거래 키로 연결되는지 분석하기 위한 보고서입니다.",
+                        "report_scope": ["정산 기준", "전표 생성 기준", "회계 reference", "취소·역처리 키"],
+                        "report_questions": [
+                            "정산 결과는 어떤 기준으로 전표 헤더·라인으로 이어지는가?",
+                            "전표와 회계 reference는 어떤 거래 키로 묶이는가?",
+                            "취소·역처리 시 같은 회계 기준이 어떻게 유지되는가?",
+                        ],
+                        "identity_sentence": "본 자산은 정산 결과가 전표 기준, 회계 reference, 거래 키로 이어지는 회계 운영 소스 묶음입니다.",
+                        "flow_sentence": "정산 결과가 전표 헤더·라인 생성으로 이어지고, 같은 거래 키로 회계 reference와 취소 역처리까지 연결되는 흐름을 먼저 복원해야 합니다.",
+                        "rule_sentence": "전표 생성 기준, 회계 reference 일치, 차변·대변 균형, 취소 시 같은 회계 키 유지가 핵심입니다.",
+                    },
+                    "operational_source": {
+                        "report_purpose": "처리 결과가 어떤 전표 기준, 회계 연결, 거래 키로 이어지는지 분석하기 위한 보고서입니다.",
+                        "report_scope": ["처리 결과", "전표 생성 기준", "회계 연결", "거래 기준"],
+                        "report_questions": [
+                            "처리 결과는 어떤 전표 기준으로 이어지는가?",
+                            "전표와 회계 연결은 어떤 거래 키로 묶이는가?",
+                            "취소·역처리 시 같은 기준이 어떻게 유지되는가?",
+                        ],
+                        "identity_sentence": "본 자산은 처리 결과가 전표 기준과 회계 연결, 거래 키로 이어지는 현행 운영 소스 묶음입니다.",
+                        "flow_sentence": "처리 결과가 전표 생성 기준으로 정리되고, 같은 거래 기준으로 회계 연결까지 이어지는 흐름을 먼저 복원해야 합니다.",
+                        "rule_sentence": "전표 생성 기준, 회계 전달 기준, 거래 키 일치, 취소 시 같은 기준 유지가 핵심입니다.",
+                    },
+                }
+                updated = dict(base)
+                updated.update(overrides.get(domain, overrides["operational_source"]))
+                return updated
+            if axis == "calculation_rule":
+                overrides = {
+                    "fx_fifo": {
+                        "report_purpose": "외화 입출금 계산 기준 선택지를 비교해 우선 적용할 계산 규칙을 정리하기 위한 보고서입니다.",
+                        "report_scope": ["계산 기준 선택지", "비교 기준", "추천안", "적용 검증 항목"],
+                        "report_questions": [
+                            "어떤 계산 기준을 우선 선택해야 하는가?",
+                            "선택지는 어떤 기준으로 비교해야 하는가?",
+                            "추천안을 적용할 때 어떤 검증 항목을 둬야 하는가?",
+                        ],
+                        "identity_sentence": "본 문서는 외화 입출금 계산 기준을 선택하기 위한 판단 결과입니다.",
+                        "flow_sentence": "현행 FIFO 유지, 평균 기준 단순화, 거래별 지정 기준을 같은 비교 축에 놓고 판단해야 합니다.",
+                        "rule_sentence": "계산 재현성, 환율 기준 일관성, 회계 연결 가능성이 핵심 비교 기준입니다.",
+                        "primary_reason": "질문 축이 계산 규칙 중심이므로 현재 단계에서는 선택지, 비교 기준, 추천안을 우선 정리합니다.",
+                        "follow_up_lines": [
+                            "추천안은 현행 FIFO 기준 유지와 예외 검증 보강입니다.",
+                            "적용 기준은 계산 재현성, 환율 기준 일관성, 회계 연결 가능성입니다.",
+                            "흐름 상세와 리스크 상세는 각각 Structure, Diagnosis 문서를 참조합니다.",
+                        ],
+                    },
+                    "operational_source": {
+                        "report_purpose": "현행 처리에서 어떤 계산 기준과 상태 규칙으로 결과가 산출되는지 분석하기 위한 보고서입니다.",
+                        "report_scope": ["계산 기준", "상태 조건", "산출 순서", "운영 리스크"],
+                        "report_questions": [
+                            "어떤 계산 기준과 상태 규칙으로 결과가 산출되는가?",
+                            "계산 결과는 어떤 순서로 후속 반영과 연결되는가?",
+                            "예외 처리 시 기준이 흔들릴 위험은 어디서 발생하는가?",
+                        ],
+                        "identity_sentence": "본 자산은 계산 기준과 상태 규칙, 후속 반영이 연결된 현행 운영 소스 묶음입니다.",
+                        "flow_sentence": "핵심 기준값 계산, 상태 반영, 후속 전달 순서를 먼저 복원해야 합니다.",
+                        "rule_sentence": "계산 기준, 상태 조건, 산출 순서, 예외 처리 시 같은 기준 유지가 핵심입니다.",
+                    },
+                }
+                updated = dict(base)
+                updated.update(overrides.get(domain, overrides["operational_source"]))
+                return updated
+            return base
+
+    def _operational_object_inventory(
+            self,
+            prepared: PreparedRebuildInput,
+            *,
+            domain: str = "",
+            question_axis: str = "",
+            limit: int = 8,
+        ) -> list[dict[str, str]]:
+            text_parts = [
+                " ".join(prepared.asset_presence.source_asset_names),
+                " ".join(prepared.asset_presence.schema_asset_names),
+                " ".join(prepared.asset_presence.sql_asset_names),
+                prepared.assets.source_code,
+                prepared.assets.database_schema,
+                prepared.assets.sql_queries,
+            ]
+            text = "\n".join(part for part in text_parts if part)
+            candidates: dict[str, dict[str, object]] = {}
+            pattern_specs = (
+                (r"\bcreate\s+(?:or\s+replace\s+)?table\s+((?:[A-Z_][A-Z0-9_$#]*\.)?[A-Z_][A-Z0-9_$#]*)", "table"),
+                (r"\bcreate\s+(?:or\s+replace\s+)?(?:procedure|function)\s+((?:[A-Z_][A-Z0-9_$#]*\.)?[A-Z_][A-Z0-9_$#]*)", "procedure"),
+                (r"\bcreate\s+(?:or\s+replace\s+)?trigger\s+((?:[A-Z_][A-Z0-9_$#]*\.)?[A-Z_][A-Z0-9_$#]*)", "trigger"),
+                (r"\b(?:from|into|update|join|merge\s+into|delete\s+from)\s+((?:[A-Z_][A-Z0-9_$#]*\.)?[A-Z_][A-Z0-9_$#]*)", "table"),
+                (r"\b((?:[A-Z_][A-Z0-9_$#]*\.)?[A-Z_][A-Z0-9_$#]*)\.(trg|trigger|prc|proc|pkb|pks|fnc|sql)\b", "file_hint"),
+            )
+            for pattern, default_kind in pattern_specs:
+                for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+                    raw_name = str(match.group(1) or "").strip()
+                    kind = default_kind
+                    if default_kind == "file_hint":
+                        ext = str(match.group(2) or "").strip().lower()
+                        kind = "trigger" if ext in {"trg", "trigger"} else "procedure" if ext in {"prc", "proc", "pkb", "pks", "fnc"} else "table"
+                    name = self._normalize_operational_object_name(raw_name)
+                    if not name or self._is_ignored_operational_object_name(name):
+                        continue
+                    current = candidates.get(name)
+                    kind_priority = self._operational_object_kind_priority(kind)
+                    if current is None or kind_priority > int(current.get("kind_priority") or 0):
+                        candidates[name] = {
+                            "name": name,
+                            "kind": kind,
+                            "kind_priority": kind_priority,
+                            "score": self._operational_object_rank(domain, name, kind, question_axis=question_axis),
+                        }
+            ordered = sorted(
+                candidates.values(),
+                key=lambda item: (
+                    -int(item.get("score") or 0),
+                    -int(item.get("kind_priority") or 0),
+                    str(item.get("name") or ""),
+                ),
+            )
+            inventory: list[dict[str, str]] = []
+            for item in ordered[:limit]:
+                name = str(item.get("name") or "").strip()
+                kind = str(item.get("kind") or "").strip() or "table"
+                if not name:
+                    continue
+                inventory.append(
+                    {
+                        "name": name,
+                        "display_name": self._operational_object_display_name(domain=domain, name=name, kind=kind),
+                        "kind": kind,
+                        "description": self._operational_object_description(domain=domain, name=name, kind=kind, question_axis=question_axis),
+                    }
+                )
+            return inventory
+
+    def _operational_object_section_intro(
+            self,
+            domain: str,
+            inventory: list[dict[str, str]],
+            *,
+            question_axis: str = "",
+        ) -> str:
+            count = len(inventory[:5])
+            axis = str(question_axis or "").strip()
+            if axis == "journal_linkage":
+                if domain == "fx_fifo":
+                    return f"핵심 데이터 흐름은 lot 계산 결과, 전표 생성 기준, GL 연결, 거래 기준번호 유지로 이어지며 관련 핵심 대상은 {count}개입니다."
+                if domain == "settlement_journal":
+                    return f"핵심 데이터 흐름은 정산 결과, 전표 기준, 회계 reference, 취소 역처리 키 유지로 이어지며 관련 핵심 대상은 {count}개입니다."
+                return f"핵심 데이터 흐름은 처리 결과, 전표 생성 기준, 회계 연결, 거래 기준 유지로 이어지며 관련 핵심 대상은 {count}개입니다."
+            if axis == "calculation_rule":
+                if domain == "fx_fifo":
+                    return f"핵심 데이터 흐름은 입금 잔량 유지, 선입선출 lot 소진, 환율 비교, 손익 산출로 이어지며 관련 핵심 대상은 {count}개입니다."
+                return f"핵심 데이터 흐름은 기준값 계산, 상태 반영, 산출 순서로 이어지며 관련 핵심 대상은 {count}개입니다."
+            if domain == "fx_fifo":
+                return f"핵심 데이터 흐름은 외화 입금, 선입선출 lot 소진, 환차손익 계산, 회계 반영으로 이어지며 관련 핵심 대상은 {count}개입니다."
+            if domain == "interface_linkage":
+                return f"핵심 데이터 흐름은 파일 수신, 상태 확정, 재처리, 후속 업무 연계로 이어지며 관련 핵심 대상은 {count}개입니다."
+            if domain == "settlement_journal":
+                return f"핵심 데이터 흐름은 정산 확정, 전표 반영, 회계 연계, 취소 역처리로 이어지며 관련 핵심 대상은 {count}개입니다."
+            return f"핵심 데이터 흐름은 저장, 자동 반영, 후속 연계 순서로 이어지며 관련 핵심 대상은 {count}개입니다."
+
+    def _operational_object_section_lines(self, inventory: list[dict[str, str]]) -> list[str]:
+            lines: list[str] = []
+            for item in inventory[:5]:
+                name = str(item.get("display_name") or item.get("name") or "").strip()
+                description = str(item.get("description") or "").strip()
+                if not name or not description:
+                    continue
+                lines.append(f"{name}: {description}")
+            return lines
+
+    def _operational_object_display_name(self, *, domain: str, name: str, kind: str) -> str:
+            upper_name = str(name or "").upper()
+            domain_specific: dict[str, dict[str, str]] = {
+                "fx_fifo": {
+                    "TN_FORINS": "외화 입금 lot 원장",
+                    "TN_FOROUT": "외화 출금 요청",
+                    "TN_FOROUD": "lot 소진 결과 이력",
+                    "TN_BKCHIT": "전표 라인 반영 이력",
+                    "GL_INTERFACE": "회계 인터페이스 적재 대상",
+                    "P_FOROUT": "출금 lot 소진 절차",
+                    "P_BKCHNO": "전표 기준번호 생성 절차",
+                },
+                "interface_linkage": {
+                    "IB_BULK_TRAN_ADD": "거래 파일 수신 적재",
+                    "P_FUNDIH": "수신 데이터 반영 절차",
+                    "IB_ACCTALL_TR_DD_ADD": "상태 응답 적재 이력",
+                    "IB_ACCTALL_TR_DD_LST": "최신 상태 스냅샷",
+                    "TN_PAY_ORDER_DTL": "후속 지급 연계 상태",
+                },
+                "settlement_journal": {
+                    "TN_SETTLE_HDR": "정산 헤더",
+                    "TN_SETTLE_DTL": "정산 상세",
+                    "TN_BKCHNO": "전표 헤더",
+                    "TN_BKCHIT": "전표 라인",
+                    "GL_INTERFACE": "회계 인터페이스 적재 대상",
+                    "TN_PAY_ORDER_DTL": "지급 상태 연계",
+                },
+            }
+            display = domain_specific.get(domain, {}).get(upper_name)
+            if display:
+                return display
+            if "GL_INTERFACE" in upper_name:
+                return "회계 인터페이스 적재 대상"
+            if "FORINS" in upper_name:
+                return "외화 입금 lot 원장"
+            if "FOROUT" in upper_name and kind == "procedure":
+                return "외화 출금 반영 절차"
+            if "FOROUT" in upper_name:
+                return "외화 출금 요청"
+            if "FOROUD" in upper_name:
+                return "lot 소진 결과 이력"
+            if "BKCHNO" in upper_name:
+                return "전표 헤더"
+            if "BKCHIT" in upper_name:
+                return "전표 라인"
+            if "SETTLE_HDR" in upper_name:
+                return "정산 헤더"
+            if "SETTLE_DTL" in upper_name:
+                return "정산 상세"
+            if "PAY_ORDER" in upper_name:
+                return "후속 지급 연계 상태"
+            if "IB_BULK" in upper_name:
+                return "거래 파일 수신 적재"
+            if "IB_" in upper_name and "LST" in upper_name:
+                return "최신 상태 스냅샷"
+            if "IB_" in upper_name:
+                return "인터페이스 수신 적재"
+            if kind == "procedure":
+                return "핵심 처리 절차"
+            if kind == "trigger":
+                return "후속 반영 트리거"
+            return "핵심 데이터 저장 객체"
+
+    def _operational_token_display_map(
+            self,
+            *,
+            domain: str,
+            inventory: list[dict[str, str]] | None = None,
+        ) -> dict[str, str]:
+            mapping: dict[str, str] = {}
+            for item in list(inventory or []):
+                raw_name = self._normalize_operational_object_name(str(item.get("name") or ""))
+                display_name = str(item.get("display_name") or item.get("name") or "").strip()
+                if raw_name and display_name:
+                    mapping[raw_name] = display_name
+            domain_specific = {
+                "fx_fifo": {
+                    "TN_FORINS": "외화 입금 lot 원장",
+                    "TN_FOROUT": "외화 출금 요청",
+                    "TN_FOROUD": "lot 소진 결과 이력",
+                    "TN_BKCHIT": "전표 라인 반영 이력",
+                    "P_FOROUT": "외화 출금 반영 절차",
+                    "P_BKCHNO": "전표 기준번호 생성 절차",
+                    "RMN_FAMT": "입금 lot 외화 잔량",
+                    "RMN_AMT": "입금 lot 원화 잔량",
+                    "GAP_AMT": "환차손익",
+                    "OUT_AMT0": "출금 기준 금액",
+                    "OUTF_AMT": "출금 외화 금액",
+                    "EXCH_RATE": "환율",
+                    "TR_DATE": "거래일자",
+                    "TR_DT": "거래일자",
+                    "TR_DATE_SEQ": "거래 순번",
+                    "ACCT_SEQ": "계좌 식별값",
+                    "MNEY_UNIT": "통화 코드",
+                    "REFERENCE4": "전표 기준번호",
+                    "REFERENCE6": "전표 상세 순번",
+                    "USER_JE_CATEGORY_NAME": "전표 분류",
+                    "CURRENCY_CODE": "통화 코드",
+                    "ENTERED_DR": "차변 금액",
+                    "ENTERED_CR": "대변 금액",
+                },
+                "interface_linkage": {
+                    "IB_BULK_TRAN_ADD": "거래 파일 수신 적재",
+                    "P_FUNDIH": "수신 데이터 반영 절차",
+                    "IB_ACCTALL_TR_DD_ADD": "상태 응답 적재 이력",
+                    "IB_ACCTALL_TR_DD_LST": "최신 상태 스냅샷",
+                    "TN_PAY_ORDER_DTL": "후속 지급 연계 상태",
+                    "TN_IF_RETRY_HIS": "재처리 이력",
+                    "ACK": "응답 확정",
+                    "ERP_RCV_FLAG": "응답 수신 상태",
+                    "PAY_ORDER": "후속 지급 연계",
+                    "STATUS_CD": "상태 코드",
+                    "STATUS_DT": "상태 일자",
+                    "TRX_NO": "거래 번호",
+                    "TRX_DT": "거래 일자",
+                },
+                "settlement_journal": {
+                    "TN_SETTLE_HDR": "정산 헤더",
+                    "TN_SETTLE_DTL": "정산 상세",
+                    "TN_BKCHNO": "전표 헤더",
+                    "TN_BKCHIT": "전표 라인",
+                    "TN_PAY_ORDER_DTL": "지급 상태 연계",
+                    "SETTLE_NO": "정산 번호",
+                    "BKCHNO": "전표 번호",
+                    "BKCHIT": "전표 라인",
+                    "REFERENCE4": "회계 기준번호",
+                    "REFERENCE6": "회계 상세 순번",
+                    "ENTERED_DR": "차변 금액",
+                    "ENTERED_CR": "대변 금액",
+                },
+            }
+            for raw_name, display_name in domain_specific.get(domain, {}).items():
+                mapping.setdefault(raw_name, display_name)
+            mapping.setdefault("GL_INTERFACE", "회계 인터페이스")
+            return mapping
+
+    def _operational_humanize_line(
+            self,
+            text: str,
+            *,
+            domain: str,
+            inventory: list[dict[str, str]] | None = None,
+        ) -> str:
+            normalized = str(text or "").strip()
+            if not normalized:
+                return ""
+            normalized = re.sub(r"\b[A-Z][A-Z0-9$#]*\.", "", normalized)
+            replacements = self._operational_token_display_map(domain=domain, inventory=inventory)
+            for raw_name, display_name in sorted(replacements.items(), key=lambda item: (-len(item[0]), item[0])):
+                normalized = re.sub(rf"\b{re.escape(raw_name)}\b", display_name, normalized, flags=re.IGNORECASE)
+            phrase_replacements = (
+                (r"\bRMN_FAMT\s*/\s*RMN_AMT\b", "입금 lot 잔량"),
+                (r"\bTR_DATE\s*,\s*TR_DATE_SEQ\b", "거래일자와 순번"),
+                (r"\bTR_DT\s*,\s*TRX_NO\b", "거래 일자와 거래 번호"),
+                (r"\bTRIGGER\b", "후속 반영"),
+                (r"\bPROCEDURE\b", "처리 절차"),
+            )
+            for pattern, replacement in phrase_replacements:
+                normalized = re.sub(pattern, replacement, normalized, flags=re.IGNORECASE)
+            generic_token_patterns = (
+                (r"\b[A-Z][A-Z0-9$#]*_[A-Z0-9$#]*AMT[A-Z0-9$#]*\b", "금액"),
+                (r"\b[A-Z][A-Z0-9$#]*_[A-Z0-9$#]*(?:DT|DATE)[A-Z0-9$#]*\b", "일자"),
+                (r"\b[A-Z][A-Z0-9$#]*_[A-Z0-9$#]*(?:NO|NUM|SEQ)[A-Z0-9$#]*\b", "번호"),
+                (r"\b[A-Z][A-Z0-9$#]*_[A-Z0-9$#]*(?:CD|CODE)[A-Z0-9$#]*\b", "코드"),
+                (r"\b[A-Z][A-Z0-9$#]*_[A-Z0-9$#]*(?:YN|FLAG)[A-Z0-9$#]*\b", "여부/표시값"),
+                (r"\b[A-Z][A-Z0-9$#]*_[A-Z0-9$#]*STATUS[A-Z0-9$#]*\b", "상태"),
+                (r"\b[A-Z][A-Z0-9$#]*_[A-Z0-9$#]*RATE[A-Z0-9$#]*\b", "비율"),
+                (r"\b[A-Z][A-Z0-9$#]*_[A-Z0-9$#]*(?:KEY|REF|ID)[A-Z0-9$#]*\b", "식별 기준"),
+            )
+            for pattern, replacement in generic_token_patterns:
+                normalized = re.sub(pattern, replacement, normalized, flags=re.IGNORECASE)
+            structural_replacements = (
+                (r"SQL\s*또는\s*데이터\s*접근\s*로직이\s*UI[^\.\n]*", "데이터 반영 흐름과 계산 기준이 한 단계에 모여 있어 처리 순서를 먼저 복원해야 합니다"),
+                (r"데이터\s*접근\s*로직이\s*UI[^\.\n]*", "데이터 반영 흐름과 계산 기준이 한 단계에 모여 있어 처리 순서를 먼저 복원해야 합니다"),
+                (r"\bSQL\b", "현행 처리"),
+                (r"\bTABLE\b", "데이터 흐름"),
+                (r"\bPROCEDURE\b", "처리 단계"),
+                (r"\bTRIGGER\b", "후속 반영 단계"),
+                (r"\bCOLUMN\b", "입력 기준"),
+                (r"데이터\s*접근", "데이터 반영"),
+                (r"\bUI\b", "화면"),
+                (r"UI/템플릿", "화면"),
+                (r"재설계", "후속 검토"),
+                (r"계층\s*분리", "처리 단계 정리"),
+                (r"서비스\s*분리", "처리 단계 정리"),
+                (r"분리\s*구조", "흐름 정리"),
+                (r"레이어", "단계"),
+            )
+            for pattern, replacement in structural_replacements:
+                normalized = re.sub(pattern, replacement, normalized, flags=re.IGNORECASE)
+            normalized = re.sub(r"\bSELECT\b|\bINSERT\b|\bUPDATE\b|\bDELETE\b|\bMERGE\b|\bJOIN\b|\bFROM\b|\bWHERE\b", "", normalized, flags=re.IGNORECASE)
+            normalized = re.sub(r"\s+/\s+", "/", normalized)
+            normalized = re.sub(r"\s+,", ",", normalized)
+            normalized = re.sub(r"\(\s*", "(", normalized)
+            normalized = re.sub(r"\s*\)", ")", normalized)
+            normalized = re.sub(r"\s{2,}", " ", normalized)
+            return normalized.strip(" ,;")
+
+    # 객체명은 테이블/프로시저/트리거뿐 아니라 컬럼명과 SQL 구문처럼 보이는 기술 토큰까지 포함해 다룹니다.
+    def operational_text_exposes_technical_token(
+            self,
+            text: str,
+            *,
+            extra_tokens: list[str] | tuple[str, ...] | None = None,
+        ) -> bool:
+            normalized = str(text or "")
+            if not normalized.strip():
+                return False
+            upper_text = normalized.upper()
+            normalized_tokens = [
+                self._normalize_operational_object_name(item)
+                for item in list(extra_tokens or [])
+                if self._normalize_operational_object_name(item)
+            ]
+            if normalized_tokens and any(token in upper_text for token in normalized_tokens):
+                return True
+            token_patterns = (
+                r"\b[A-Z][A-Z0-9$#]*\.[A-Z_][A-Z0-9_$#]+\b",
+                r"\.[A-Z_][A-Z0-9_$#]+\b",
+                r"\b[A-Z][A-Z0-9$#]*_[A-Z0-9_$#]+\b",
+                r"\b(?:TN|TB|TR|IB|GL|P|PKG|PK|PROC|PRC|FN|FNC|SP|VW|IDX|SEQ)_[A-Z0-9_$#]+\b",
+                r"\b[A-Z][A-Z0-9$#]*_[A-Z0-9$#]*(?:AMT|SEQ|ID|CD|CODE|YN|FLAG|STATUS|RATE|DATE|DT|NO|NUM|QTY|CNT|KEY|REF)[A-Z0-9$#]*\b",
+                r"\b(?:SELECT|INSERT|UPDATE|DELETE|MERGE|JOIN|FROM|WHERE|GROUP\s+BY|ORDER\s+BY)\b",
+                r"\b(?:SQL|TABLE|PROCEDURE|TRIGGER|COLUMN)\b",
+                r"\bUI\b",
+                r"데이터\s*접근",
+                r"(?:테이블|프로시저|트리거|컬럼)",
+            )
+            return any(re.search(pattern, upper_text) for pattern in token_patterns)
+
+    def _operational_default_section_lines(
+            self,
+            *,
+            section_key: str,
+            profile: dict[str, object],
+        ) -> list[str]:
+            identity_sentence = str(profile.get("identity_sentence") or "").strip()
+            flow_sentence = str(profile.get("flow_sentence") or "").strip()
+            rule_sentence = str(profile.get("rule_sentence") or "").strip()
+            risk_sentence = str(profile.get("risk_sentence") or "").strip()
+            primary_reason = str(profile.get("primary_reason") or "").strip()
+            follow_up_lines = [str(item).strip() for item in list(profile.get("follow_up_lines") or []) if str(item).strip()]
+            if section_key == "report_purpose":
+                report_purpose = str(profile.get("report_purpose") or "").strip()
+                return [report_purpose] if report_purpose else []
+            if section_key == "one_line_conclusion":
+                if identity_sentence:
+                    return [f"{identity_sentence.rstrip('.')} 1차 목적은 현행 데이터 흐름과 계산 기준, 처리 순서를 복원하는 것입니다."]
+                return []
+            if section_key == "executive_summary_v2":
+                return [
+                    line
+                    for line in (
+                        f"현행 분석: {identity_sentence}" if identity_sentence else "",
+                        f"핵심 흐름: {flow_sentence}" if flow_sentence else "",
+                        f"주요 업무 규칙: {rule_sentence}" if rule_sentence else "",
+                        f"운영 리스크: {risk_sentence}" if risk_sentence else "",
+                    )
+                    if line
+                ]
+            if section_key in {"primary_judgment_reason", "rationale"}:
+                return [primary_reason] if primary_reason else []
+            if section_key in {"recommended_option", "recommended_directions", "next_step"}:
+                return follow_up_lines[:3]
+            if section_key in {"risks", "risk"}:
+                return [risk_sentence] if risk_sentence else []
+            return []
+
+    def operational_lines_expose_technical_tokens(
+            self,
+            lines: list[str] | tuple[str, ...],
+            *,
+            extra_tokens: list[str] | tuple[str, ...] | None = None,
+        ) -> bool:
+            return any(
+                self.operational_text_exposes_technical_token(str(line or ""), extra_tokens=extra_tokens)
+                for line in list(lines or [])
+            )
+
+    def operational_text_exposes_forbidden_surface_phrase(self, text: str) -> bool:
+            normalized = str(text or "").strip().lower()
+            if not normalized:
+                return False
+            patterns = (
+                "분리 구조",
+                "분리",
+                "계층 분리",
+                "계층으로 분리",
+                "재설계",
+                "재구성 로드맵",
+                "서비스 분리",
+                "서비스로 분리",
+                "정책 계층",
+                "모듈형",
+                "옵션",
+                "구조 개선",
+            )
+            return any(pattern in normalized for pattern in patterns)
+
+    def operational_section_level(self, section_key: str) -> str:
+            normalized = str(section_key or "").strip()
+            if normalized in {"analysis_summary", "evidence"}:
+                return "l2"
+            if normalized in {
+                "report_purpose",
+                "one_line_conclusion",
+                "one_line_summary",
+                "executive_summary",
+                "executive_summary_v2",
+                "primary_judgment_reason",
+                "rationale",
+                "recommended_option",
+                "recommended_directions",
+                "execution_plan",
+                "related_contracts",
+                "next_step",
+                "risks",
+                "risk",
+            }:
+                return "l1"
+            return "l3"
+
+    def render_operational_section_lines(
+            self,
+            *,
+            section_key: str,
+            lines: list[str] | tuple[str, ...] | None = None,
+            prepared: PreparedRebuildInput | None = None,
+            domain_override: str = "",
+            fallback_lines: list[str] | tuple[str, ...] | None = None,
+        ) -> list[str]:
+            level = self.operational_section_level(section_key)
+            normalized_lines = [str(line or "").strip() for line in list(lines or []) if str(line or "").strip()]
+            normalized_fallback = [str(line or "").strip() for line in list(fallback_lines or []) if str(line or "").strip()]
+            profile = self.operational_analysis_profile(prepared) if prepared is not None else {}
+            domain = str(profile.get("domain") or domain_override or "").strip()
+            inventory = list(profile.get("object_inventory") or [])
+            raw_object_tokens = [
+                str(item.get("name") or "").strip()
+                for item in inventory
+                if str(item.get("name") or "").strip()
+            ]
+            if level == "l2" and prepared is not None:
+                intro = str(profile.get("object_section_intro") or "").strip()
+                object_lines = [str(item).strip() for item in list(profile.get("object_section_lines") or []) if str(item).strip()]
+                return [item for item in [intro, *object_lines] if item]
+            candidate_lines = normalized_lines or normalized_fallback
+            fallback_candidate_lines = normalized_fallback if normalized_fallback and normalized_fallback != candidate_lines else []
+            default_lines = self._operational_default_section_lines(section_key=section_key, profile=profile)
+            if level == "l1":
+                candidate_lines = [
+                    self._operational_humanize_line(line, domain=domain, inventory=inventory)
+                    for line in candidate_lines
+                ]
+                candidate_lines = [line for line in candidate_lines if line]
+                fallback_candidate_lines = [
+                    self._operational_humanize_line(line, domain=domain, inventory=inventory)
+                    for line in fallback_candidate_lines
+                ]
+                fallback_candidate_lines = [line for line in fallback_candidate_lines if line]
+                filtered = [
+                    line
+                    for line in candidate_lines
+                    if not self.operational_text_exposes_technical_token(line, extra_tokens=raw_object_tokens)
+                    and not self.operational_text_exposes_forbidden_surface_phrase(line)
+                ]
+                if filtered:
+                    return filtered
+                if fallback_candidate_lines:
+                    fallback_filtered = [
+                        line
+                        for line in fallback_candidate_lines
+                        if not self.operational_text_exposes_technical_token(line, extra_tokens=raw_object_tokens)
+                        and not self.operational_text_exposes_forbidden_surface_phrase(line)
+                    ]
+                    if fallback_filtered:
+                        return fallback_filtered
+                if default_lines:
+                    default_filtered = [
+                        line
+                        for line in default_lines
+                        if not self.operational_text_exposes_technical_token(line, extra_tokens=raw_object_tokens)
+                        and not self.operational_text_exposes_forbidden_surface_phrase(line)
+                    ]
+                    if default_filtered:
+                        return default_filtered
+                return filtered
+            if level == "l2":
+                filtered = [
+                    line
+                    for line in candidate_lines
+                    if not self.operational_text_exposes_technical_token(line, extra_tokens=raw_object_tokens)
+                ]
+                if filtered:
+                    return filtered
+                if fallback_candidate_lines:
+                    fallback_filtered = [
+                        line
+                        for line in fallback_candidate_lines
+                        if not self.operational_text_exposes_technical_token(line, extra_tokens=raw_object_tokens)
+                    ]
+                    if fallback_filtered:
+                        return fallback_filtered
+                return candidate_lines
+            return candidate_lines
+
+    def _operational_object_names(self, prepared: PreparedRebuildInput, limit: int = 6) -> list[str]:
+            domain = "operational_source"
+            if self._has_fx_fifo_domain(prepared):
+                domain = "fx_fifo"
+            elif self._has_interface_linkage_domain(prepared) and self._interface_linkage_signal_score(prepared) >= self._settlement_journal_signal_score(prepared):
+                domain = "interface_linkage"
+            elif self._has_settlement_journal_domain(prepared):
+                domain = "settlement_journal"
+            return [
+                str(item.get("name") or "").strip()
+                for item in self._operational_object_inventory(prepared, domain=domain, limit=limit)
+                if str(item.get("name") or "").strip()
+            ]
+
+    def _normalize_operational_object_name(self, value: str) -> str:
+            normalized = str(value or "").strip().upper()
+            if not normalized:
+                return ""
+            if "." in normalized:
+                normalized = normalized.split(".")[-1]
+            normalized = re.sub(r"[^A-Z0-9_$#]", "", normalized)
+            return normalized
+
+    def _is_ignored_operational_object_name(self, name: str) -> bool:
+            ignored = {
+                "CREATE",
+                "TABLE",
+                "PROCEDURE",
+                "FUNCTION",
+                "TRIGGER",
+                "SELECT",
+                "INSERT",
+                "UPDATE",
+                "DELETE",
+                "FROM",
+                "INTO",
+                "JOIN",
+                "WHERE",
+                "MERGE",
+                "VALUES",
+                "SET",
+                "WHEN",
+                "THEN",
+                "BEGIN",
+                "END",
+                "DUAL",
+            }
+            return not name or len(name) < 3 or name in ignored
+
+    def _operational_object_kind_priority(self, kind: str) -> int:
+            return {"table": 3, "procedure": 2, "trigger": 1}.get(str(kind or "").strip(), 0)
+
+    def _operational_object_rank(self, domain: str, name: str, kind: str, *, question_axis: str = "") -> int:
+            score = self._operational_object_kind_priority(kind) * 10
+            domain_priority: dict[str, tuple[tuple[str, ...], ...]] = {
+                "fx_fifo": (
+                    ("FORINS",),
+                    ("FOROUT",),
+                    ("FOROUD",),
+                    ("BKCHIT",),
+                    ("GL_INTERFACE",),
+                    ("BKCHNO",),
+                ),
+                "interface_linkage": (
+                    ("IB_BULK_TRAN_ADD",),
+                    ("P_FUNDIH",),
+                    ("IB_ACCTALL_TR_DD_LST",),
+                    ("TN_PAY_ORDER_DTL",),
+                    ("IB_",),
+                    ("PAY_ORDER",),
+                ),
+                "settlement_journal": (
+                    ("TN_SETTLE_HDR",),
+                    ("TN_SETTLE_DTL",),
+                    ("TN_BKCHNO",),
+                    ("TN_BKCHIT",),
+                    ("GL_INTERFACE",),
+                    ("TN_PAY_ORDER_DTL",),
+                ),
+            }
+            priorities = domain_priority.get(domain, ())
+            for index, tokens in enumerate(priorities):
+                if any(token in name for token in tokens):
+                    score += 100 - (index * 8)
+                    break
+            if "GL_INTERFACE" in name:
+                score += 20
+            if "PAY_ORDER" in name:
+                score += 12
+            if kind == "table":
+                score += 4
+            axis = str(question_axis or "").strip()
+            axis_priority: dict[str, tuple[tuple[str, ...], ...]] = {
+                "journal_linkage": (
+                    ("BKCHNO", "JE", "JOURNAL"),
+                    ("BKCHIT", "ENTRY", "LINE"),
+                    ("GL_INTERFACE", "GL", "LEDGER"),
+                    ("FOROUD", "SETTLE_DTL"),
+                ),
+                "calculation_rule": (
+                    ("FORINS", "RMN", "BAL"),
+                    ("FOROUT", "OUT", "REQ"),
+                    ("FOROUD", "GAP", "LOSS", "RATE"),
+                    ("SETTLE_DTL", "AMT", "CALC"),
+                ),
+                "processing_flow": (
+                    ("FORINS", "SETTLE_HDR", "IB_"),
+                    ("FOROUT", "SETTLE_DTL", "P_"),
+                    ("FOROUD", "BKCHIT", "GL_INTERFACE"),
+                ),
+            }
+            for index, tokens in enumerate(axis_priority.get(axis, ())):
+                if any(token in name for token in tokens):
+                    score += 70 - (index * 9)
+                    break
+            return score
+
+    def _operational_object_description(self, *, domain: str, name: str, kind: str, question_axis: str = "") -> str:
+            upper_name = str(name or "").upper()
+            axis = str(question_axis or "").strip()
+            if axis == "journal_linkage":
+                journal_specific: dict[str, dict[str, str]] = {
+                    "fx_fifo": {
+                        "TN_FOROUD": "lot 소진 결과와 환차손익이 어떤 전표 기준으로 넘어가는지 남깁니다.",
+                        "TN_BKCHIT": "lot 계산 결과가 어떤 전표 라인으로 이어지는지 보여 줍니다.",
+                        "GL_INTERFACE": "전표 결과가 어떤 거래 기준번호로 회계 연계에 전달되는지 보여 줍니다.",
+                        "P_BKCHNO": "전표 기준번호를 만들고 계산 결과를 회계 연계 기준과 묶습니다.",
+                    },
+                    "settlement_journal": {
+                        "TN_SETTLE_HDR": "정산 결과가 어떤 전표 기준으로 이어지는지 출발 기준을 잡습니다.",
+                        "TN_BKCHNO": "정산 결과를 어떤 전표 헤더 기준으로 묶는지 보여 줍니다.",
+                        "TN_BKCHIT": "전표 라인과 회계 reference가 어떤 거래 키로 연결되는지 남깁니다.",
+                        "GL_INTERFACE": "전표 결과가 어떤 회계 기준으로 외부 연계에 전달되는지 보여 줍니다.",
+                    },
+                }
+                description = journal_specific.get(domain, {}).get(upper_name)
+                if description:
+                    return description
+            if axis == "calculation_rule":
+                calculation_specific: dict[str, dict[str, str]] = {
+                    "fx_fifo": {
+                        "TN_FORINS": "입금 lot의 잔량과 취득 기준을 유지해 계산의 시작점을 잡습니다.",
+                        "TN_FOROUT": "출금 금액이 어떤 lot 소진 기준으로 계산되는지 출발 기준을 잡습니다.",
+                        "TN_FOROUD": "lot 소진량과 손익 산출 결과를 계산 기준대로 남깁니다.",
+                        "P_FOROUT": "lot 선택 순서와 환율 비교, 손익 산출 단계를 이어 줍니다.",
+                    },
+                }
+                description = calculation_specific.get(domain, {}).get(upper_name)
+                if description:
+                    return description
+            domain_specific: dict[str, dict[str, str]] = {
+                "fx_fifo": {
+                    "TN_FORINS": "입금 금액과 남은 잔량의 출발 기준을 관리합니다.",
+                    "TN_FOROUT": "출금 요청 금액과 소진 대상 선택의 출발 기준을 잡습니다.",
+                    "TN_FOROUD": "어떤 lot이 얼마만큼 소진됐는지와 계산 결과를 남깁니다.",
+                    "TN_BKCHIT": "계산 결과가 전표 반영으로 이어진 흔적을 남깁니다.",
+                    "GL_INTERFACE": "계산 결과가 회계 반영으로 넘어가기 전 최종 전달 기준을 모읍니다.",
+                    "P_FOROUT": "출금 요청에서 lot 소진 순서와 금액 계산을 이어 줍니다.",
+                    "P_BKCHNO": "전표 기준번호를 만들고 회계 반영 순서를 이어 줍니다.",
+                },
+                "interface_linkage": {
+                    "IB_BULK_TRAN_ADD": "수신된 거래가 첫 적재 단계에서 어떤 상태로 들어오는지 잡습니다.",
+                    "P_FUNDIH": "수신 데이터가 상태 갱신과 후속 반영으로 이어지게 합니다.",
+                    "IB_ACCTALL_TR_DD_LST": "최신 상태가 무엇인지와 마지막 확정 결과를 유지합니다.",
+                    "TN_PAY_ORDER_DTL": "후속 지급 단계와 연결되는 처리 상태를 관리합니다.",
+                },
+                "settlement_journal": {
+                    "TN_SETTLE_HDR": "정산 확정의 출발 기준과 전체 상태를 관리합니다.",
+                    "TN_SETTLE_DTL": "거래별 정산 기준과 세부 반영 대상을 남깁니다.",
+                    "TN_BKCHNO": "정산 결과가 어떤 전표 단위로 이어지는지 잡습니다.",
+                    "TN_BKCHIT": "전표별 반영 금액과 처리 결과를 남깁니다.",
+                    "GL_INTERFACE": "전표 결과가 회계 반영 단계로 넘어가기 전 전달 기준을 모읍니다.",
+                    "TN_PAY_ORDER_DTL": "지급 상태와 정산 반영 결과의 연결 상태를 관리합니다.",
+                },
+            }
+            description = domain_specific.get(domain, {}).get(upper_name)
+            if description:
+                return description
+            if "GL_INTERFACE" in upper_name:
+                return "외부 회계 반영으로 넘어가기 전 전달 기준을 모읍니다."
+            if any(token in upper_name for token in ("BKCHNO", "HDR", "HEAD")):
+                return "상위 단위 상태와 기준번호 흐름을 관리합니다."
+            if any(token in upper_name for token in ("BKCHIT", "DTL", "LINE", "IT")):
+                return "세부 반영 결과와 금액 흐름을 남깁니다."
+            if any(token in upper_name for token in ("HIST", "LST", "LOG")):
+                return "이력과 최신 상태 변화를 이어서 보여 줍니다."
+            if "PAY_ORDER" in upper_name:
+                return "후속 지급 또는 주문 연계 상태를 이어 줍니다."
+            if kind == "trigger":
+                return "상태 변화 뒤 이어지는 후속 반영을 자동으로 이어 줍니다."
+            if kind == "procedure":
+                return "처리 순서와 계산·연계 단계를 이어 줍니다."
+            return "핵심 데이터와 처리 상태를 같은 거래 흐름 기준으로 관리합니다."
     
     def _workflow_signal_text(self, prepared: PreparedRebuildInput) -> str:
             parts = [
@@ -367,6 +1811,8 @@ class TemplateSupport:
             return "\n".join(part for part in parts if part).lower()
     
     def _workflow_actor_signal_count(self, prepared: PreparedRebuildInput) -> int:
+            if self._has_fx_fifo_domain(prepared):
+                return 0
             text = self._workflow_signal_text(prepared)
             patterns = [
                 r"\bapproverrole\b",
@@ -388,7 +1834,7 @@ class TemplateSupport:
             count += sum(1 for token in korean_patterns if token in text)
             role_literals = {
                 token
-                for token in ("manager", "finance", "hr", "director", "team_lead", "auditor")
+                for token in ("manager", "director", "team_lead", "auditor")
                 if re.search(rf"""["']{re.escape(token)}["']""", text)
             }
             if role_literals:
@@ -398,6 +1844,8 @@ class TemplateSupport:
             return count
     
     def _workflow_stage_signal_count(self, prepared: PreparedRebuildInput) -> int:
+            if self._has_fx_fifo_domain(prepared):
+                return 0
             text = self._workflow_signal_text(prepared)
             direct_groups = [
                 ("approvalstep", "approval_step", "approvallevel", "approval_level", "approvalstage", "approval_stage"),
@@ -419,39 +1867,43 @@ class TemplateSupport:
             return count
     
     def _workflow_gate_signal_count(self, prepared: PreparedRebuildInput) -> int:
+            if self._has_fx_fifo_domain(prepared):
+                return 0
             text = self._workflow_signal_text(prepared)
             groups = [
                 ("approve(", ".approve(", "approved", "\"approved\"", "'approved'", "승인", "auto_approved", "자동 승인"),
                 ("reject", "rejected", "반려"),
-                ("hold", "on_hold", "보류"),
                 ("delegate", "delegated", "대리 승인", "위임"),
                 ("escalation", "escalate"),
             ]
             return sum(1 for tokens in groups if any(token in text for token in tokens))
-    
+
     def _workflow_progression_signal_count(self, prepared: PreparedRebuildInput) -> int:
+            if self._has_fx_fifo_domain(prepared):
+                return 0
             text = self._workflow_signal_text(prepared)
             groups = [
                 ("requested", "submitted", "request_status"),
                 ("approvalstep", "approval_step", "approvallevel", "approval_level", "getnextstep", "nextstep"),
                 ("delegate", "delegated", "pending_delegate_assignment"),
-                ("reject", "rejected", "hold", "on_hold"),
+                ("reject", "rejected"),
             ]
             return sum(1 for tokens in groups if any(token in text for token in tokens))
 
     def _has_workflow_pattern(self, prepared: PreparedRebuildInput) -> bool:
+            if self._has_fx_fifo_domain(prepared):
+                return False
             actor_count = self._workflow_actor_signal_count(prepared)
             stage_count = self._workflow_stage_signal_count(prepared)
             gate_count = self._workflow_gate_signal_count(prepared)
             progression_count = self._workflow_progression_signal_count(prepared)
-            satisfied = sum(
-                (
-                    actor_count >= 1,
-                    stage_count >= 1,
-                    gate_count >= 1,
-                )
+            total_strength = actor_count + stage_count + gate_count + progression_count
+            return (
+                actor_count >= 1
+                and progression_count >= 1
+                and total_strength >= 3
+                and (stage_count >= 1 or gate_count >= 1)
             )
-            return satisfied >= 2 and progression_count >= 1
     
     def _should_force_access_control_narrative(self, grounded_rules: list[GroundedBusinessRule]) -> bool:
             text = " ".join(f"{item.title} {item.description}" for item in grounded_rules)
@@ -501,6 +1953,22 @@ class TemplateSupport:
     
     def build_recommended_directions(self, prepared: PreparedRebuildInput) -> list[str]:
             concept = self._primary_concept(prepared)
+            profile = self.operational_analysis_profile(prepared)
+            if bool(profile.get("active")):
+                fallback_lines = [str(item).strip() for item in list(profile.get("follow_up_lines") or []) if str(item).strip()]
+                if not fallback_lines:
+                    fallback_lines = [
+                        "취소와 재처리 시 현행 처리 순서가 유지되는지 추가 확인합니다.",
+                        "후속 연계가 같은 거래 기준을 유지하는지 점검합니다.",
+                        "현행 처리 기준을 운영 점검표로 정리합니다.",
+                    ]
+                rendered = self.render_operational_section_lines(
+                    section_key="recommended_directions",
+                    prepared=prepared,
+                    lines=fallback_lines,
+                    fallback_lines=fallback_lines,
+                )
+                return rendered or fallback_lines
             narrative = self._active_narrative_judgment(prepared)
             if narrative == "workflow":
                 return [
@@ -558,7 +2026,7 @@ class TemplateSupport:
                 return "회계"
             if prepared.signals.primary_feature_mode == "search_filters":
                 selected_judgment = str(
-                    getattr(prepared, "selected_primary_judgment", "") or getattr(prepared, "selected_narrative_judgment", "")
+                    getattr(prepared, "selected_narrative_judgment", "") or getattr(prepared, "selected_primary_judgment", "")
                 ).strip()
                 if selected_judgment in {"workflow", "access_control", "state_transition"}:
                     concept_map = {
@@ -598,16 +2066,20 @@ class TemplateSupport:
             return mapping.get(mode, "일반 기능")
 
     def _resolve_domain_anchor(self, prepared: PreparedRebuildInput) -> str | None:
+            if self._has_fx_fifo_domain(prepared):
+                return "외화 입출금 FIFO"
             text = " ".join(
                 [
                     " ".join(prepared.asset_presence.source_asset_names),
                     " ".join(prepared.asset_presence.ui_asset_names),
                     " ".join(prepared.asset_presence.schema_asset_names),
                     " ".join(prepared.asset_presence.sql_asset_names),
+                    " ".join(prepared.asset_presence.doc_asset_names),
                     prepared.assets.source_code,
                     prepared.assets.ui_template,
                     prepared.assets.sql_queries,
                     prepared.assets.database_schema,
+                    prepared.supporting_docs,
                 ]
             ).lower()
             claim_adjust_patterns = (
@@ -636,6 +2108,9 @@ class TemplateSupport:
                 token in text for token in ("vip", "agency", "deliveryhold", "review_required", "배송보류")
             ):
                 return "주문 마감"
+            document_terms = self._document_domain_terms(prepared)
+            if document_terms:
+                return document_terms[0]
             return None
     
     def _resource_name(self, prepared: PreparedRebuildInput) -> str:
@@ -859,6 +2334,8 @@ class TemplateSupport:
             *,
             applied_templates: list[AppliedJudgmentTemplate] | None = None,
         ) -> bool:
+            if self._has_fx_fifo_domain(prepared):
+                return False
             if applied_templates is not None:
                 primary = self._primary_template(prepared, applied_templates)
                 if primary and primary.template_id == "access_control":
@@ -878,6 +2355,8 @@ class TemplateSupport:
             prepared: PreparedRebuildInput,
             grounded: list[GroundedBusinessRule],
         ) -> bool:
+            if self._has_fx_fifo_domain(prepared):
+                return False
             if self._has_explicit_state_transition_signal(prepared) or self._is_validation_primary(prepared):
                 return False
             if prepared.signals.primary_feature_mode == "status_permissions" and self._count_access_control_axes(grounded) >= 2:
@@ -1055,6 +2534,8 @@ class TemplateSupport:
             prepared: PreparedRebuildInput,
             grounded_rules: list[GroundedBusinessRule],
         ) -> JudgmentTemplateId | None:
+            if self._has_fx_fifo_domain(prepared):
+                return "validation"
             if self._has_workflow_pattern(prepared):
                 return "workflow"
             if self._has_explicit_state_transition_signal(prepared):
@@ -1078,6 +2559,11 @@ class TemplateSupport:
             recommended: DesignOption,
             applied_templates: list[AppliedJudgmentTemplate],
         ) -> str:
+            if self._has_fx_fifo_domain(prepared):
+                return (
+                    f"{self._attach_object_particle(self._option_label(recommended.name))} 우선안으로 두고 "
+                    "현행 lot, 환차손익, 전표/GL 연계 기준을 복원한 뒤 후속 구조 개선 후보로 비교하는 편이 적절합니다."
+                )
             ordered_templates = self._ordered_templates_for_generation(prepared, applied_templates, grounded_rules)
             primary_template = ordered_templates[0] if ordered_templates else self._primary_template(prepared, applied_templates)
             narrative_templates = [primary_template] if primary_template else ordered_templates or applied_templates
@@ -1266,6 +2752,8 @@ class TemplateSupport:
     
     def _build_non_recommended_selection_reason(self, option_name: str, applied_templates: list[AppliedJudgmentTemplate]) -> str:
             label = self._option_label(option_name)
+            if "lot" in label.lower() or "fifo" in label.lower() or "gl" in label.lower():
+                return f"{label}는 일부 구조 분리에는 유효하지만 FIFO 계산과 회계 연계를 함께 묶는 현재 우선순위보다 뒤에 두어야 합니다."
             ids = [item.template_id for item in applied_templates[:2]]
             if "화면" in option_name:
                 return f"{label}는 화면 개선 효과는 빠르지만 핵심 규칙 분리를 뒤로 미루므로 후순위로 둬야 합니다."
@@ -1331,6 +2819,27 @@ class TemplateSupport:
             decision_count_hint: int | None = None,
         ) -> list[DecisionItem]:
             concept = self._primary_concept(prepared)
+            if self._has_fx_fifo_domain(prepared):
+                evidence_pool = [evidence for rule in grounded_rules[:3] for evidence in rule.evidence][:3]
+                objects = self._operational_object_names(prepared)
+                lot_anchor = ", ".join(objects[:3]) if objects else "TN_FORINS, TN_FOROUT, TN_FOROUD"
+                return [
+                    DecisionItem(
+                        statement=f"{concept} 자산에서 {lot_anchor} 기준의 입금 lot 적재와 FIFO 소진 순서를 먼저 복원해야 합니다.",
+                        rationale="입금 lot 잔량과 출금 lot 소진 순서를 먼저 확인해야 동일 거래의 원가 계산과 lot 추적 근거를 설명할 수 있습니다.",
+                        linked_evidence=evidence_pool,
+                    ),
+                    DecisionItem(
+                        statement=f"{concept} 자산에서 EXCH_RATE, OUT_AMT0, GAP_AMT 기준의 환차손익 계산 경로를 확인해야 합니다.",
+                        rationale="lot별 취득 환율과 출금 환율 비교 기준을 복원해야 환차손익과 출금 금액 연결 관계를 검증할 수 있습니다.",
+                        linked_evidence=evidence_pool,
+                    ),
+                    DecisionItem(
+                        statement=f"{concept} 자산에서 TN_BKCHIT, GL_INTERFACE 적재와 거래 기준번호 연계를 확인해야 합니다.",
+                        rationale="전표와 GL 반영 기준번호가 어떤 계산 결과를 따라가는지 확인해야 회계 반영 누락과 재처리 오류 위험을 점검할 수 있습니다.",
+                        linked_evidence=evidence_pool,
+                    ),
+                ]
             evidence_index = {rule.title: rule.evidence for rule in grounded_rules}
             items: list[DecisionItem] = []
             primary = self._primary_template(prepared, applied_templates)
@@ -1585,6 +3094,77 @@ class TemplateSupport:
             applied_templates: list[AppliedJudgmentTemplate],
         ) -> list[PrioritySplitItem]:
             concept = self._primary_concept(prepared)
+            if self._has_fx_fifo_domain(prepared):
+                linked_rules = [rule.title for rule in grounded_rules[:3]]
+                linked_contracts = [item.item for item in retained_contracts[:2]]
+                return [
+                    PrioritySplitItem(
+                        priority=1,
+                        item=f"{concept} 기능에서 입금 lot 원장과 출금 lot 소진 순서를 먼저 복원하는 것이 필요합니다.",
+                        title=f"{concept} 현행 lot 흐름 복원",
+                        reason="FIFO lot 잔량과 소진 순서를 먼저 복원해야 출금 원가와 lot 추적 결과의 현재 기준을 설명할 수 있습니다.",
+                        impact_scope="입금 lot 원장, 출금 소진 이력, FIFO 소진 기준",
+                        prerequisite="핵심 lot 객체 식별",
+                        linked_rules=linked_rules,
+                        linked_contracts=linked_contracts,
+                    ),
+                    PrioritySplitItem(
+                        priority=2,
+                        item=f"{concept} 기능에서 환차손익 계산 기준과 GAP_AMT 반영 흐름을 다음 단계로 점검하는 것이 필요합니다.",
+                        title=f"{concept} 환차손익 경로 점검",
+                        reason="lot별 취득 환율과 출금 환율 비교 기준을 확인해야 환차손익 결과와 출금 금액 연결을 설명할 수 있습니다.",
+                        impact_scope="환차손익 계산, 출금 금액, 계산 예외 처리",
+                        prerequisite="FIFO lot 소진 기준 복원",
+                        linked_rules=linked_rules,
+                        linked_contracts=linked_contracts,
+                    ),
+                    PrioritySplitItem(
+                        priority=3,
+                        item=f"{concept} 기능의 전표 생성, GL 반영, 취소·재처리 정합성을 마지막에 점검하는 것이 필요합니다.",
+                        title=f"{concept} 전표·GL 정합성 점검",
+                        reason="lot 계산과 환차손익 흐름이 확인된 뒤 전표와 GL 인터페이스 연계를 점검해야 운영 누락 위험을 줄일 수 있습니다.",
+                        impact_scope="전표 생성, GL_INTERFACE 적재, 역분개·정합성 검토",
+                        prerequisite="환차손익 계산 기준 확인",
+                        linked_rules=linked_rules,
+                        linked_contracts=linked_contracts,
+                    ),
+                ]
+            if self._uses_document_neutral_template_fallback(prepared, applied_templates):
+                focus_terms = self._document_focus_terms(prepared)
+                primary_focus = focus_terms[0]
+                comparison_focus = focus_terms[1] if len(focus_terms) > 1 else "판단 기준"
+                return [
+                    PrioritySplitItem(
+                        priority=1,
+                        item=f"{primary_focus} 관련 현행 구조와 핵심 용어를 먼저 정리하는 것이 필요합니다.",
+                        title=f"{primary_focus} 현행 구조 정리",
+                        reason="문서형 입력에서는 현행 구조와 핵심 용어를 먼저 고정해야 후속 비교와 계획이 흔들리지 않습니다.",
+                        impact_scope="현행 구조, 핵심 용어, source 근거 정리",
+                        prerequisite="핵심 source block 확인",
+                        linked_rules=[rule.title for rule in grounded_rules[:2]],
+                        linked_contracts=[item.item for item in retained_contracts[:1]],
+                    ),
+                    PrioritySplitItem(
+                        priority=2,
+                        item=f"{comparison_focus} 관련 비교 기준과 판단 축을 다음 단계로 정리하는 것이 필요합니다.",
+                        title=f"{comparison_focus} 비교 기준 정리",
+                        reason="비교 기준과 판단 축을 분리해야 결론을 먼저 강제하지 않고 선택지를 정리할 수 있습니다.",
+                        impact_scope="선택지 비교, 판단 기준, 누락 정보 정리",
+                        prerequisite="현행 구조 정리",
+                        linked_rules=[rule.title for rule in grounded_rules[:2]],
+                        linked_contracts=[item.item for item in retained_contracts[:1]],
+                    ),
+                    PrioritySplitItem(
+                        priority=3,
+                        item="누락 정보와 단계별 실행 후보를 마지막에 정리하는 것이 필요합니다.",
+                        title="누락 정보 및 로드맵 정리",
+                        reason="구조와 기준을 먼저 정리한 뒤 실행 후보를 정리해야 후속 계획이 source와 어긋나지 않습니다.",
+                        impact_scope="누락 정보, 후속 확인 항목, 단계별 계획",
+                        prerequisite="비교 기준 정리",
+                        linked_rules=[rule.title for rule in grounded_rules[:2]],
+                        linked_contracts=[item.item for item in retained_contracts[:1]],
+                    ),
+                ]
             templates = applied_templates[:2]
             primary = self._primary_template(prepared, applied_templates)
             items: list[PrioritySplitItem] = []
@@ -1819,6 +3399,75 @@ class TemplateSupport:
             retained_contracts: list[RetainedContract],
             applied_templates: list[AppliedJudgmentTemplate],
         ) -> list[DesignOption]:
+            if self._has_fx_fifo_domain(prepared):
+                return [
+                    DesignOption(
+                        name="옵션 A. FIFO 계산·회계 연계 분리 구조",
+                        structure_summary="입금 lot 원장, 출금 lot 소진 계산, 환차손익 계산, 전표/GL 반영을 순차 서비스로 분리합니다.",
+                        advantages=["FIFO lot 계산과 환차손익 기준을 같은 계산 흐름으로 고정할 수 있습니다.", "전표 생성과 GL 연계를 계산 결과와 같은 거래 키로 연결하기 쉽습니다."],
+                        risks=["lot 식별 키가 약하면 계산 계층과 회계 계층 사이에서 재정렬 비용이 생길 수 있습니다."],
+                        difficulty="MEDIUM",
+                        duration_weeks=4,
+                        recommended=True,
+                        selection_reason="",
+                    ),
+                    DesignOption(
+                        name="옵션 B. lot 원장 우선 분리 구조",
+                        structure_summary="입금 lot 잔량과 출금 lot 소진 이력을 먼저 분리하고 환차손익/전표는 후속 단계에서 연결합니다.",
+                        advantages=["FIFO 원장 경계를 빠르게 고정할 수 있습니다."],
+                        risks=["환차손익과 전표 반영 기준이 뒤로 밀리면 회계 정합성 확인이 늦어질 수 있습니다."],
+                        difficulty="MEDIUM",
+                        duration_weeks=5,
+                        recommended=False,
+                        selection_reason="",
+                    ),
+                    DesignOption(
+                        name="옵션 C. GL 연계 우선 구조",
+                        structure_summary="전표 생성과 GL 인터페이스를 먼저 정리하고 FIFO lot 계산과 환차손익 정교화는 후속 단계로 넘깁니다.",
+                        advantages=["회계 인터페이스 정합성을 빠르게 정리할 수 있습니다."],
+                        risks=["핵심 FIFO lot 계산이 레거시에 남아 재작업 가능성이 큽니다."],
+                        difficulty="MEDIUM",
+                        duration_weeks=5,
+                        recommended=False,
+                        selection_reason="",
+                    ),
+                ]
+            if self._uses_document_neutral_template_fallback(prepared, applied_templates):
+                focus_terms = self._document_focus_terms(prepared)
+                primary_focus = focus_terms[0]
+                secondary_focus = focus_terms[1] if len(focus_terms) > 1 else "판단 기준"
+                return [
+                    DesignOption(
+                        name="옵션 A. 현행 구조 정리 중심 구조",
+                        structure_summary=f"{primary_focus}와 {secondary_focus}를 기준으로 현행 구조, 핵심 용어, 비교 축을 먼저 정리하는 구조입니다.",
+                        advantages=["source에서 직접 확인된 용어와 구조를 먼저 고정할 수 있습니다.", "도메인 불확실성을 남긴 채 비교 기준을 정리하기 쉽습니다."],
+                        risks=["세부 구현 방식은 후속 근거 없이 확정하지 못합니다."],
+                        difficulty="MEDIUM",
+                        duration_weeks=4,
+                        recommended=True,
+                        selection_reason="",
+                    ),
+                    DesignOption(
+                        name="옵션 B. 비교 기준 분리 구조",
+                        structure_summary=f"{primary_focus} 관련 선택지와 판단 기준을 먼저 분리하고 상세 설계는 후속 단계에서 정리하는 구조입니다.",
+                        advantages=["선택지 비교와 기준 정리를 빠르게 진행할 수 있습니다."],
+                        risks=["현행 상세 구조를 충분히 보지 못하면 후속 설계 재조정이 필요할 수 있습니다."],
+                        difficulty="MEDIUM",
+                        duration_weeks=5,
+                        recommended=False,
+                        selection_reason="",
+                    ),
+                    DesignOption(
+                        name="옵션 C. 추가 근거 확인 후 상세 설계 구조",
+                        structure_summary="핵심 구조와 누락 정보를 먼저 수집한 뒤 상세 설계를 단계적으로 정리하는 구조입니다.",
+                        advantages=["source 근거가 약한 영역을 별도 확인 항목으로 남기기 쉽습니다."],
+                        risks=["초기 설계 속도는 상대적으로 느릴 수 있습니다."],
+                        difficulty="MEDIUM",
+                        duration_weeks=5,
+                        recommended=False,
+                        selection_reason="",
+                    ),
+                ]
             labels = [item.template_id for item in applied_templates[:2]]
             primary = labels[0] if labels else "validation"
             secondary = labels[1] if len(labels) > 1 else None
@@ -1891,6 +3540,164 @@ class TemplateSupport:
         ) -> list[ExecutionPlanWeek]:
             concept = self._primary_concept(prepared)
             option_name = self._option_label(recommended_option.name) if recommended_option else "정책 중심 모듈형 구조"
+            if self._has_fx_fifo_domain(prepared):
+                related_rules = [rule.title for rule in grounded_rules[:3]]
+                related_contracts = self.render_operational_section_lines(
+                    section_key="related_contracts",
+                    prepared=prepared,
+                    lines=[item.item for item in retained_contracts[:3]],
+                    fallback_lines=[
+                        "입금 lot 잔량 계산 계약은 유지하는 것이 필요합니다.",
+                        "출금 lot 소진 순서 계약은 유지하는 것이 필요합니다.",
+                        "환차손익과 회계 인터페이스 반영 계약은 유지하는 것이 필요합니다.",
+                    ],
+                )
+                stage_lines = [
+                    (
+                        "1주차",
+                        "현행 입금 lot 원장과 출금 lot 소진 흐름을 복원합니다.",
+                        [
+                            "TN_FORINS, TN_FOROUT, TN_FOROUD 기준으로 입금 lot 잔량과 출금 소진 흐름을 표로 정리합니다.",
+                            "lot 잔량(RMN_FAMT/RMN_AMT)과 FIFO 소진 순서(TR_DATE, TR_DATE_SEQ)의 현행 기준을 정리합니다.",
+                        ],
+                        [
+                            "현행 입금 lot 원장과 출금 lot 소진 흐름을 복원합니다.",
+                            "외화 입금 lot 원장, 외화 출금 요청, lot 소진 결과 이력 기준으로 입금 lot 잔량과 출금 소진 흐름을 표로 정리합니다.",
+                            "입금 lot 잔량과 FIFO 소진 순서의 현행 기준을 정리합니다.",
+                        ],
+                        ["lot 원장 구조도", "FIFO 소진 규칙 표", "핵심 객체 목록"],
+                        ["컨설턴트", "업무 분석가", "백엔드 아키텍트"],
+                    ),
+                    (
+                        "2주차",
+                        "환차손익 계산과 전표·GL 연계 규칙을 분석합니다.",
+                        [
+                            "lot별 취득 환율, 출금 환율, GAP_AMT 계산 기준을 현행 로직 기준으로 정리합니다.",
+                            "전표 생성과 GL_INTERFACE 적재 기준번호가 어떤 거래 키를 따르는지 연결 관계를 확인합니다.",
+                        ],
+                        [
+                            "환차손익 계산과 전표·회계 인터페이스 연계 규칙을 분석합니다.",
+                            "lot별 취득 환율, 출금 환율, 환차손익 계산 기준을 현행 로직 기준으로 정리합니다.",
+                            "전표 생성과 회계 인터페이스 적재 기준번호가 어떤 거래 키를 따르는지 연결 관계를 확인합니다.",
+                        ],
+                        ["환차손익 계산 명세", "전표/GL 연계 명세", "거래 키 매핑 규칙"],
+                        ["백엔드 아키텍트", "시니어 개발자"],
+                    ),
+                    (
+                        "3주차",
+                        f"{concept} 취소·재처리·정합성 점검 포인트를 정리합니다.",
+                        [
+                            "FIFO lot 선택, lot 잔량 차감, GAP_AMT 계산에서 재처리 시점과 누락 가능 지점을 확인합니다.",
+                            "TN_BKCHIT/GL_INTERFACE 반영, 취소, 삭제, 역분개 연계 여부를 점검 항목으로 정리합니다.",
+                        ],
+                        [
+                            f"{concept} 취소·재처리·정합성 점검 포인트를 정리합니다.",
+                            "FIFO lot 선택, lot 잔량 차감, 환차손익 계산에서 재처리 시점과 누락 가능 지점을 확인합니다.",
+                            "전표 라인 반영 이력과 회계 인터페이스 반영, 취소, 삭제, 역분개 연계 여부를 점검 항목으로 정리합니다.",
+                        ],
+                        ["정합성 점검표", "회계 연계 테스트 케이스", "운영 리스크 목록"],
+                        ["백엔드 개발자", "QA"],
+                    ),
+                    (
+                        "4주차",
+                        f"현행 분석 이후 {option_name} 등 개선 후보를 후속 검토안으로 정리합니다.",
+                        [
+                            "lot 소진 상세, 환차손익 결과, 전표 반영 결과가 같은 거래 기준번호로 연결되는지 검증합니다.",
+                            "트리거 책임 축소, 계산 로직 분리, 회귀 테스트 고정 방안을 개선 후보로 정리합니다.",
+                        ],
+                        [
+                            f"현행 분석 이후 {option_name} 등 개선 후보를 후속 검토안으로 정리합니다.",
+                            "lot 소진 상세, 환차손익 결과, 전표 반영 결과가 같은 거래 기준번호로 연결되는지 검증합니다.",
+                            "후속 반영 책임 축소, 계산 로직 분리, 회귀 테스트 고정 방안을 개선 후보로 정리합니다.",
+                        ],
+                        ["정합성 체크리스트", "회귀 검증 결과", "개선 후보 목록"],
+                        ["백엔드 개발자", "QA", "회계 담당자"],
+                    ),
+                ]
+                rendered_plan: list[ExecutionPlanWeek] = []
+                for week_label, goal, tasks, fallback_lines, deliverables, roles in stage_lines:
+                    rendered_lines = self.render_operational_section_lines(
+                        section_key="execution_plan",
+                        prepared=prepared,
+                        lines=[goal, *tasks],
+                        fallback_lines=fallback_lines,
+                    )
+                    rendered_goal = str(rendered_lines[0] if rendered_lines else fallback_lines[0]).strip()
+                    rendered_tasks = [str(item).strip() for item in rendered_lines[1:] if str(item).strip()] or list(fallback_lines[1:])
+                    rendered_plan.append(
+                        ExecutionPlanWeek(
+                            week_label=week_label,
+                            goal=rendered_goal,
+                            tasks=rendered_tasks,
+                            related_rules=related_rules,
+                            related_contracts=related_contracts,
+                            roles=roles,
+                            duration_weeks=1,
+                            deliverables=deliverables,
+                        )
+                    )
+                return rendered_plan
+            if self._uses_document_neutral_template_fallback(prepared, applied_templates):
+                focus_terms = self._document_focus_terms(prepared)
+                primary_focus = focus_terms[0]
+                secondary_focus = focus_terms[1] if len(focus_terms) > 1 else "판단 기준"
+                linked_rules = [rule.title for rule in grounded_rules[:3]]
+                linked_contracts = [item.item for item in retained_contracts[:2]]
+                return [
+                    ExecutionPlanWeek(
+                        week_label="1주차",
+                        goal=f"{primary_focus} 관련 현행 구조와 핵심 용어를 정리합니다.",
+                        tasks=[
+                            "safe source 기준으로 핵심 용어와 구조 단위를 목록화합니다.",
+                            "슬라이드/문서별 핵심 근거와 반복 표현을 정리합니다.",
+                            "직접 확인된 구조와 확인이 필요한 구조를 구분합니다.",
+                        ],
+                        related_rules=linked_rules,
+                        related_contracts=linked_contracts,
+                        roles=["컨설턴트", "업무 분석가"],
+                        duration_weeks=1,
+                        deliverables=["현행 구조 목록", "핵심 용어 표", "source 근거 목록"],
+                    ),
+                    ExecutionPlanWeek(
+                        week_label="2주차",
+                        goal=f"{secondary_focus} 관련 비교 기준과 판단 축을 정리합니다.",
+                        tasks=[
+                            "선택지 비교에 필요한 판단 기준과 제약을 정리합니다.",
+                            "문서에서 직접 확인된 개선 방향과 누락 정보를 분리합니다.",
+                        ],
+                        related_rules=linked_rules,
+                        related_contracts=linked_contracts,
+                        roles=["컨설턴트", "아키텍트"],
+                        duration_weeks=1,
+                        deliverables=["판단 기준 표", "선택지 비교 초안", "누락 정보 목록"],
+                    ),
+                    ExecutionPlanWeek(
+                        week_label="3주차",
+                        goal="선택지와 후속 확인 항목을 구조 기준으로 정리합니다.",
+                        tasks=[
+                            "현행 구조와 개선 방향 사이의 차이를 선택지 단위로 정리합니다.",
+                            "추가 확인이 필요한 항목을 missing information으로 분리합니다.",
+                        ],
+                        related_rules=linked_rules,
+                        related_contracts=linked_contracts,
+                        roles=["업무 분석가", "백엔드 아키텍트"],
+                        duration_weeks=1,
+                        deliverables=["선택지 정리표", "후속 확인 항목", "리스크 메모"],
+                    ),
+                    ExecutionPlanWeek(
+                        week_label="4주차",
+                        goal=f"{option_name} 기준의 단계별 실행 로드맵을 정리합니다.",
+                        tasks=[
+                            "단기 실행 항목과 후속 설계 항목을 분리합니다.",
+                            "source 근거가 약한 영역은 보류 또는 추가 확인 대상으로 남깁니다.",
+                        ],
+                        related_rules=linked_rules,
+                        related_contracts=linked_contracts,
+                        roles=["컨설턴트", "프로젝트 리드"],
+                        duration_weeks=1,
+                        deliverables=["단계별 로드맵", "우선순위 목록", "보류 항목 정리"],
+                    ),
+                ]
             templates = self._ordered_templates_for_generation(prepared, applied_templates, grounded_rules)[:2]
             top = templates[0] if templates else None
             second = templates[1] if len(templates) > 1 else None
@@ -2153,6 +3960,15 @@ class TemplateSupport:
             retained_contracts: list[RetainedContract],
             applied_templates: list[AppliedJudgmentTemplate],
         ) -> list[str]:
+            if self._has_fx_fifo_domain(prepared):
+                risks = [
+                    "FIFO lot 소진 순서가 바뀌면 동일 출금 건의 원가와 lot 추적 결과가 달라질 수 있습니다.",
+                    "GAP_AMT 계산 기준이 흔들리면 환차손익과 전표 금액이 서로 어긋날 수 있습니다.",
+                    "전표 생성과 GL_INTERFACE 반영 기준번호가 분리되면 회계 연계 누락이 발생할 수 있습니다.",
+                ]
+                if prepared.missing_context:
+                    risks.append("입력 자산이 제한적이므로 제안은 설계 초안 수준이며 추가 파일 확인이 필요합니다.")
+                return self._dedupe_list(risks)[:4]
             risks: list[str] = []
             ordered_templates = self._ordered_templates_for_generation(prepared, applied_templates, grounded_rules)
             for template in ordered_templates[:2]:
@@ -2349,6 +4165,28 @@ class TemplateSupport:
             table_name = self._detect_primary_table_name(prepared)
             specs: list[dict[str, object]] = []
             seen: set[str] = set()
+            if self._has_fx_fifo_domain(prepared):
+                for item, keywords, basis in (
+                    (
+                        "입금 lot 잔량(RMN_FAMT/RMN_AMT) 계산 계약은 유지하는 것이 필요합니다.",
+                        ("tn_forins", "rmn_famt", "rmn_amt", "acnt_seq"),
+                        "입금 lot 잔량이 바뀌면 FIFO 출금 순서와 잔량 계산 결과가 달라질 수 있습니다.",
+                    ),
+                    (
+                        "출금 lot 소진 순서(TR_DATE, TR_DATE_SEQ 기준 FIFO) 계약은 유지하는 것이 필요합니다.",
+                        ("tn_forout", "tn_foroud", "tr_date", "tr_date_seq", "tr_date_seq0", "order by"),
+                        "lot 소진 순서가 달라지면 동일 출금 건의 원가와 환차손익 결과가 달라질 수 있습니다.",
+                    ),
+                    (
+                        "환차손익(GAP_AMT) 계산 및 전표/GL_INTERFACE 반영 계약은 유지하는 것이 필요합니다.",
+                        ("gap_amt", "gl_interface", "reference4", "reference6", "user_je_category_name"),
+                        "환차손익 계산과 전표 반영 기준이 바뀌면 회계 결과와 GL 연계 흐름이 달라질 수 있습니다.",
+                    ),
+                ):
+                    built = self._contract_spec(item=item, keywords=keywords, basis=basis, seen=seen)
+                    if built:
+                        specs.append(built)
+                return [item for item in specs if item]
             candidate_ids = self._candidate_template_ids(prepared, grounded_rules)
             validation_primary = self._is_validation_primary(prepared)
             access_control_primary = self._should_enrich_access_control(prepared, grounded_rules) or self._has_claim_access_control_focus(prepared, grounded_rules)
@@ -2592,6 +4430,8 @@ class TemplateSupport:
             prepared: PreparedRebuildInput,
             grounded_rules: list[GroundedBusinessRule],
         ) -> list[JudgmentTemplateId]:
+            if self._has_fx_fifo_domain(prepared):
+                return ["validation", "amount_threshold"]
             ordered: list[JudgmentTemplateId] = []
             mode_map: dict[str, tuple[JudgmentTemplateId, ...]] = {
                 "status_permissions": ("workflow", "state_transition", "access_control"),

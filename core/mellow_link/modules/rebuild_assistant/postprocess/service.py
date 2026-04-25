@@ -75,20 +75,21 @@ class StructuredResultPolishService:
         )
 
     def _build_sections(self, result: StructuredRebuildResult) -> list[tuple[str, str, str]]:
+        analysis_first = self._uses_analysis_first_surface(result)
         sections = [
-            ("report_purpose", "보고서 목적", result.report_purpose),
+            ("report_purpose", self._section_title(result, "report_purpose", "보고서 목적"), result.report_purpose),
             ("report_scope", "분석 범위", self._join_lines(result.report_scope)),
-            ("report_questions", "검증 질문", self._join_lines(result.report_questions)),
-            ("one_line_conclusion", "핵심 결론", result.one_line_conclusion),
-            ("executive_summary_v2", "Executive Summary", self._join_lines(result.executive_summary_v2)),
-            ("grounded_business_rules", "핵심 업무 규칙", self._join_grounded_rules(result)),
-            ("retained_contracts", "유지해야 할 계약", self._join_retained_contracts(result)),
-            ("priority_split_items", "분리 우선순위", self._join_priority_items(result)),
-            ("recommended_option", "추천안", self._join_recommended_option(result)),
-            ("execution_plan", "실행 계획", self._join_execution_plan(result)),
-            ("recommended_directions", "추천 방향", self._join_lines(result.recommended_directions)),
-            ("risks", "주요 리스크", self._join_lines(result.risks)),
-            ("recomposition_draft", "전환 초안", self._join_recomposition_draft(result)),
+            ("report_questions", "검토 질문" if analysis_first else "검증 질문", self._join_lines(result.report_questions)),
+            ("one_line_conclusion", self._section_title(result, "one_line_conclusion", "핵심 결론"), result.one_line_conclusion),
+            ("executive_summary_v2", self._section_title(result, "executive_summary_v2", "Executive Summary"), self._join_lines(result.executive_summary_v2)),
+            ("grounded_business_rules", "업무 규칙 및 처리 기준" if analysis_first else "핵심 업무 규칙", self._join_grounded_rules(result)),
+            ("retained_contracts", "유지해야 할 운영 계약" if analysis_first else "유지해야 할 계약", self._join_retained_contracts(result)),
+            ("priority_split_items", "검토 우선순위" if analysis_first else "분리 우선순위", self._join_priority_items(result)),
+            ("recommended_option", self._section_title(result, "recommended_option", "추천안"), self._join_recommended_option(result)),
+            ("execution_plan", self._section_title(result, "execution_plan", "실행 계획"), self._join_execution_plan(result)),
+            ("recommended_directions", self._section_title(result, "recommended_directions", "추천 방향"), self._join_lines(result.recommended_directions)),
+            ("risks", self._section_title(result, "risks", "주요 리스크"), self._join_lines(result.risks)),
+            ("recomposition_draft", self._section_title(result, "recomposition_draft", "전환 초안"), self._join_recomposition_draft(result)),
         ]
         accounting = self._accounting_extension(result)
         if accounting:
@@ -235,6 +236,25 @@ class StructuredResultPolishService:
         extensions = result.extensions if isinstance(result.extensions, dict) else {}
         accounting = extensions.get("accounting") if isinstance(extensions, dict) else None
         return accounting if isinstance(accounting, dict) else {}
+
+    def _surface_wording(self, result: StructuredRebuildResult) -> dict:
+        extensions = result.extensions if isinstance(result.extensions, dict) else {}
+        governance = extensions.get("decision_governance") if isinstance(extensions, dict) else {}
+        wording = governance.get("surface_wording") if isinstance(governance, dict) else {}
+        return wording if isinstance(wording, dict) else {}
+
+    def _uses_analysis_first_surface(self, result: StructuredRebuildResult) -> bool:
+        wording = self._surface_wording(result)
+        return str(wording.get("mode") or "").strip() == "analysis_first_operational_source"
+
+    def _section_title(self, result: StructuredRebuildResult, section_key: str, fallback: str) -> str:
+        wording = self._surface_wording(result)
+        titles = wording.get("section_titles") if isinstance(wording, dict) else {}
+        if isinstance(titles, dict):
+            title = str(titles.get(section_key) or "").strip()
+            if title:
+                return title
+        return fallback
 
     def _collect_preserved_facts(self, result: StructuredRebuildResult) -> list[str]:
         facts: list[str] = []

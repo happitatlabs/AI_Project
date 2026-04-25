@@ -9,6 +9,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 from mellow_link.modules.rebuild_assistant.schemas import (
+    AssumptionItem,
     AppliedJudgmentTemplate,
     AssetPresenceSummary,
     DesignOption,
@@ -27,6 +28,12 @@ from mellow_link.modules.rebuild_assistant.schemas import (
     VerificationItem,
 )
 from mellow_link.services.anonymization.schemas import SafeAnalysisBundle, StructureArtifact
+
+from .question_guard_schemas import (
+    GuardedUserQuestion,
+    QuestionGuardSummary,
+    SourceQuestionCandidate,
+)
 
 
 def stable_hash(*parts: object) -> str:
@@ -163,6 +170,8 @@ class PreparedRebuildInput:
     analysis_context: AnalysisContextBundle | None = None
     safe_bundle: SafeAnalysisBundle | None = None
     temp_context: str = ""
+    raw_goal: str = ""
+    raw_constraints: list[str] = field(default_factory=list)
     supporting_docs: str = ""
     legacy_bundle: str = ""
     scope_limited: bool = False
@@ -177,6 +186,12 @@ class PreparedRebuildInput:
     accounting_input: Any | None = None
     accounting_asset_name: str = ""
     accounting_input_error: str = ""
+    assumption_candidates: list[AssumptionItem] = field(default_factory=list)
+    source_question_candidates: list[SourceQuestionCandidate] = field(default_factory=list)
+    blocked_user_questions: list[GuardedUserQuestion] = field(default_factory=list)
+    review_user_questions: list[GuardedUserQuestion] = field(default_factory=list)
+    question_guard_summary: QuestionGuardSummary = field(default_factory=QuestionGuardSummary)
+    stage_control: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not (self.intent.goal or self.intent.constraints or self.intent.scenario):
@@ -189,6 +204,10 @@ class PreparedRebuildInput:
             self.goal = self.intent.goal
             self.constraints = list(self.intent.constraints)
             self.temp_context = self.intent.scenario
+        if not self.raw_goal:
+            self.raw_goal = self.goal
+        if not self.raw_constraints:
+            self.raw_constraints = list(self.constraints or [])
         if self.missing_context is None:
             self.missing_context = []
 
@@ -418,6 +437,7 @@ class DecisionArtifacts(BaseModel):
     primary_judgment_reason: str = ""
     selected_narrative_judgment: str = ""
     decision_items: list[DecisionItem] = Field(default_factory=list)
+    assumptions: list[AssumptionItem] = Field(default_factory=list)
     synthetic_signal_detected: bool = False
 
 
@@ -464,4 +484,7 @@ class StructuredRefactoringResult(BaseModel):
     diagnosis_report: DiagnosisReport = Field(default_factory=DiagnosisReport)
     decision_summary: DecisionSummary = Field(default_factory=DecisionSummary)
     improvement_plan_bundle: ImprovementPlanBundle = Field(default_factory=ImprovementPlanBundle)
+    judgment_canvas: dict[str, Any] = Field(default_factory=dict)
+    stage_control: dict[str, Any] = Field(default_factory=dict)
+    validation_result: dict[str, Any] = Field(default_factory=dict)
     appendix: dict[str, Any] = Field(default_factory=dict)

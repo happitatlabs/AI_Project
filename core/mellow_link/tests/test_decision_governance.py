@@ -32,6 +32,109 @@ def _run_decision_engine(asset_specs, goal: str, constraints: list[str] | None =
     return service, prepared, structure, diagnosis, decisions
 
 
+def _fx_fifo_boundary_asset_specs():
+    return [
+        {
+            "name": "fx_fifo_page.jsp",
+            "content": """
+<%@ page import="FxFifoRepository" %>
+<%
+FxFifoRepository repo = new FxFifoRepository();
+repo.findLots();
+if (outAmt > 0) {
+    repo.saveGl();
+}
+%>
+            """,
+        },
+        {
+            "name": "fx_fifo_repository.java",
+            "content": """
+class FxFifoRepository {
+    String findLots() {
+        return "SELECT ACCT_SEQ, RMN_FAMT FROM TN_FORINS ORDER BY TR_DATE, TR_DATE_SEQ";
+    }
+
+    void saveGl() {
+        String sql = "INSERT INTO GL_INTERFACE (REFERENCE4, REFERENCE6, USER_JE_CATEGORY_NAME, CURRENCY_CODE) VALUES (?, ?, ?, ?)";
+    }
+}
+            """,
+        },
+        {
+            "name": "TN_FORINS.sql",
+            "content": """
+CREATE TABLE TN_FORINS (
+    ACCT_SEQ VARCHAR2(50),
+    TR_DATE VARCHAR2(8),
+    TR_DATE_SEQ NUMBER,
+    RMN_FAMT NUMBER,
+    RMN_AMT NUMBER,
+    EXCH_RATE NUMBER,
+    MNEY_UNIT VARCHAR2(5)
+);
+            """,
+        },
+        {
+            "name": "P_FOROUT.prc",
+            "content": """
+CREATE OR REPLACE procedure P_FOROUT IS
+BEGIN
+    IF out_amt > 0 THEN
+        FOR clr IN (
+            SELECT ACCT_SEQ, TR_DATE, TR_DATE_SEQ, RMN_FAMT, RMN_AMT, EXCH_RATE
+            FROM TN_FORINS
+            ORDER BY TR_DATE, TR_DATE_SEQ
+        ) LOOP
+            INSERT INTO TN_FOROUD (OUTF_AMT, OUT_AMT0, GAP_AMT) VALUES (10, 1000, 50);
+        END LOOP;
+    END IF;
+END;
+            """,
+        },
+        {
+            "name": "TRG_FOROUT.sql",
+            "content": """
+CREATE OR REPLACE TRIGGER TRG_FOROUT
+BEFORE INSERT ON TN_FOROUT
+FOR EACH ROW
+BEGIN
+    IF :NEW.OUT_AMT > 0 THEN
+        INSERT INTO TN_FOROUD (OUTF_AMT, OUT_AMT0, GAP_AMT)
+        VALUES (:NEW.OUT_FAMT, :NEW.OUT_AMT, :NEW.OUT_AMT - 100);
+    END IF;
+END;
+            """,
+        },
+        {
+            "name": "P_BKCHNO.prc",
+            "content": """
+CREATE OR REPLACE procedure P_BKCHNO IS
+BEGIN
+    IF out_amt > 0 THEN
+        INSERT INTO TN_BKCHIT (OCCR_PART, MNEY_UNIT) VALUES ('exchange p/l', 'USD');
+        INSERT INTO GL_INTERFACE (REFERENCE4, REFERENCE6, USER_JE_CATEGORY_NAME, CURRENCY_CODE)
+        VALUES ('CHK-20260418', '1', 'deposit', 'USD');
+    END IF;
+END;
+            """,
+        },
+        {
+            "name": "GL_INTERFACE.sql",
+            "content": """
+CREATE TABLE GL_INTERFACE (
+    REFERENCE4 VARCHAR2(50),
+    REFERENCE6 VARCHAR2(50),
+    USER_JE_CATEGORY_NAME VARCHAR2(25),
+    CURRENCY_CODE VARCHAR2(5),
+    ENTERED_DR NUMBER,
+    ENTERED_CR NUMBER
+);
+            """,
+        },
+    ]
+
+
 def test_goal_only_migration_signal_is_blocked_and_downgrades_to_observation_only():
     case = load_expansion_sample_case("01_crud_simple")
     _, _, _, diagnosis, decisions = _run_decision_engine(
@@ -168,7 +271,7 @@ def test_goal_wording_alone_does_not_upgrade_issue_bearing_sample_to_migration()
 
 
 def test_result_packager_exposes_governance_metadata_and_rechecks_rogue_migration():
-    case = load_expansion_sample_case("01_crud_simple")
+    case = load_expansion_sample_case("04_db_heavy_query_filter")
     service = RebuildAssistantService()
     prepared = service.prepare_safe_bundle_input(
         goal="reports CRUD 구조를 점검하고 전환 초안을 작성하라.",
@@ -220,7 +323,34 @@ def test_result_packager_exposes_governance_metadata_and_rechecks_rogue_migratio
 
     result = ResultPackager().package(prepared, structure, diagnosis, decisions, improvement, service)
 
-    assert result.structural_judgment == "observation_only"
-    assert result.decision_summary["decisions"] == []
+    assert result.structural_judgment == "refactor"
+    assert result.decision_summary["decisions"]
+    assert all(item["decision_type"] == "refactor" for item in result.decision_summary["decisions"])
     assert result.extensions["decision_governance"]["synthetic_signal_detected"] is True
     assert result.extensions["decision_governance"]["packager_guard_applied"] is True
+
+
+def test_operational_sql_bundle_keeps_operational_analysis_when_boundary_mismatch_exists():
+    service, prepared, structure, diagnosis, decisions = _run_decision_engine(
+        _fx_fifo_boundary_asset_specs(),
+        goal="외화 입출금 FIFO 처리 흐름을 검토해줘",
+    )
+    improvement = ImprovementPlanner().run(prepared, structure, diagnosis, decisions, service)
+    result = ResultPackager().package(prepared, structure, diagnosis, decisions, improvement, service)
+
+    assert any(item.detector_id == "boundary_mismatch" for item in diagnosis.diagnosis_report.issues)
+    assert decisions.decision_summary.decisions
+    assert decisions.decision_summary.decisions[0].decision_type == "refactor"
+    assert "운영 소스 분석 우선 게이트" in decisions.decision_summary.decisions[0].explainability.decision_rule
+    assert decisions.decision_summary.recommended_strategy == "리팩터링 우선"
+    assert decisions.family_classification.family == "operational_source"
+    assert "redesign_review" in decisions.family_classification.secondary_signals
+    assert decisions.structural_judgment == "refactor"
+    assert result.one_line_conclusion.startswith("본 자산은")
+    assert "분리 구조" not in result.one_line_conclusion
+    assert result.executive_summary_v2[0].startswith("현행 분석:")
+    assert "현행 분석 우선" == result.extensions["decision_governance"]["document_outline"]["recommended_strategy"]
+    assert result.family_classification.family == "operational_source"
+    assert len(result.execution_plan) == 3
+    assert all("주차" not in item.week_label for item in result.execution_plan)
+    assert all("로드맵" not in item.goal for item in result.execution_plan)

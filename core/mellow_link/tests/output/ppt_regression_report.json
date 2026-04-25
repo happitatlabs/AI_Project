@@ -1,0 +1,2212 @@
+{
+  "generated_at": "2026-04-26T00:16:20.819577",
+  "sample_root": "C:\\Users\\Hyein\\ClaudeAI\\AI_Project\\core\\mellow_link\\modules\\rebuild_assistant\\samples\\08_consulting_output_reference\\assets",
+  "report_count": 30,
+  "reports": [
+    {
+      "file": "1부산우유컨설팅개요.ppt",
+      "relative_path": "0_원가계산컨설팅자료_260418/1부산우유컨설팅개요.ppt",
+      "status": "ok",
+      "issues": [],
+      "warnings": [],
+      "diagnostics": {
+        "sml_text_length": 5273,
+        "expected_domain_profile": "oo_milk_costing",
+        "expected_keywords": [
+          "원가",
+          "배부",
+          "재료비",
+          "노무비",
+          "제조경비",
+          "손익"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 0,
+        "low_conf_warning_count": 68,
+        "low_conf_ratio": 0.2012,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 5598,
+        "source_question_candidate_count": 3,
+        "question_guard_summary": {
+          "safe_question_count": 3,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 3,
+          "source_question_candidate_count": 3,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 5598,
+          "sml_text_length": 5598,
+          "no_candidate_reasons": [],
+          "selected_questions": [
+            "현행 원가체계의 한계는 무엇인가?",
+            "문서가 제안하는 원가계산 개선 방향은 무엇인가?",
+            "비교 가능한 선택지는 무엇인가?"
+          ],
+          "selected_question_types": [
+            "problem_definition",
+            "strategy",
+            "option_comparison"
+          ],
+          "source_domain_terms": [
+            "원가",
+            "원가분석",
+            "원가계산",
+            "배부"
+          ],
+          "preferred_question_axis": "processing_flow",
+          "applied_question_source": "source_candidates"
+        },
+        "result_domain_terms": [
+          "원가",
+          "배부"
+        ]
+      }
+    },
+    {
+      "file": "2부산우유컨설팅전개.ppt",
+      "relative_path": "0_원가계산컨설팅자료_260418/2부산우유컨설팅전개.ppt",
+      "status": "ok",
+      "issues": [],
+      "warnings": [],
+      "diagnostics": {
+        "sml_text_length": 20590,
+        "expected_domain_profile": "oo_milk_costing",
+        "expected_keywords": [
+          "원가",
+          "배부",
+          "재료비",
+          "노무비",
+          "제조경비",
+          "손익"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 0,
+        "low_conf_warning_count": 310,
+        "low_conf_ratio": 0.2831,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 21074,
+        "source_question_candidate_count": 5,
+        "question_guard_summary": {
+          "safe_question_count": 4,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 5,
+          "source_question_candidate_count": 5,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 21074,
+          "sml_text_length": 21074,
+          "no_candidate_reasons": [],
+          "selected_questions": [
+            "현행 원가체계의 한계는 무엇인가?",
+            "문서가 제안하는 원가계산 개선 방향은 무엇인가?",
+            "재료비, 노무비, 제조경비 배부 기준은 어떻게 달라지는가?",
+            "비교 가능한 선택지는 무엇인가?"
+          ],
+          "selected_question_types": [
+            "problem_definition",
+            "strategy",
+            "decision_criteria",
+            "option_comparison"
+          ],
+          "source_domain_terms": [
+            "원가",
+            "원가계산",
+            "재료비",
+            "노무비",
+            "제조경비",
+            "배부",
+            "배부기준"
+          ],
+          "preferred_question_axis": "processing_flow",
+          "applied_question_source": "source_candidates"
+        },
+        "result_domain_terms": [
+          "원가",
+          "배부",
+          "재료비",
+          "노무비",
+          "제조경비"
+        ]
+      }
+    },
+    {
+      "file": "3부산우유컨설팅구현.ppt",
+      "relative_path": "0_원가계산컨설팅자료_260418/3부산우유컨설팅구현.ppt",
+      "status": "ok",
+      "issues": [],
+      "warnings": [],
+      "diagnostics": {
+        "sml_text_length": 92875,
+        "expected_domain_profile": "oo_milk_costing",
+        "expected_keywords": [
+          "원가",
+          "배부",
+          "재료비",
+          "노무비",
+          "제조경비",
+          "손익"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 0,
+        "low_conf_warning_count": 692,
+        "low_conf_ratio": 0.1938,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 92868,
+        "source_question_candidate_count": 6,
+        "question_guard_summary": {
+          "safe_question_count": 4,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 6,
+          "source_question_candidate_count": 6,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 92868,
+          "sml_text_length": 92868,
+          "no_candidate_reasons": [],
+          "selected_questions": [
+            "현행 원가체계의 한계는 무엇인가?",
+            "문서가 제안하는 원가계산 개선 방향은 무엇인가?",
+            "재료비, 노무비, 제조경비 배부 기준은 어떻게 달라지는가?",
+            "원가계산 결과를 손익분석까지 확장할 근거가 있는가?"
+          ],
+          "selected_question_types": [
+            "problem_definition",
+            "strategy",
+            "decision_criteria",
+            "scope"
+          ],
+          "source_domain_terms": [
+            "원가",
+            "원가분석",
+            "원가계산",
+            "재료비",
+            "노무비",
+            "제조경비",
+            "배부",
+            "배부기준"
+          ],
+          "preferred_question_axis": "processing_flow",
+          "applied_question_source": "source_candidates"
+        },
+        "result_domain_terms": [
+          "원가",
+          "배부",
+          "재료비",
+          "노무비",
+          "제조경비",
+          "손익"
+        ]
+      }
+    },
+    {
+      "file": "4부산우유컨설팅설계.ppt",
+      "relative_path": "0_원가계산컨설팅자료_260418/4부산우유컨설팅설계.ppt",
+      "status": "ok",
+      "issues": [],
+      "warnings": [],
+      "diagnostics": {
+        "sml_text_length": 33165,
+        "expected_domain_profile": "oo_milk_costing",
+        "expected_keywords": [
+          "원가",
+          "배부",
+          "재료비",
+          "노무비",
+          "제조경비",
+          "손익"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 0,
+        "low_conf_warning_count": 387,
+        "low_conf_ratio": 0.1847,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 33906,
+        "source_question_candidate_count": 5,
+        "question_guard_summary": {
+          "safe_question_count": 4,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 5,
+          "source_question_candidate_count": 5,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 33906,
+          "sml_text_length": 33906,
+          "no_candidate_reasons": [],
+          "selected_questions": [
+            "현행 원가체계의 한계는 무엇인가?",
+            "문서가 제안하는 원가계산 개선 방향은 무엇인가?",
+            "재료비, 노무비, 제조경비 배부 기준은 어떻게 달라지는가?",
+            "비교 가능한 선택지는 무엇인가?"
+          ],
+          "selected_question_types": [
+            "problem_definition",
+            "strategy",
+            "decision_criteria",
+            "option_comparison"
+          ],
+          "source_domain_terms": [
+            "원가",
+            "원가계산",
+            "재료비",
+            "노무비",
+            "제조경비",
+            "배부",
+            "배부기준"
+          ],
+          "preferred_question_axis": "processing_flow",
+          "applied_question_source": "source_candidates"
+        },
+        "result_domain_terms": [
+          "원가",
+          "배부",
+          "재료비",
+          "노무비",
+          "제조경비"
+        ]
+      }
+    },
+    {
+      "file": "5부산우유컨설팅비전.ppt",
+      "relative_path": "0_원가계산컨설팅자료_260418/5부산우유컨설팅비전.ppt",
+      "status": "warn",
+      "issues": [],
+      "warnings": [
+        "low_conf_ratio_high"
+      ],
+      "diagnostics": {
+        "sml_text_length": 8670,
+        "expected_domain_profile": "oo_milk_costing",
+        "expected_keywords": [
+          "원가",
+          "배부",
+          "재료비",
+          "노무비",
+          "제조경비",
+          "손익"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 0,
+        "low_conf_warning_count": 171,
+        "low_conf_ratio": 0.3155,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 8889,
+        "source_question_candidate_count": 5,
+        "question_guard_summary": {
+          "safe_question_count": 4,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 5,
+          "source_question_candidate_count": 5,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 8889,
+          "sml_text_length": 8889,
+          "no_candidate_reasons": [],
+          "selected_questions": [
+            "현행 원가체계의 한계는 무엇인가?",
+            "문서가 제안하는 원가계산 개선 방향은 무엇인가?",
+            "재료비, 노무비, 제조경비 배부 기준은 어떻게 달라지는가?",
+            "원가계산 결과를 손익분석까지 확장할 근거가 있는가?"
+          ],
+          "selected_question_types": [
+            "problem_definition",
+            "strategy",
+            "decision_criteria",
+            "scope"
+          ],
+          "source_domain_terms": [
+            "원가",
+            "원가분석",
+            "원가계산",
+            "재료비",
+            "노무비",
+            "제조경비",
+            "배부",
+            "배부기준"
+          ],
+          "preferred_question_axis": "processing_flow",
+          "applied_question_source": "source_candidates"
+        },
+        "result_domain_terms": [
+          "원가",
+          "배부",
+          "재료비",
+          "노무비",
+          "제조경비",
+          "손익"
+        ]
+      }
+    },
+    {
+      "file": "0업무구성도.ppt",
+      "relative_path": "0_컨설팅자료2_260423/0업무구성도.ppt",
+      "status": "ok",
+      "issues": [],
+      "warnings": [],
+      "diagnostics": {
+        "sml_text_length": 7004,
+        "expected_domain_profile": "generic_consulting",
+        "expected_keywords": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "요구사항",
+          "방향"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 1,
+        "low_conf_warning_count": 100,
+        "low_conf_ratio": 0.2273,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 7578,
+        "source_question_candidate_count": 5,
+        "question_guard_summary": {
+          "safe_question_count": 4,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 5,
+          "source_question_candidate_count": 5,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 7578,
+          "sml_text_length": 7578,
+          "no_candidate_reasons": [
+            "no_domain_terms_detected"
+          ],
+          "selected_questions": [
+            "판단 기준은 무엇인가?",
+            "이 문서는 어떤 문제를 해결하려는가?",
+            "현행 구조의 한계는 무엇인가?",
+            "문서에서 제시하는 개선 방향은 무엇인가?"
+          ],
+          "selected_question_types": [
+            "decision_criteria",
+            "problem_definition",
+            "strategy"
+          ],
+          "source_domain_terms": [],
+          "preferred_question_axis": "processing_flow",
+          "applied_question_source": "generic_fallback"
+        },
+        "result_domain_terms": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "요구사항",
+          "방향"
+        ]
+      }
+    },
+    {
+      "file": "1납품관리설계.ppt",
+      "relative_path": "0_컨설팅자료2_260423/1납품관리설계.ppt",
+      "status": "ok",
+      "issues": [],
+      "warnings": [],
+      "diagnostics": {
+        "sml_text_length": 5594,
+        "expected_domain_profile": "generic_consulting",
+        "expected_keywords": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "요구사항",
+          "방향"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 0,
+        "low_conf_warning_count": 82,
+        "low_conf_ratio": 0.277,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 5694,
+        "source_question_candidate_count": 5,
+        "question_guard_summary": {
+          "safe_question_count": 4,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 5,
+          "source_question_candidate_count": 5,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 5694,
+          "sml_text_length": 5694,
+          "no_candidate_reasons": [
+            "no_domain_terms_detected"
+          ],
+          "selected_questions": [
+            "현행 구조의 한계는 무엇인가?",
+            "판단 기준은 무엇인가?",
+            "이 문서는 어떤 문제를 해결하려는가?",
+            "문서에서 제시하는 개선 방향은 무엇인가?"
+          ],
+          "selected_question_types": [
+            "problem_definition",
+            "decision_criteria",
+            "strategy"
+          ],
+          "source_domain_terms": [],
+          "preferred_question_axis": "processing_flow",
+          "applied_question_source": "generic_fallback"
+        },
+        "result_domain_terms": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "방향"
+        ]
+      }
+    },
+    {
+      "file": "2초도산품관리.ppt",
+      "relative_path": "0_컨설팅자료2_260423/2초도산품관리.ppt",
+      "status": "ok",
+      "issues": [],
+      "warnings": [],
+      "diagnostics": {
+        "sml_text_length": 6321,
+        "expected_domain_profile": "generic_consulting",
+        "expected_keywords": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "요구사항",
+          "방향"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 2,
+        "low_conf_warning_count": 87,
+        "low_conf_ratio": 0.2479,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 6421,
+        "source_question_candidate_count": 6,
+        "question_guard_summary": {
+          "safe_question_count": 4,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 6,
+          "source_question_candidate_count": 6,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 6421,
+          "sml_text_length": 6421,
+          "no_candidate_reasons": [
+            "no_domain_terms_detected"
+          ],
+          "selected_questions": [
+            "현행 구조의 한계는 무엇인가?",
+            "판단 기준은 무엇인가?",
+            "이 문서는 어떤 문제를 해결하려는가?",
+            "문서에서 제시하는 개선 방향은 무엇인가?"
+          ],
+          "selected_question_types": [
+            "problem_definition",
+            "decision_criteria",
+            "strategy"
+          ],
+          "source_domain_terms": [],
+          "preferred_question_axis": "processing_flow",
+          "applied_question_source": "generic_fallback"
+        },
+        "result_domain_terms": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "방향"
+        ]
+      }
+    },
+    {
+      "file": "3조립일정설계.ppt",
+      "relative_path": "0_컨설팅자료2_260423/3조립일정설계.ppt",
+      "status": "ok",
+      "issues": [],
+      "warnings": [],
+      "diagnostics": {
+        "sml_text_length": 12070,
+        "expected_domain_profile": "generic_consulting",
+        "expected_keywords": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "요구사항",
+          "방향"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 0,
+        "low_conf_warning_count": 181,
+        "low_conf_ratio": 0.2798,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 12381,
+        "source_question_candidate_count": 6,
+        "question_guard_summary": {
+          "safe_question_count": 4,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 6,
+          "source_question_candidate_count": 6,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 12381,
+          "sml_text_length": 12381,
+          "no_candidate_reasons": [
+            "no_domain_terms_detected"
+          ],
+          "selected_questions": [
+            "문서가 제안하는 개선 방향은 무엇인가?",
+            "판단 기준은 무엇인가?",
+            "이 문서는 어떤 문제를 해결하려는가?",
+            "현행 구조의 한계는 무엇인가?"
+          ],
+          "selected_question_types": [
+            "strategy",
+            "decision_criteria",
+            "problem_definition"
+          ],
+          "source_domain_terms": [],
+          "preferred_question_axis": "processing_flow",
+          "applied_question_source": "generic_fallback"
+        },
+        "result_domain_terms": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "방향"
+        ]
+      }
+    },
+    {
+      "file": "4부품일정설계.ppt",
+      "relative_path": "0_컨설팅자료2_260423/4부품일정설계.ppt",
+      "status": "ok",
+      "issues": [],
+      "warnings": [],
+      "diagnostics": {
+        "sml_text_length": 14184,
+        "expected_domain_profile": "generic_consulting",
+        "expected_keywords": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "요구사항",
+          "방향"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 0,
+        "low_conf_warning_count": 192,
+        "low_conf_ratio": 0.25,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 14999,
+        "source_question_candidate_count": 8,
+        "question_guard_summary": {
+          "safe_question_count": 4,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 8,
+          "source_question_candidate_count": 8,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 14999,
+          "sml_text_length": 14999,
+          "no_candidate_reasons": [
+            "no_domain_terms_detected"
+          ],
+          "selected_questions": [
+            "문서가 제안하는 개선 방향은 무엇인가?",
+            "비교 가능한 선택지는 무엇인가?",
+            "판단 기준은 무엇인가?",
+            "이 문서는 어떤 문제를 해결하려는가?"
+          ],
+          "selected_question_types": [
+            "strategy",
+            "option_comparison",
+            "decision_criteria",
+            "problem_definition"
+          ],
+          "source_domain_terms": [],
+          "preferred_question_axis": "processing_flow",
+          "applied_question_source": "generic_fallback"
+        },
+        "result_domain_terms": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "방향"
+        ]
+      }
+    },
+    {
+      "file": "5부품재고관리.ppt",
+      "relative_path": "0_컨설팅자료2_260423/5부품재고관리.ppt",
+      "status": "ok",
+      "issues": [],
+      "warnings": [],
+      "diagnostics": {
+        "sml_text_length": 8030,
+        "expected_domain_profile": "generic_consulting",
+        "expected_keywords": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "요구사항",
+          "방향"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 1,
+        "low_conf_warning_count": 113,
+        "low_conf_ratio": 0.2562,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 8198,
+        "source_question_candidate_count": 7,
+        "question_guard_summary": {
+          "safe_question_count": 4,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 7,
+          "source_question_candidate_count": 7,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 8198,
+          "sml_text_length": 8198,
+          "no_candidate_reasons": [
+            "no_domain_terms_detected"
+          ],
+          "selected_questions": [
+            "문서가 제안하는 개선 방향은 무엇인가?",
+            "판단 기준은 무엇인가?",
+            "이 문서는 어떤 문제를 해결하려는가?",
+            "현행 구조의 한계는 무엇인가?"
+          ],
+          "selected_question_types": [
+            "strategy",
+            "decision_criteria",
+            "problem_definition"
+          ],
+          "source_domain_terms": [],
+          "preferred_question_axis": "processing_flow",
+          "applied_question_source": "generic_fallback"
+        },
+        "result_domain_terms": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "방향"
+        ]
+      }
+    },
+    {
+      "file": "6부하능력관리.ppt",
+      "relative_path": "0_컨설팅자료2_260423/6부하능력관리.ppt",
+      "status": "ok",
+      "issues": [],
+      "warnings": [],
+      "diagnostics": {
+        "sml_text_length": 11626,
+        "expected_domain_profile": "generic_consulting",
+        "expected_keywords": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "요구사항",
+          "방향"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 0,
+        "low_conf_warning_count": 176,
+        "low_conf_ratio": 0.2978,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 11973,
+        "source_question_candidate_count": 7,
+        "question_guard_summary": {
+          "safe_question_count": 4,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 7,
+          "source_question_candidate_count": 7,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 11973,
+          "sml_text_length": 11973,
+          "no_candidate_reasons": [
+            "no_domain_terms_detected"
+          ],
+          "selected_questions": [
+            "현행 구조의 한계는 무엇인가?",
+            "비교 가능한 선택지는 무엇인가?",
+            "판단 기준은 무엇인가?",
+            "이 문서는 어떤 문제를 해결하려는가?"
+          ],
+          "selected_question_types": [
+            "problem_definition",
+            "option_comparison",
+            "decision_criteria"
+          ],
+          "source_domain_terms": [],
+          "preferred_question_axis": "processing_flow",
+          "applied_question_source": "generic_fallback"
+        },
+        "result_domain_terms": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "방향"
+        ]
+      }
+    },
+    {
+      "file": "7치공구설계.ppt",
+      "relative_path": "0_컨설팅자료2_260423/7치공구설계.ppt",
+      "status": "ok",
+      "issues": [],
+      "warnings": [],
+      "diagnostics": {
+        "sml_text_length": 15081,
+        "expected_domain_profile": "generic_consulting",
+        "expected_keywords": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "요구사항",
+          "방향"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 0,
+        "low_conf_warning_count": 199,
+        "low_conf_ratio": 0.2403,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 15843,
+        "source_question_candidate_count": 7,
+        "question_guard_summary": {
+          "safe_question_count": 4,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 7,
+          "source_question_candidate_count": 7,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 15843,
+          "sml_text_length": 15843,
+          "no_candidate_reasons": [
+            "no_domain_terms_detected"
+          ],
+          "selected_questions": [
+            "문서가 제안하는 개선 방향은 무엇인가?",
+            "비교 가능한 선택지는 무엇인가?",
+            "판단 기준은 무엇인가?",
+            "이 문서는 어떤 문제를 해결하려는가?"
+          ],
+          "selected_question_types": [
+            "strategy",
+            "option_comparison",
+            "decision_criteria",
+            "problem_definition"
+          ],
+          "source_domain_terms": [],
+          "preferred_question_axis": "processing_flow",
+          "applied_question_source": "generic_fallback"
+        },
+        "result_domain_terms": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "요구사항",
+          "방향"
+        ]
+      }
+    },
+    {
+      "file": "8WO발행관리.ppt",
+      "relative_path": "0_컨설팅자료2_260423/8WO발행관리.ppt",
+      "status": "warn",
+      "issues": [],
+      "warnings": [
+        "low_conf_ratio_high"
+      ],
+      "diagnostics": {
+        "sml_text_length": 7799,
+        "expected_domain_profile": "generic_consulting",
+        "expected_keywords": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "요구사항",
+          "방향"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 0,
+        "low_conf_warning_count": 116,
+        "low_conf_ratio": 0.3135,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 8525,
+        "source_question_candidate_count": 8,
+        "question_guard_summary": {
+          "safe_question_count": 4,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 8,
+          "source_question_candidate_count": 8,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 8525,
+          "sml_text_length": 8525,
+          "no_candidate_reasons": [
+            "no_domain_terms_detected"
+          ],
+          "selected_questions": [
+            "문서가 제안하는 개선 방향은 무엇인가?",
+            "비교 가능한 선택지는 무엇인가?",
+            "판단 기준은 무엇인가?",
+            "이 문서는 어떤 문제를 해결하려는가?"
+          ],
+          "selected_question_types": [
+            "strategy",
+            "option_comparison",
+            "decision_criteria",
+            "problem_definition"
+          ],
+          "source_domain_terms": [],
+          "preferred_question_axis": "processing_flow",
+          "applied_question_source": "generic_fallback"
+        },
+        "result_domain_terms": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "요구사항",
+          "방향"
+        ]
+      }
+    },
+    {
+      "file": "9작업보고설계.ppt",
+      "relative_path": "0_컨설팅자료2_260423/9작업보고설계.ppt",
+      "status": "ok",
+      "issues": [],
+      "warnings": [],
+      "diagnostics": {
+        "sml_text_length": 14317,
+        "expected_domain_profile": "generic_consulting",
+        "expected_keywords": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "요구사항",
+          "방향"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 0,
+        "low_conf_warning_count": 157,
+        "low_conf_ratio": 0.2063,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 15439,
+        "source_question_candidate_count": 3,
+        "question_guard_summary": {
+          "safe_question_count": 3,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 3,
+          "source_question_candidate_count": 3,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 15439,
+          "sml_text_length": 15439,
+          "no_candidate_reasons": [],
+          "selected_questions": [
+            "현행 구조의 한계는 무엇인가?",
+            "비교 가능한 선택지는 무엇인가?",
+            "판단 기준은 무엇인가?"
+          ],
+          "selected_question_types": [
+            "problem_definition",
+            "option_comparison",
+            "decision_criteria"
+          ],
+          "source_domain_terms": [
+            "원가"
+          ],
+          "preferred_question_axis": "processing_flow",
+          "applied_question_source": "source_candidates"
+        },
+        "result_domain_terms": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "방향"
+        ]
+      }
+    },
+    {
+      "file": "차세대경영정보_BPRISMP_0.표지및목차_최종_1221.pptx",
+      "relative_path": "0_컨설팅자료2_260423/차세대경영정보_BPRISMP_0.표지및목차_최종_1221.pptx",
+      "status": "ok",
+      "issues": [],
+      "warnings": [],
+      "diagnostics": {
+        "sml_text_length": 3767,
+        "expected_domain_profile": "bpr_ismp",
+        "expected_keywords": [
+          "업무프로세스",
+          "통합재무",
+          "인적자원",
+          "기금",
+          "이행계획",
+          "변화관리",
+          "요구사항"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 0,
+        "low_conf_warning_count": 1,
+        "low_conf_ratio": 0.0073,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 4062,
+        "source_question_candidate_count": 6,
+        "question_guard_summary": {
+          "safe_question_count": 4,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 6,
+          "source_question_candidate_count": 6,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 4062,
+          "sml_text_length": 4062,
+          "no_candidate_reasons": [
+            "no_domain_terms_detected"
+          ],
+          "selected_questions": [
+            "문서가 제안하는 개선 방향은 무엇인가?",
+            "판단 기준은 무엇인가?",
+            "이 문서는 어떤 문제를 해결하려는가?",
+            "현행 구조의 한계는 무엇인가?"
+          ],
+          "selected_question_types": [
+            "strategy",
+            "decision_criteria",
+            "problem_definition"
+          ],
+          "source_domain_terms": [],
+          "preferred_question_axis": "processing_flow",
+          "applied_question_source": "generic_fallback"
+        },
+        "result_domain_terms": [
+          "업무프로세스",
+          "통합재무",
+          "인적자원",
+          "기금",
+          "이행계획",
+          "변화관리",
+          "요구사항"
+        ]
+      }
+    },
+    {
+      "file": "차세대경영정보_BPRISMP_I. 사업의 개요_최종_1221.pptx",
+      "relative_path": "0_컨설팅자료2_260423/차세대경영정보_BPRISMP_I. 사업의 개요_최종_1221.pptx",
+      "status": "warn",
+      "issues": [],
+      "warnings": [
+        "low_conf_ratio_high"
+      ],
+      "diagnostics": {
+        "sml_text_length": 5067,
+        "expected_domain_profile": "bpr_ismp",
+        "expected_keywords": [
+          "업무프로세스",
+          "통합재무",
+          "인적자원",
+          "기금",
+          "이행계획",
+          "변화관리",
+          "요구사항"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 1,
+        "low_conf_warning_count": 94,
+        "low_conf_ratio": 0.3456,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 5964,
+        "source_question_candidate_count": 4,
+        "question_guard_summary": {
+          "safe_question_count": 3,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 4,
+          "source_question_candidate_count": 4,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 5964,
+          "sml_text_length": 5964,
+          "no_candidate_reasons": [
+            "no_domain_terms_detected"
+          ],
+          "selected_questions": [
+            "현행 구조의 한계는 무엇인가?",
+            "이 문서는 어떤 문제를 해결하려는가?",
+            "문서에서 제시하는 개선 방향은 무엇인가?"
+          ],
+          "selected_question_types": [
+            "problem_definition",
+            "strategy"
+          ],
+          "source_domain_terms": [],
+          "preferred_question_axis": "processing_flow",
+          "applied_question_source": "generic_fallback"
+        },
+        "result_domain_terms": [
+          "업무프로세스",
+          "통합재무",
+          "인적자원",
+          "기금",
+          "이행계획",
+          "변화관리",
+          "요구사항"
+        ]
+      }
+    },
+    {
+      "file": "차세대경영정보_BPRISMP_Ⅳ. 목표모델_03. 업무프로세스 개선_최종_1221.pptx",
+      "relative_path": "0_컨설팅자료2_260423/차세대경영정보_BPRISMP_Ⅳ. 목표모델_03. 업무프로세스 개선_최종_1221.pptx",
+      "status": "ok",
+      "issues": [],
+      "warnings": [],
+      "diagnostics": {
+        "sml_text_length": 200475,
+        "expected_domain_profile": "bpr_ismp",
+        "expected_keywords": [
+          "업무프로세스",
+          "통합재무",
+          "인적자원",
+          "기금",
+          "이행계획",
+          "변화관리",
+          "요구사항"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 0,
+        "low_conf_warning_count": 2466,
+        "low_conf_ratio": 0.1964,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 211995,
+        "source_question_candidate_count": 6,
+        "question_guard_summary": {
+          "safe_question_count": 4,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 6,
+          "source_question_candidate_count": 6,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 211995,
+          "sml_text_length": 211995,
+          "no_candidate_reasons": [],
+          "selected_questions": [
+            "현행 원가체계의 한계는 무엇인가?",
+            "문서가 제안하는 원가계산 개선 방향은 무엇인가?",
+            "원가계산 결과를 손익분석까지 확장할 근거가 있는가?",
+            "비교 가능한 선택지는 무엇인가?"
+          ],
+          "selected_question_types": [
+            "problem_definition",
+            "strategy",
+            "scope",
+            "option_comparison"
+          ],
+          "source_domain_terms": [
+            "원가",
+            "배부",
+            "배부기준",
+            "손익"
+          ],
+          "preferred_question_axis": "calculation_rule",
+          "applied_question_source": "source_candidates"
+        },
+        "result_domain_terms": [
+          "업무프로세스",
+          "통합재무",
+          "인적자원",
+          "기금",
+          "요구사항"
+        ]
+      }
+    },
+    {
+      "file": "차세대경영정보_BPRISMP_Ⅴ. 이행계획_최종_1221.pptx",
+      "relative_path": "0_컨설팅자료2_260423/차세대경영정보_BPRISMP_Ⅴ. 이행계획_최종_1221.pptx",
+      "status": "ok",
+      "issues": [],
+      "warnings": [],
+      "diagnostics": {
+        "sml_text_length": 226657,
+        "expected_domain_profile": "bpr_ismp",
+        "expected_keywords": [
+          "업무프로세스",
+          "통합재무",
+          "인적자원",
+          "기금",
+          "이행계획",
+          "변화관리",
+          "요구사항"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 0,
+        "low_conf_warning_count": 655,
+        "low_conf_ratio": 0.1482,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 226269,
+        "source_question_candidate_count": 6,
+        "question_guard_summary": {
+          "safe_question_count": 4,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 6,
+          "source_question_candidate_count": 6,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 226269,
+          "sml_text_length": 226269,
+          "no_candidate_reasons": [],
+          "selected_questions": [
+            "현행 원가체계의 한계는 무엇인가?",
+            "문서가 제안하는 원가계산 개선 방향은 무엇인가?",
+            "원가계산 결과를 손익분석까지 확장할 근거가 있는가?",
+            "비교 가능한 선택지는 무엇인가?"
+          ],
+          "selected_question_types": [
+            "problem_definition",
+            "strategy",
+            "scope",
+            "option_comparison"
+          ],
+          "source_domain_terms": [
+            "원가",
+            "원가계산",
+            "배부",
+            "배부기준",
+            "손익"
+          ],
+          "preferred_question_axis": "calculation_rule",
+          "applied_question_source": "source_candidates"
+        },
+        "result_domain_terms": [
+          "업무프로세스",
+          "통합재무",
+          "인적자원",
+          "기금",
+          "이행계획",
+          "변화관리",
+          "요구사항"
+        ]
+      }
+    },
+    {
+      "file": "1원가계산컨설팅개요.ppt",
+      "relative_path": "0_컨설팅자료_260423/1원가계산컨설팅개요.ppt",
+      "status": "ok",
+      "issues": [],
+      "warnings": [],
+      "diagnostics": {
+        "sml_text_length": 5264,
+        "expected_domain_profile": "oo_milk_costing",
+        "expected_keywords": [
+          "원가",
+          "배부",
+          "재료비",
+          "노무비",
+          "제조경비",
+          "손익"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 0,
+        "low_conf_warning_count": 68,
+        "low_conf_ratio": 0.2018,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 5590,
+        "source_question_candidate_count": 3,
+        "question_guard_summary": {
+          "safe_question_count": 3,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 3,
+          "source_question_candidate_count": 3,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 5590,
+          "sml_text_length": 5590,
+          "no_candidate_reasons": [],
+          "selected_questions": [
+            "현행 원가체계의 한계는 무엇인가?",
+            "문서가 제안하는 원가계산 개선 방향은 무엇인가?",
+            "비교 가능한 선택지는 무엇인가?"
+          ],
+          "selected_question_types": [
+            "problem_definition",
+            "strategy",
+            "option_comparison"
+          ],
+          "source_domain_terms": [
+            "원가",
+            "원가분석",
+            "원가계산",
+            "배부"
+          ],
+          "preferred_question_axis": "processing_flow",
+          "applied_question_source": "source_candidates"
+        },
+        "result_domain_terms": [
+          "원가",
+          "배부"
+        ]
+      }
+    },
+    {
+      "file": "2원가계산컨설팅전개.ppt",
+      "relative_path": "0_컨설팅자료_260423/2원가계산컨설팅전개.ppt",
+      "status": "ok",
+      "issues": [],
+      "warnings": [],
+      "diagnostics": {
+        "sml_text_length": 23332,
+        "expected_domain_profile": "oo_milk_costing",
+        "expected_keywords": [
+          "원가",
+          "배부",
+          "재료비",
+          "노무비",
+          "제조경비",
+          "손익"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 0,
+        "low_conf_warning_count": 340,
+        "low_conf_ratio": 0.2376,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 23836,
+        "source_question_candidate_count": 5,
+        "question_guard_summary": {
+          "safe_question_count": 4,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 5,
+          "source_question_candidate_count": 5,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 23836,
+          "sml_text_length": 23836,
+          "no_candidate_reasons": [],
+          "selected_questions": [
+            "현행 원가체계의 한계는 무엇인가?",
+            "문서가 제안하는 원가계산 개선 방향은 무엇인가?",
+            "재료비, 노무비, 제조경비 배부 기준은 어떻게 달라지는가?",
+            "비교 가능한 선택지는 무엇인가?"
+          ],
+          "selected_question_types": [
+            "problem_definition",
+            "strategy",
+            "decision_criteria",
+            "option_comparison"
+          ],
+          "source_domain_terms": [
+            "원가",
+            "원가계산",
+            "재료비",
+            "노무비",
+            "제조경비",
+            "배부",
+            "배부기준"
+          ],
+          "preferred_question_axis": "processing_flow",
+          "applied_question_source": "source_candidates"
+        },
+        "result_domain_terms": [
+          "원가",
+          "배부",
+          "재료비",
+          "노무비",
+          "제조경비"
+        ]
+      }
+    },
+    {
+      "file": "상수도제안.ppt",
+      "relative_path": "0_컨설팅자료_260423/상수도제안.ppt",
+      "status": "ok",
+      "issues": [],
+      "warnings": [],
+      "diagnostics": {
+        "sml_text_length": 7449,
+        "expected_domain_profile": "waterworks_proposal",
+        "expected_keywords": [
+          "수용가",
+          "민원",
+          "요금",
+          "자재",
+          "자산",
+          "예산",
+          "회계"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 0,
+        "low_conf_warning_count": 114,
+        "low_conf_ratio": 0.2043,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 8102,
+        "source_question_candidate_count": 3,
+        "question_guard_summary": {
+          "safe_question_count": 3,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 3,
+          "source_question_candidate_count": 3,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 8102,
+          "sml_text_length": 8102,
+          "no_candidate_reasons": [],
+          "selected_questions": [
+            "현행 원가체계의 한계는 무엇인가?",
+            "문서가 제안하는 원가계산 개선 방향은 무엇인가?",
+            "판단 기준은 무엇인가?"
+          ],
+          "selected_question_types": [
+            "problem_definition",
+            "strategy",
+            "decision_criteria"
+          ],
+          "source_domain_terms": [
+            "원가",
+            "원가계산"
+          ],
+          "preferred_question_axis": "processing_flow",
+          "applied_question_source": "source_candidates"
+        },
+        "result_domain_terms": [
+          "수용가",
+          "민원",
+          "요금",
+          "자재",
+          "자산",
+          "예산",
+          "회계"
+        ]
+      }
+    },
+    {
+      "file": "위동컨설팅.ppt",
+      "relative_path": "0_컨설팅자료_260423/위동컨설팅.ppt",
+      "status": "ok",
+      "issues": [],
+      "warnings": [],
+      "diagnostics": {
+        "sml_text_length": 31168,
+        "expected_domain_profile": "maritime_biz",
+        "expected_keywords": [
+          "선박",
+          "영업",
+          "운항",
+          "장비",
+          "재무",
+          "총무",
+          "협력업체"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 0,
+        "low_conf_warning_count": 448,
+        "low_conf_ratio": 0.1764,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 33146,
+        "source_question_candidate_count": 4,
+        "question_guard_summary": {
+          "safe_question_count": 4,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 4,
+          "source_question_candidate_count": 4,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 33146,
+          "sml_text_length": 33146,
+          "no_candidate_reasons": [],
+          "selected_questions": [
+            "현행 원가체계의 한계는 무엇인가?",
+            "문서가 제안하는 원가계산 개선 방향은 무엇인가?",
+            "원가계산 결과를 손익분석까지 확장할 근거가 있는가?",
+            "판단 기준은 무엇인가?"
+          ],
+          "selected_question_types": [
+            "problem_definition",
+            "strategy",
+            "scope",
+            "decision_criteria"
+          ],
+          "source_domain_terms": [
+            "원가",
+            "손익",
+            "손익분석"
+          ],
+          "preferred_question_axis": "processing_flow",
+          "applied_question_source": "source_candidates"
+        },
+        "result_domain_terms": [
+          "선박",
+          "영업",
+          "운항",
+          "장비",
+          "재무",
+          "총무",
+          "협력업체"
+        ]
+      }
+    },
+    {
+      "file": "코레일테크ISP_완료보고.pptx",
+      "relative_path": "0_컨설팅자료_260423/코레일테크ISP_완료보고.pptx",
+      "status": "ok",
+      "issues": [],
+      "warnings": [],
+      "diagnostics": {
+        "sml_text_length": 96627,
+        "expected_domain_profile": "generic_consulting",
+        "expected_keywords": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "요구사항",
+          "방향"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 2,
+        "low_conf_warning_count": 581,
+        "low_conf_ratio": 0.186,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 100739,
+        "source_question_candidate_count": 6,
+        "question_guard_summary": {
+          "safe_question_count": 4,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 6,
+          "source_question_candidate_count": 6,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 100739,
+          "sml_text_length": 100739,
+          "no_candidate_reasons": [],
+          "selected_questions": [
+            "현행 원가체계의 한계는 무엇인가?",
+            "문서가 제안하는 원가계산 개선 방향은 무엇인가?",
+            "원가계산 결과를 손익분석까지 확장할 근거가 있는가?",
+            "비교 가능한 선택지는 무엇인가?"
+          ],
+          "selected_question_types": [
+            "problem_definition",
+            "strategy",
+            "scope",
+            "option_comparison"
+          ],
+          "source_domain_terms": [
+            "원가",
+            "원가분석",
+            "원가계산",
+            "재료비",
+            "노무비",
+            "배부",
+            "배부기준",
+            "손익"
+          ],
+          "preferred_question_axis": "processing_flow",
+          "applied_question_source": "source_candidates"
+        },
+        "result_domain_terms": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "방향"
+        ]
+      }
+    },
+    {
+      "file": "구축방안비교표.pptx",
+      "relative_path": "0_코레일 상세자료_260423/구축방안비교표.pptx",
+      "status": "ok",
+      "issues": [],
+      "warnings": [],
+      "diagnostics": {
+        "sml_text_length": 2714,
+        "expected_domain_profile": "generic_consulting",
+        "expected_keywords": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "요구사항",
+          "방향"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 0,
+        "low_conf_warning_count": 2,
+        "low_conf_ratio": 0.0513,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 2991,
+        "source_question_candidate_count": 6,
+        "question_guard_summary": {
+          "safe_question_count": 4,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 6,
+          "source_question_candidate_count": 6,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 2991,
+          "sml_text_length": 2991,
+          "no_candidate_reasons": [
+            "no_domain_terms_detected"
+          ],
+          "selected_questions": [
+            "문서가 제안하는 개선 방향은 무엇인가?",
+            "비교 가능한 선택지는 무엇인가?",
+            "이 문서는 어떤 문제를 해결하려는가?",
+            "현행 구조의 한계는 무엇인가?"
+          ],
+          "selected_question_types": [
+            "strategy",
+            "option_comparison",
+            "problem_definition"
+          ],
+          "source_domain_terms": [],
+          "preferred_question_axis": "processing_flow",
+          "applied_question_source": "generic_fallback"
+        },
+        "result_domain_terms": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "요구사항",
+          "방향"
+        ]
+      }
+    },
+    {
+      "file": "코레일테크ISP보고서_0.목차.pptx",
+      "relative_path": "0_코레일 상세자료_260423/코레일테크ISP보고서_0.목차.pptx",
+      "status": "ok",
+      "issues": [],
+      "warnings": [],
+      "diagnostics": {
+        "sml_text_length": 1852,
+        "expected_domain_profile": "generic_consulting",
+        "expected_keywords": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "요구사항",
+          "방향"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 0,
+        "low_conf_warning_count": 0,
+        "low_conf_ratio": 0.0,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 1956,
+        "source_question_candidate_count": 6,
+        "question_guard_summary": {
+          "safe_question_count": 4,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 6,
+          "source_question_candidate_count": 6,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 1956,
+          "sml_text_length": 1956,
+          "no_candidate_reasons": [
+            "no_domain_terms_detected"
+          ],
+          "selected_questions": [
+            "문서가 제안하는 개선 방향은 무엇인가?",
+            "판단 기준은 무엇인가?",
+            "이 문서는 어떤 문제를 해결하려는가?",
+            "현행 구조의 한계는 무엇인가?"
+          ],
+          "selected_question_types": [
+            "strategy",
+            "decision_criteria",
+            "problem_definition"
+          ],
+          "source_domain_terms": [],
+          "preferred_question_axis": "processing_flow",
+          "applied_question_source": "generic_fallback"
+        },
+        "result_domain_terms": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "요구사항",
+          "방향"
+        ]
+      }
+    },
+    {
+      "file": "코레일테크ISP보고서_1.사업의 개요.pptx",
+      "relative_path": "0_코레일 상세자료_260423/코레일테크ISP보고서_1.사업의 개요.pptx",
+      "status": "warn",
+      "issues": [],
+      "warnings": [
+        "low_conf_ratio_high"
+      ],
+      "diagnostics": {
+        "sml_text_length": 3511,
+        "expected_domain_profile": "generic_consulting",
+        "expected_keywords": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "요구사항",
+          "방향"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 0,
+        "low_conf_warning_count": 58,
+        "low_conf_ratio": 0.3333,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 3791,
+        "source_question_candidate_count": 4,
+        "question_guard_summary": {
+          "safe_question_count": 3,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 4,
+          "source_question_candidate_count": 4,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 3791,
+          "sml_text_length": 3791,
+          "no_candidate_reasons": [
+            "no_domain_terms_detected"
+          ],
+          "selected_questions": [
+            "현행 구조의 한계는 무엇인가?",
+            "이 문서는 어떤 문제를 해결하려는가?",
+            "문서에서 제시하는 개선 방향은 무엇인가?"
+          ],
+          "selected_question_types": [
+            "problem_definition",
+            "strategy"
+          ],
+          "source_domain_terms": [],
+          "preferred_question_axis": "processing_flow",
+          "applied_question_source": "generic_fallback"
+        },
+        "result_domain_terms": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "요구사항",
+          "방향"
+        ]
+      }
+    },
+    {
+      "file": "코레일테크ISP보고서_2.방향성 수립.pptx",
+      "relative_path": "0_코레일 상세자료_260423/코레일테크ISP보고서_2.방향성 수립.pptx",
+      "status": "ok",
+      "issues": [],
+      "warnings": [],
+      "diagnostics": {
+        "sml_text_length": 61275,
+        "expected_domain_profile": "generic_consulting",
+        "expected_keywords": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "요구사항",
+          "방향"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 3,
+        "low_conf_warning_count": 398,
+        "low_conf_ratio": 0.2509,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 62431,
+        "source_question_candidate_count": 6,
+        "question_guard_summary": {
+          "safe_question_count": 4,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 6,
+          "source_question_candidate_count": 6,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 62431,
+          "sml_text_length": 62431,
+          "no_candidate_reasons": [],
+          "selected_questions": [
+            "현행 원가체계의 한계는 무엇인가?",
+            "문서가 제안하는 원가계산 개선 방향은 무엇인가?",
+            "원가계산 결과를 손익분석까지 확장할 근거가 있는가?",
+            "비교 가능한 선택지는 무엇인가?"
+          ],
+          "selected_question_types": [
+            "problem_definition",
+            "strategy",
+            "scope",
+            "option_comparison"
+          ],
+          "source_domain_terms": [
+            "원가",
+            "원가계산",
+            "재료비",
+            "노무비",
+            "배부",
+            "배부기준",
+            "손익"
+          ],
+          "preferred_question_axis": "processing_flow",
+          "applied_question_source": "source_candidates"
+        },
+        "result_domain_terms": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "방향"
+        ]
+      }
+    },
+    {
+      "file": "코레일테크ISP보고서_3.목표모델 설계.pptx",
+      "relative_path": "0_코레일 상세자료_260423/코레일테크ISP보고서_3.목표모델 설계.pptx",
+      "status": "ok",
+      "issues": [],
+      "warnings": [],
+      "diagnostics": {
+        "sml_text_length": 232862,
+        "expected_domain_profile": "generic_consulting",
+        "expected_keywords": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "요구사항",
+          "방향"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 22,
+        "low_conf_warning_count": 1520,
+        "low_conf_ratio": 0.189,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 251566,
+        "source_question_candidate_count": 6,
+        "question_guard_summary": {
+          "safe_question_count": 4,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 6,
+          "source_question_candidate_count": 6,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 251566,
+          "sml_text_length": 251566,
+          "no_candidate_reasons": [],
+          "selected_questions": [
+            "현행 원가체계의 한계는 무엇인가?",
+            "문서가 제안하는 원가계산 개선 방향은 무엇인가?",
+            "원가계산 결과를 손익분석까지 확장할 근거가 있는가?",
+            "비교 가능한 선택지는 무엇인가?"
+          ],
+          "selected_question_types": [
+            "problem_definition",
+            "strategy",
+            "scope",
+            "option_comparison"
+          ],
+          "source_domain_terms": [
+            "원가",
+            "원가계산",
+            "재료비",
+            "노무비",
+            "배부",
+            "배부기준",
+            "손익",
+            "손익분석"
+          ],
+          "preferred_question_axis": "calculation_rule",
+          "applied_question_source": "source_candidates"
+        },
+        "result_domain_terms": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "방향"
+        ]
+      }
+    },
+    {
+      "file": "코레일테크ISP보고서_4.이행계획 수립.pptx",
+      "relative_path": "0_코레일 상세자료_260423/코레일테크ISP보고서_4.이행계획 수립.pptx",
+      "status": "ok",
+      "issues": [],
+      "warnings": [],
+      "diagnostics": {
+        "sml_text_length": 20396,
+        "expected_domain_profile": "generic_consulting",
+        "expected_keywords": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "요구사항",
+          "방향"
+        ],
+        "safe_source_count": 1,
+        "risk_person_candidate_count": 0,
+        "low_conf_warning_count": 84,
+        "low_conf_ratio": 0.1045,
+        "uploaded_asset_count": 1,
+        "has_pptx_asset": true,
+        "guard_input_source_count": 1,
+        "guard_input_total_chars": 20977,
+        "source_question_candidate_count": 4,
+        "question_guard_summary": {
+          "safe_question_count": 3,
+          "blocked_question_count": 0,
+          "review_question_count": 0,
+          "candidate_count": 4,
+          "source_question_candidate_count": 4,
+          "allowed_user_question_count": 0,
+          "needs_review": false,
+          "source_question_shortage": false,
+          "uploaded_asset_count": 1,
+          "has_pptx_asset": true,
+          "has_safe_source_text": true,
+          "safe_source_count": 1,
+          "guard_input_source_count": 1,
+          "guard_input_total_chars": 20977,
+          "sml_text_length": 20977,
+          "no_candidate_reasons": [],
+          "selected_questions": [
+            "현행 원가체계의 한계는 무엇인가?",
+            "문서가 제안하는 원가계산 개선 방향은 무엇인가?",
+            "판단 기준은 무엇인가?"
+          ],
+          "selected_question_types": [
+            "problem_definition",
+            "strategy",
+            "decision_criteria"
+          ],
+          "source_domain_terms": [
+            "원가",
+            "원가분석",
+            "원가계산"
+          ],
+          "preferred_question_axis": "processing_flow",
+          "applied_question_source": "source_candidates"
+        },
+        "result_domain_terms": [
+          "업무",
+          "현행",
+          "개선",
+          "구조",
+          "계획",
+          "방향"
+        ]
+      }
+    }
+  ]
+}

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .planning_synthesizer import PlanningSynthesizer
+from .runtime_contracts import assert_stage_action
 from .schemas import (
     DecisionArtifacts,
     DiagnosisArtifacts,
@@ -26,7 +27,15 @@ class ImprovementPlanner:
         diagnosis: DiagnosisArtifacts,
         decisions: DecisionArtifacts,
         legacy_service: Any | None = None,
+        *,
+        stage_control: dict[str, object] | None = None,
     ) -> ImprovementArtifacts:
+        assert_stage_action(
+            stage_control or getattr(prepared, "stage_control", None),
+            expected_stage="planning",
+            action="generate_improvement_plan",
+            goal=str(getattr(prepared, "goal", "") or ""),
+        )
         planning_synthesizer = self.planning_synthesizer or PlanningSynthesizer()
         if decisions is None:
             raise ValueError("DecisionArtifacts are required for planning.")

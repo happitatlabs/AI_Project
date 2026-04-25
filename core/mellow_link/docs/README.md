@@ -73,6 +73,9 @@
 
 ### 제품 / 구조
 
+- [MELLOW_LINK_BEGINNER_USER_GUIDE_KO.md](/C:/Users/Hyein/ClaudeAI/AI_Project/core/mellow_link/docs/MELLOW_LINK_BEGINNER_USER_GUIDE_KO.md)
+  - 컴퓨터 초보자용 사용자 설명서
+  - `/projects/create` 기준으로 로그인, 업로드, 분석 시작, 결과 확인, 저장 절차를 화면 문구 기준으로 설명
 - [AI_PROJECT_STRUCTURE_AND_SPEC.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/AI_PROJECT_STRUCTURE_AND_SPEC.md)
   - 현재 제품 구조, 디렉토리 구분, 대표 실행 흐름
 - [refactoring_support_engine.md](/C:/Users/Hyein/ClaudeAI/AI_Project/refactoring_support_engine.md)
