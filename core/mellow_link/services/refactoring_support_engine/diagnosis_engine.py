@@ -13,6 +13,8 @@ from mellow_link.modules.rebuild_assistant.schemas import (
 )
 
 from .policies import get_detector_policy, load_engine_policy_bundle
+from .runtime_contracts import assert_stage_action
+from .template_support import TemplateSupport
 from .schemas import (
     CoverageSummary,
     DetectorStat,
@@ -70,8 +72,22 @@ class DiagnosisEngine:
 
     def __init__(self, policy_bundle=None) -> None:
         self.policy_bundle = policy_bundle or load_engine_policy_bundle()
+        self.template_support = TemplateSupport()
 
-    def run(self, prepared: Any, structure: StructureAnalysisResult, legacy_service: Any) -> DiagnosisArtifacts:
+    def run(
+        self,
+        prepared: Any,
+        structure: StructureAnalysisResult,
+        legacy_service: Any,
+        *,
+        stage_control: dict[str, object] | None = None,
+    ) -> DiagnosisArtifacts:
+        assert_stage_action(
+            stage_control or getattr(prepared, "stage_control", None),
+            expected_stage="diagnosis",
+            action="generate_diagnosis_report",
+            goal=str(getattr(prepared, "goal", "") or ""),
+        )
         evidence_store = _EvidenceStore(structure)
         issues: list[StructuralIssue] = []
         detector_evidence_ids: dict[str, set[str]] = defaultdict(set)
@@ -141,6 +157,8 @@ class DiagnosisEngine:
         )
 
     def build_analysis_summary(self, prepared: Any) -> list[str]:
+        if self.template_support._has_operational_source_analysis_priority(prepared):
+            return self._build_operational_analysis_summary(prepared)
         findings: list[str] = []
         primary_label = self._feature_mode_label(str(getattr(getattr(prepared, "signals", None), "primary_feature_mode", "") or ""))
         if self._looks_like_jsp(prepared):
@@ -176,6 +194,20 @@ class DiagnosisEngine:
         if not findings:
             findings.append("제공된 자산 범위에서는 단일 기능 수준의 레거시 웹 화면과 데이터 접근 계층이 함께 얽혀 있는 것으로 보입니다.")
         return findings[:6]
+
+    def _build_operational_analysis_summary(self, prepared: Any) -> list[str]:
+        lines = self.template_support.render_operational_section_lines(
+            section_key="analysis_summary",
+            prepared=prepared,
+        )
+        if lines:
+            return lines[:6]
+        return [
+            "핵심 객체는 데이터 저장, 자동 반영, 후속 연계 역할 기준으로 추린 3개입니다.",
+            "핵심 데이터 흐름: 주요 처리 데이터와 상태를 같은 거래 흐름 기준으로 관리합니다.",
+            "핵심 처리 흐름: 상태 갱신과 계산 단계를 같은 순서로 이어 줍니다.",
+            "후속 반영 흐름: 연계 반영과 이력 갱신을 같은 처리 흐름으로 이어 줍니다.",
+        ]
 
     def build_extracted_rules(self, prepared: Any) -> ExtractedRulesEnvelope:
         primary = str(getattr(getattr(prepared, "signals", None), "primary_feature_mode", "") or "")

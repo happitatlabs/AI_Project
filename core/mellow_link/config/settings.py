@@ -29,7 +29,11 @@ except ImportError:
 # Force output_dir to be inside mellow_link package
 _MELLOW_LINK_DIR = Path(os.path.dirname(os.path.abspath(__file__))).parent
 _REPO_ROOT = _MELLOW_LINK_DIR.parent
-_ENV_FILE = _REPO_ROOT / ".env"
+_ENV_FILE_CANDIDATES = (
+    _MELLOW_LINK_DIR / ".env",
+    _REPO_ROOT / ".env",
+)
+_ENV_FILE = next((path for path in _ENV_FILE_CANDIDATES if path.exists()), _ENV_FILE_CANDIDATES[0])
 _FORCED_OUTPUT_DIR = _MELLOW_LINK_DIR / "outputs"
 _REPO_ENV_OVERRIDE_KEYS = {
     "ENABLE_MEDIA_AI",
@@ -422,6 +426,53 @@ class Settings(BaseSettings):
         description="OpenAI API key for GPT-4o (Guardian audit)",
         validation_alias="OPENAI_API_KEY" if PYDANTIC_V2 else None
     )
+    enable_narrative_llm: bool = Field(
+        default=False,
+        description="Enable optional Azure OpenAI narrative enhancement for rebuild assistant",
+        validation_alias=AliasChoices("ENABLE_NARRATIVE_LLM", "MELLOW_ENABLE_NARRATIVE_LLM") if (PYDANTIC_V2 and AliasChoices) else None
+    )
+    narrative_llm_provider: str = Field(
+        default="azure_openai",
+        description="Narrative enhancement provider",
+        validation_alias=AliasChoices("NARRATIVE_LLM_PROVIDER", "MELLOW_NARRATIVE_LLM_PROVIDER") if (PYDANTIC_V2 and AliasChoices) else None
+    )
+    azure_openai_api_key: str = Field(
+        default="",
+        description="Azure OpenAI API key for narrative enhancement",
+        validation_alias=AliasChoices("AZURE_OPENAI_API_KEY", "MELLOW_AZURE_OPENAI_API_KEY") if (PYDANTIC_V2 and AliasChoices) else None
+    )
+    azure_openai_endpoint: str = Field(
+        default="",
+        description="Azure OpenAI endpoint for narrative enhancement",
+        validation_alias=AliasChoices("AZURE_OPENAI_ENDPOINT", "MELLOW_AZURE_OPENAI_ENDPOINT") if (PYDANTIC_V2 and AliasChoices) else None
+    )
+    azure_openai_api_version: str = Field(
+        default="2024-02-15-preview",
+        description="Azure OpenAI API version for narrative enhancement",
+        validation_alias=AliasChoices("AZURE_OPENAI_API_VERSION", "MELLOW_AZURE_OPENAI_API_VERSION") if (PYDANTIC_V2 and AliasChoices) else None
+    )
+    azure_openai_narrative_model: str = Field(
+        default="",
+        description="Azure OpenAI model or deployment name for narrative enhancement",
+        validation_alias=AliasChoices("AZURE_OPENAI_NARRATIVE_MODEL", "AZURE_OPENAI_MODEL", "MELLOW_AZURE_OPENAI_NARRATIVE_MODEL") if (PYDANTIC_V2 and AliasChoices) else None
+    )
+    azure_openai_narrative_timeout: float = Field(
+        default=30.0,
+        ge=1.0,
+        description="Azure OpenAI timeout for narrative enhancement requests",
+        validation_alias=AliasChoices("AZURE_OPENAI_NARRATIVE_TIMEOUT", "MELLOW_AZURE_OPENAI_NARRATIVE_TIMEOUT") if (PYDANTIC_V2 and AliasChoices) else None
+    )
+    openai_narrative_model: str = Field(
+        default="gpt-4o-mini",
+        description="OpenAI model for narrative enhancement",
+        validation_alias=AliasChoices("OPENAI_NARRATIVE_MODEL", "MELLOW_OPENAI_NARRATIVE_MODEL") if (PYDANTIC_V2 and AliasChoices) else None
+    )
+    openai_narrative_timeout: float = Field(
+        default=30.0,
+        ge=1.0,
+        description="OpenAI timeout for narrative enhancement requests",
+        validation_alias=AliasChoices("OPENAI_NARRATIVE_TIMEOUT", "MELLOW_OPENAI_NARRATIVE_TIMEOUT") if (PYDANTIC_V2 and AliasChoices) else None
+    )
     google_api_key: str = Field(
         default="",
         description="Google API key for Gemini (Tower/관제)",
@@ -713,7 +764,7 @@ class Settings(BaseSettings):
                     return s
             return "NORMAL"
         
-        @field_validator("docs_auto_enabled", "enable_autonomous_agent", "enable_workspace_scanner", "enable_rag_background_indexing", "enable_tool_forge", "enable_model_unload_on_idle", "enable_outbound_http", "enable_web_search", "enable_guardian_apis", "enable_telegram", "enable_edge_tts", "enable_media_compute", "enable_media_ai", "enable_media_upload", "enable_ffmpeg", mode="before")
+        @field_validator("docs_auto_enabled", "enable_autonomous_agent", "enable_workspace_scanner", "enable_rag_background_indexing", "enable_tool_forge", "enable_model_unload_on_idle", "enable_outbound_http", "enable_web_search", "enable_guardian_apis", "enable_narrative_llm", "enable_telegram", "enable_edge_tts", "enable_media_compute", "enable_media_ai", "enable_media_upload", "enable_ffmpeg", mode="before")
         @classmethod
         def parse_bool_flag(cls, v):
             """Convert string "0"/"1" to boolean."""
@@ -759,7 +810,7 @@ class Settings(BaseSettings):
                     return s
             return "NORMAL"
         
-        @validator("docs_auto_enabled", "enable_autonomous_agent", "enable_workspace_scanner", "enable_rag_background_indexing", "enable_tool_forge", "enable_model_unload_on_idle", "enable_outbound_http", "enable_web_search", "enable_guardian_apis", "enable_telegram", "enable_edge_tts", "enable_media_compute", "enable_media_ai", "enable_media_upload", "enable_ffmpeg", pre=True)
+        @validator("docs_auto_enabled", "enable_autonomous_agent", "enable_workspace_scanner", "enable_rag_background_indexing", "enable_tool_forge", "enable_model_unload_on_idle", "enable_outbound_http", "enable_web_search", "enable_guardian_apis", "enable_narrative_llm", "enable_telegram", "enable_edge_tts", "enable_media_compute", "enable_media_ai", "enable_media_upload", "enable_ffmpeg", pre=True)
         def parse_bool_flag(cls, v):
             """Convert string "0"/"1" to boolean."""
             if isinstance(v, bool):
@@ -866,6 +917,73 @@ class Settings(BaseSettings):
     def allow_guardian_api(self) -> bool:
         """Guardian APIs (Gemini/OpenAI/Anthropic) 허용 여부. 폐쇄망 기본 False."""
         return bool(self.enable_guardian_apis)
+
+    @property
+    def narrative_llm_configured(self) -> bool:
+        """Return True when optional Azure narrative enhancement is fully configured."""
+        provider = self.narrative_llm_provider_normalized
+        if not self.enable_narrative_llm:
+            return False
+        if provider == "openai":
+            return bool(self.narrative_llm_api_key and self.openai_narrative_model.strip())
+        if provider == "azure_openai":
+            return bool(
+                self.narrative_llm_api_key
+                and self.azure_openai_endpoint.strip()
+                and self.azure_openai_narrative_model.strip()
+            )
+        return False
+
+    @property
+    def narrative_llm_api_key(self) -> str:
+        """
+        Effective API key for narrative enhancement.
+
+        Priority:
+        1. AZURE_OPENAI_API_KEY / MELLOW_AZURE_OPENAI_API_KEY
+        2. OPENAI_API_KEY
+
+        The OPENAI_API_KEY fallback is resolved from raw environment variables so
+        it still works even when guardian settings clear the in-memory guardian
+        key field.
+        """
+        provider = self.narrative_llm_provider_normalized
+        if provider == "openai":
+            candidates = (
+                self.openai_api_key,
+                os.getenv("OPENAI_API_KEY", ""),
+            )
+        else:
+            candidates = (
+                self.azure_openai_api_key,
+                os.getenv("AZURE_OPENAI_API_KEY", ""),
+                os.getenv("MELLOW_AZURE_OPENAI_API_KEY", ""),
+                self.openai_api_key,
+                os.getenv("OPENAI_API_KEY", ""),
+            )
+        for candidate in candidates:
+            normalized = str(candidate or "").strip()
+            if normalized:
+                return normalized
+        return ""
+
+    @property
+    def narrative_llm_provider_normalized(self) -> str:
+        return str(self.narrative_llm_provider or "").strip().lower()
+
+    @property
+    def narrative_llm_model(self) -> str:
+        provider = self.narrative_llm_provider_normalized
+        if provider == "openai":
+            return str(self.openai_narrative_model or "").strip()
+        return str(self.azure_openai_narrative_model or "").strip()
+
+    @property
+    def narrative_llm_timeout_seconds(self) -> float:
+        provider = self.narrative_llm_provider_normalized
+        if provider == "openai":
+            return float(self.openai_narrative_timeout)
+        return float(self.azure_openai_narrative_timeout)
 
     def allow_telegram(self) -> bool:
         """Telegram 알림/웹훅 허용 여부. 폐쇄망 기본 False."""

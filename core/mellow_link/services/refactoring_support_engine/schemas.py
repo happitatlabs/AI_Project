@@ -9,6 +9,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 from mellow_link.modules.rebuild_assistant.schemas import (
+    AssumptionItem,
     AppliedJudgmentTemplate,
     AssetPresenceSummary,
     DesignOption,
@@ -16,6 +17,7 @@ from mellow_link.modules.rebuild_assistant.schemas import (
     ExtractedRulesEnvelope,
     ExecutionPlanWeek,
     GroundedBusinessRule,
+    InputFamilyClassification,
     LayeredListResult,
     MissingContextItem,
     PatternCandidate,
@@ -26,6 +28,12 @@ from mellow_link.modules.rebuild_assistant.schemas import (
     VerificationItem,
 )
 from mellow_link.services.anonymization.schemas import SafeAnalysisBundle, StructureArtifact
+
+from .question_guard_schemas import (
+    GuardedUserQuestion,
+    QuestionGuardSummary,
+    SourceQuestionCandidate,
+)
 
 
 def stable_hash(*parts: object) -> str:
@@ -66,6 +74,92 @@ class IntentInput(BaseModel):
     sources: dict[str, str] = Field(default_factory=dict)
 
 
+class AnalysisContextProject(BaseModel):
+    project_id: str
+    project_name: str = ""
+    client_name: str = ""
+    template_key: str = ""
+
+
+class AnalysisContextAsset(BaseModel):
+    asset_id: str
+    name: str
+    asset_type: str
+    language: str = ""
+    size: int = 0
+    content_fingerprint: str
+    masking_level: str = "FULL"
+
+
+class AnalysisContextSourceBlock(BaseModel):
+    block_id: str
+    asset_id: str
+    asset_name: str = ""
+    asset_type: str = ""
+    locator: str = ""
+    excerpt: str = ""
+    fingerprint: str = ""
+    content: str = ""
+
+    @field_validator("fingerprint", mode="before")
+    @classmethod
+    def default_fingerprint(cls, value: str, info) -> str:
+        if value:
+            return value
+        content = ""
+        if isinstance(info.data, dict):
+            content = str(info.data.get("content") or info.data.get("excerpt") or "")
+        return stable_hash(normalize_fingerprint_text(content))
+
+
+class AnalysisContextEvidenceItem(BaseModel):
+    evidence_id: str
+    source_block_id: str
+    asset_id: str
+    locator: str = ""
+    excerpt: str = ""
+    claim: str = ""
+    claim_type: Literal["observed", "inferred", "mapped"] = "observed"
+
+
+class AnalysisFrame(BaseModel):
+    family: str = ""
+    family_confidence: float = 0.0
+    question_axis: str = ""
+    question_axis_confidence: float = 0.0
+    primary_feature_mode: str = "general"
+    primary_feature_mode_confidence: float = 0.0
+    concept_signals: list[str] = Field(default_factory=list)
+    scope_limited: bool = False
+
+
+class AnalysisTrust(BaseModel):
+    safe_bundle_id: str = ""
+    masking_level: str = "FULL"
+    missing_context: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class AnalysisRun(BaseModel):
+    run_id: str = ""
+    input_fingerprint: str = ""
+    policy_versions: dict[str, str] = Field(default_factory=dict)
+
+
+class AnalysisContextBundle(BaseModel):
+    context_id: str
+    schema_version: str = "analysis_context_v1"
+    project: AnalysisContextProject
+    intent: IntentInput
+    assets: list[AnalysisContextAsset] = Field(default_factory=list)
+    source_blocks: list[AnalysisContextSourceBlock] = Field(default_factory=list)
+    analysis_frame: AnalysisFrame = Field(default_factory=AnalysisFrame)
+    evidence_index: list[AnalysisContextEvidenceItem] = Field(default_factory=list)
+    trust: AnalysisTrust = Field(default_factory=AnalysisTrust)
+    run: AnalysisRun = Field(default_factory=AnalysisRun)
+    seed_structures: list[StructureArtifact] = Field(default_factory=list)
+
+
 @dataclass
 class PreparedRebuildInput:
     goal: str
@@ -73,8 +167,11 @@ class PreparedRebuildInput:
     constraints: list[str]
     intent: IntentInput = field(default_factory=lambda: IntentInput(goal=""))
     asset_presence: AssetPresenceSummary = field(default_factory=AssetPresenceSummary)
+    analysis_context: AnalysisContextBundle | None = None
     safe_bundle: SafeAnalysisBundle | None = None
     temp_context: str = ""
+    raw_goal: str = ""
+    raw_constraints: list[str] = field(default_factory=list)
     supporting_docs: str = ""
     legacy_bundle: str = ""
     scope_limited: bool = False
@@ -83,10 +180,18 @@ class PreparedRebuildInput:
     selected_primary_judgment: str = ""
     selected_primary_judgment_reason: str = ""
     selected_narrative_judgment: str = ""
+    question_axis: str = ""
     pattern_candidates: list[PatternCandidate] = field(default_factory=list)
+    family_classification: InputFamilyClassification | None = None
     accounting_input: Any | None = None
     accounting_asset_name: str = ""
     accounting_input_error: str = ""
+    assumption_candidates: list[AssumptionItem] = field(default_factory=list)
+    source_question_candidates: list[SourceQuestionCandidate] = field(default_factory=list)
+    blocked_user_questions: list[GuardedUserQuestion] = field(default_factory=list)
+    review_user_questions: list[GuardedUserQuestion] = field(default_factory=list)
+    question_guard_summary: QuestionGuardSummary = field(default_factory=QuestionGuardSummary)
+    stage_control: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not (self.intent.goal or self.intent.constraints or self.intent.scenario):
@@ -99,6 +204,10 @@ class PreparedRebuildInput:
             self.goal = self.intent.goal
             self.constraints = list(self.intent.constraints)
             self.temp_context = self.intent.scenario
+        if not self.raw_goal:
+            self.raw_goal = self.goal
+        if not self.raw_constraints:
+            self.raw_constraints = list(self.constraints or [])
         if self.missing_context is None:
             self.missing_context = []
 
@@ -117,6 +226,8 @@ class SourceBlock(BaseModel):
     asset_id: str
     asset_name: str
     asset_type: str
+    locator: str = ""
+    excerpt: str = ""
     content: str
     fingerprint: str = ""
 
@@ -317,6 +428,7 @@ class DecisionArtifacts(BaseModel):
     decision_summary: DecisionSummary = Field(default_factory=DecisionSummary)
     applied_templates: list[AppliedJudgmentTemplate] = Field(default_factory=list)
     pattern_candidates: list[PatternCandidate] = Field(default_factory=list)
+    family_classification: InputFamilyClassification = Field(default_factory=InputFamilyClassification)
     primary_judgment: str = ""
     template_judgment: str = ""
     structural_judgment: str = ""
@@ -325,6 +437,7 @@ class DecisionArtifacts(BaseModel):
     primary_judgment_reason: str = ""
     selected_narrative_judgment: str = ""
     decision_items: list[DecisionItem] = Field(default_factory=list)
+    assumptions: list[AssumptionItem] = Field(default_factory=list)
     synthetic_signal_detected: bool = False
 
 
@@ -371,4 +484,7 @@ class StructuredRefactoringResult(BaseModel):
     diagnosis_report: DiagnosisReport = Field(default_factory=DiagnosisReport)
     decision_summary: DecisionSummary = Field(default_factory=DecisionSummary)
     improvement_plan_bundle: ImprovementPlanBundle = Field(default_factory=ImprovementPlanBundle)
+    judgment_canvas: dict[str, Any] = Field(default_factory=dict)
+    stage_control: dict[str, Any] = Field(default_factory=dict)
+    validation_result: dict[str, Any] = Field(default_factory=dict)
     appendix: dict[str, Any] = Field(default_factory=dict)

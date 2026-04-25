@@ -18,6 +18,8 @@
   - `/projects/create` 업로드용 user/dev surface 분리 확인 팩
 - `ui_05_dev_failure_guard_mapping`
   - `bundle-runs`용 validation fail dev fixture
+- `08_consulting_output_reference`
+  - 컨설팅형 결과물과 입력 원본을 함께 보관하는 reference-only 자산 세트
 
 UI 업로드/익명화 검증 전용 팩 사용법은 아래 문서를 본다.
 
@@ -30,6 +32,9 @@ UI 업로드/익명화 검증 전용 팩 사용법은 아래 문서를 본다.
 - `02. python_claim_adjustment_case_01`
 - `04. amount_limit`
 - `01_success_full`
+- `09_fx_fifo_operational_source`
+- `10_interface_linkage_operational_source`
+- `11_settlement_journal_operational_source`
 
 위 샘플의 기대 결과는 아래 문서와 테스트로 함께 고정한다.
 
@@ -51,6 +56,7 @@ UI 업로드/익명화 검증 전용 팩 사용법은 아래 문서를 본다.
 확장 샘플 검증 메모는 아래 문서에 둔다.
 
 - [REFACTORING_SUPPORT_ENGINE_GOLDEN_SAMPLE_EXPANSION_QA_CHECKLIST.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/REFACTORING_SUPPORT_ENGINE_GOLDEN_SAMPLE_EXPANSION_QA_CHECKLIST.md)
+- [OPERATIONAL_SOURCE_GOLDEN_SAMPLE_PLAN_2026-04-19.md](/C:/Users/Hyein/ClaudeAI/AI_Project/core/mellow_link/docs/OPERATIONAL_SOURCE_GOLDEN_SAMPLE_PLAN_2026-04-19.md)
 
 샘플은 아래 두 계열로 나뉜다.
 
@@ -72,6 +78,9 @@ UI 업로드/익명화 검증 전용 팩 사용법은 아래 문서를 본다.
 - `02. python_claim_adjustment_case_01`
 - `04. amount_limit`
 - `01_success_full`
+- `09_fx_fifo_operational_source`
+- `10_interface_linkage_operational_source`
+- `11_settlement_journal_operational_source`
 
 ## 2. 확장 샘플 풀
 
@@ -136,12 +145,14 @@ Phase 3 전후의 후보 샘플 팩이다. 이 계열은 실행용 자산보다 
 
 - `03. judgment_template_samples`
 - `05. query_filter`
+- `08_consulting_output_reference`
 
 이 계열의 역할은 아래로 제한한다.
 
 - detector / template 축 예시 조각 제공
 - 설명 문서나 로컬 수동 점검용 reference
 - 향후 runnable sample을 만들 때 seed material 제공
+- 결과 패키지/발표자료 톤과 구조를 따라갈 reference asset 제공
 
 이 계열에는 현재 아래가 없다.
 

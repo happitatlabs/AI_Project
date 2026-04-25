@@ -8,12 +8,16 @@ from .schemas import CanonicalAnonymizedSource, MaskingLevel, StructureArtifact,
 class MaskingPolicyApplier:
     """Applies derived masking views to canonical anonymized artifacts."""
 
+    _CANONICAL_TOKEN_PATTERN = re.compile(
+        r"\b(?:CLS|FUNC|TBL|COL|API|COMPANY|ORG|DEPT|PERSON|PROJECT|CLIENT|EMAIL|PHONE|ADDRESS|BUSINESS|CONTRACT)_\d{3}\b"
+    )
+
     def apply_source(self, canonical: CanonicalAnonymizedSource, level: MaskingLevel) -> CanonicalAnonymizedSource:
         if level == MaskingLevel.FULL:
             return canonical.model_copy(deep=True)
         if level == MaskingLevel.PARTIAL:
             return canonical.model_copy(update={"level": level, "source_type": "partial_anonymized"})
-        masked = re.sub(r"\b(?:CLS|FUNC|TBL|COL|API)_\d{3}\b", "MASKED_NODE", canonical.content or "")
+        masked = self._CANONICAL_TOKEN_PATTERN.sub("MASKED_NODE", canonical.content or "")
         return canonical.model_copy(update={"level": level, "source_type": "fully_masked", "content": masked})
 
     def apply_structure(self, structure: StructureArtifact, level: MaskingLevel) -> StructureArtifact:

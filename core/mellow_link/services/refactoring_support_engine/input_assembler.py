@@ -4,9 +4,17 @@ import os
 import re
 from typing import Any
 
-from mellow_link.modules.rebuild_assistant.schemas import RebuildAssetsPayload
+from mellow_link.modules.rebuild_assistant.schemas import (
+    AssumptionItem,
+    AssetPresenceSummary,
+    RebuildAssetsPayload,
+)
 
+from .analysis_context_builder import AnalysisContextBuilder
+from .source_question_guard import SourceQuestionGuardService
+from .runtime_contracts import assert_stage_action
 from .schemas import (
+    AnalysisContextBundle,
     AssetInventoryItem,
     IntentInput,
     MissingContextItem,
@@ -35,6 +43,15 @@ class InputAssembler:
         "yarn.lock",
     }
     _NON_ANALYSIS_ASSET_TYPES = {"doc", "framework", "intent"}
+    _ASSUMPTION_LABEL_PATTERN = re.compile(r"^(가정|전제)\s*[:：]\s*(?P<statement>.+?)\s*$")
+    _ASSUMPTION_INLINE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+        ("전제", re.compile(r"(?P<statement>.+?(?:를|을)\s*전제로\s*(?:한다|하며|한|두고).*)")),
+        ("if_clause", re.compile(r"(?P<statement>.+?라고\s+가정하면.*)")),
+        ("조건부", re.compile(r"(?P<statement>.+?(?:경우에만|경우에 한해).*)")),
+    )
+
+    def __init__(self) -> None:
+        self.question_guard = SourceQuestionGuardService()
 
     def prepare_input(
         self,
@@ -44,6 +61,7 @@ class InputAssembler:
         assets: RebuildAssetsPayload,
         constraints: list[str] | None = None,
         temp_context: str = "",
+        include_asset_assumptions: bool = True,
     ) -> PreparedRebuildInput:
         intent = self.normalize_intent_inputs(
             goal=goal,
@@ -74,6 +92,11 @@ class InputAssembler:
             temp_context=intent.scenario,
             legacy_bundle="\n\n".join(part for part in parts if part),
             scope_limited=legacy_service.is_scope_limited(intent.goal),
+            assumption_candidates=self._collect_prepared_input_assumptions(
+                intent=intent,
+                assets=cleaned_assets,
+                include_asset_fields=include_asset_assumptions,
+            ),
         )
         prepared.signals = legacy_service.extract_feature_signals(prepared)
         prepared.missing_context = legacy_service.detect_missing_context(prepared)
@@ -87,9 +110,27 @@ class InputAssembler:
         safe_bundle,
         constraints: list[str] | None = None,
     ) -> PreparedRebuildInput:
-        asset_presence = legacy_service._build_asset_presence_from_safe_bundle(safe_bundle)
-        asset_name_by_id = {asset.asset_id: asset.name for asset in safe_bundle.asset_summary}
-        intent_files: dict[str, list[str]] = {}
+        analysis_context = AnalysisContextBuilder().build(
+            project_id=getattr(safe_bundle, "project_id", ""),
+            run_id="runless",
+            safe_bundle=safe_bundle,
+            goal=goal,
+            constraints=constraints or [],
+        )
+        prepared = self.prepare_analysis_context_input(
+            legacy_service,
+            analysis_context=analysis_context,
+        )
+        prepared.safe_bundle = safe_bundle
+        return prepared
+
+    def prepare_analysis_context_input(
+        self,
+        legacy_service: Any,
+        *,
+        analysis_context: AnalysisContextBundle,
+    ) -> PreparedRebuildInput:
+        asset_presence = self._build_asset_presence_from_context(analysis_context)
         source_code_blocks: list[str] = []
         schema_blocks: list[str] = []
         sql_blocks: list[str] = []
@@ -98,15 +139,18 @@ class InputAssembler:
         accounting_input = None
         accounting_asset_name = ""
         accounting_input_error = ""
-        for source in safe_bundle.sources:
-            content = (source.content or "").strip()
+        source_assumption_candidates: list[AssumptionItem] = []
+        for source in analysis_context.source_blocks:
+            content = (source.content or source.excerpt or "").strip()
             if not content:
                 continue
-            asset_name = asset_name_by_id.get(source.asset_id, "")
-            intent_slot = self._intent_slot_for_asset_name(asset_name)
-            if intent_slot:
-                intent_files.setdefault(intent_slot, []).append(content)
-                continue
+            asset_name = source.asset_name or source.locator or source.asset_id
+            source_assumption_candidates.extend(
+                self._collect_explicit_assumption_candidates(
+                    content,
+                    source_field=f"analysis_context.source_blocks[{asset_name or source.asset_id}]",
+                )
+            )
             if legacy_service._looks_like_accounting_payload_asset(asset_name, content):
                 if accounting_input is not None or accounting_input_error:
                     accounting_input_error = "multiple accounting payload assets found"
@@ -116,21 +160,22 @@ class InputAssembler:
                 accounting_asset_name = asset_name
                 continue
             block = f"[SAFE SOURCE: {source.asset_id} | {asset_name or '-'}]\n{content}"
-            if legacy_service._is_schema_asset_name(asset_name, content):
+            asset_type = (source.asset_type or "").strip().lower()
+            if asset_type == "schema" or legacy_service._is_schema_asset_name(asset_name, content):
                 schema_blocks.append(block)
-            elif legacy_service._is_sql_asset_name(asset_name, content):
+            elif asset_type == "sql" or legacy_service._is_sql_asset_name(asset_name, content):
                 sql_blocks.append(block)
-            elif legacy_service._is_ui_asset_name(asset_name):
+            elif asset_type == "ui" or legacy_service._is_ui_asset_name(asset_name):
                 ui_blocks.append(block)
-            elif legacy_service._is_doc_asset_name(asset_name):
+            elif asset_type == "doc" or legacy_service._is_doc_asset_name(asset_name):
                 doc_blocks.append(block)
-            elif legacy_service._is_framework_asset_name(asset_name):
+            elif asset_type == "framework" or legacy_service._is_framework_asset_name(asset_name):
                 continue
             else:
                 source_code_blocks.append(block)
         structures = "\n\n".join(
             legacy_service._render_structure_block(structure)
-            for structure in safe_bundle.structures
+            for structure in analysis_context.seed_structures
             if structure.nodes or structure.edges
         )
         supporting_docs = "\n\n".join(doc_blocks)
@@ -139,24 +184,22 @@ class InputAssembler:
             database_schema="\n\n".join(schema_blocks),
             sql_queries="\n\n".join(sql_blocks),
             ui_template="\n\n".join(part for part in [structures, "\n\n".join(ui_blocks)] if part),
-            framework_info=legacy_service._build_framework_hint(safe_bundle, asset_presence),
-        )
-        intent = self.normalize_intent_inputs(
-            goal=goal,
-            constraints=constraints,
-            file_intents=intent_files,
+            framework_info=self._build_context_framework_hint(asset_presence),
         )
         prepared = self.prepare_input(
             legacy_service,
-            goal=intent.goal,
+            goal=analysis_context.intent.goal,
             assets=assets,
-            constraints=intent.constraints,
-            temp_context=intent.scenario,
+            constraints=analysis_context.intent.constraints,
+            temp_context=analysis_context.intent.scenario,
+            include_asset_assumptions=False,
         )
         prepared.asset_presence = asset_presence
-        prepared.safe_bundle = safe_bundle
-        prepared.intent = intent
+        prepared.analysis_context = analysis_context
+        prepared.intent = analysis_context.intent
         prepared.supporting_docs = supporting_docs
+        prepared.raw_goal = analysis_context.intent.goal
+        prepared.raw_constraints = list(analysis_context.intent.constraints or [])
         if supporting_docs:
             prepared.legacy_bundle = "\n\n".join(
                 part
@@ -166,11 +209,39 @@ class InputAssembler:
                 ]
                 if part
             )
+        question_guard = self.question_guard.evaluate(
+            analysis_context=analysis_context,
+            raw_goal=analysis_context.intent.goal,
+            raw_constraints=analysis_context.intent.constraints,
+        )
+        prepared.source_question_candidates = list(question_guard.source_question_candidates)
+        prepared.blocked_user_questions = list(question_guard.blocked_user_questions)
+        prepared.review_user_questions = list(question_guard.review_user_questions)
+        prepared.question_guard_summary = question_guard.question_guard_summary
+        prepared.goal = question_guard.effective_goal
+        prepared.constraints = list(question_guard.effective_constraints)
+        prepared.intent = prepared.intent.model_copy(
+            update={
+                "goal": prepared.goal,
+                "constraints": list(prepared.constraints),
+            }
+        )
+        if question_guard.preferred_question_axis:
+            prepared.question_axis = question_guard.preferred_question_axis
+        prepared.scope_limited = legacy_service.is_scope_limited(prepared.goal)
         prepared.signals = legacy_service.extract_feature_signals(prepared)
         prepared.missing_context = legacy_service.detect_missing_context(prepared)
         prepared.accounting_input = accounting_input
         prepared.accounting_asset_name = accounting_asset_name
         prepared.accounting_input_error = accounting_input_error
+        prepared.assumption_candidates = self._merge_assumption_candidates(
+            source_assumption_candidates,
+            prepared.assumption_candidates,
+        )
+        analysis_context.trust.missing_context = list(prepared.missing_context or [])
+        analysis_context.analysis_frame.concept_signals = list(prepared.signals.concepts or [])
+        analysis_context.analysis_frame.primary_feature_mode = prepared.signals.primary_feature_mode
+        analysis_context.analysis_frame.scope_limited = bool(prepared.scope_limited)
         return prepared
 
     def normalize_intent_inputs(
@@ -213,7 +284,19 @@ class InputAssembler:
             sources=sources,
         )
 
-    def assemble(self, prepared: Any) -> RefactoringAnalysisInput:
+    def assemble(
+        self,
+        prepared: Any,
+        *,
+        stage_control: dict[str, object] | None = None,
+    ) -> RefactoringAnalysisInput:
+        assert_stage_action(
+            stage_control or getattr(prepared, "stage_control", None),
+            expected_stage="analysis",
+            action="assemble_analysis_input",
+            goal=str(getattr(prepared, "goal", "") or ""),
+        )
+        analysis_context = getattr(prepared, "analysis_context", None)
         safe_bundle = getattr(prepared, "safe_bundle", None)
         constraints = [str(item).strip() for item in list(getattr(prepared, "constraints", []) or []) if str(item).strip()]
         intent = getattr(prepared, "intent", None)
@@ -223,7 +306,37 @@ class InputAssembler:
                 constraints=constraints,
                 scenario=str(getattr(prepared, "temp_context", "") or ""),
             )
-        if safe_bundle is not None:
+        if analysis_context is not None:
+            asset_inventory = [
+                AssetInventoryItem(
+                    asset_id=asset.asset_id,
+                    name=asset.name,
+                    asset_type=asset.asset_type,
+                    size=asset.size,
+                    language=asset.language,
+                    kind_hint=asset.asset_type,
+                )
+                for asset in analysis_context.assets
+                if asset.asset_type not in self._NON_ANALYSIS_ASSET_TYPES
+            ]
+            source_blocks = [
+                SourceBlock(
+                    block_id=source.block_id,
+                    asset_id=source.asset_id,
+                    asset_name=source.asset_name or source.locator or source.asset_id,
+                    asset_type=source.asset_type,
+                    locator=source.locator,
+                    excerpt=source.excerpt,
+                    content=source.content,
+                    fingerprint=source.fingerprint,
+                )
+                for source in analysis_context.source_blocks
+                if source.asset_type not in self._NON_ANALYSIS_ASSET_TYPES
+            ]
+            seed_structures = list(analysis_context.seed_structures or [])
+            safe_bundle_id = analysis_context.trust.safe_bundle_id
+            input_fingerprint = analysis_context.run.input_fingerprint
+        elif safe_bundle is not None:
             content_by_asset_id = {source.asset_id: source.content or "" for source in safe_bundle.sources}
             asset_presence = getattr(prepared, "asset_presence", None)
             schema_asset_names = {
@@ -307,10 +420,12 @@ class InputAssembler:
                 )
             seed_structures = list(safe_bundle.structures or [])
             safe_bundle_id = safe_bundle.bundle_id
+            input_fingerprint = ""
         else:
             asset_inventory, source_blocks = self._assemble_without_bundle(prepared)
             seed_structures = []
             safe_bundle_id = ""
+            input_fingerprint = ""
         missing_context = list(getattr(prepared, "missing_context_details", []) or [])
         if not missing_context:
             missing_context = [
@@ -329,7 +444,159 @@ class InputAssembler:
             source_blocks=source_blocks,
             seed_structures=seed_structures,
             missing_context=missing_context,
+            input_fingerprint=input_fingerprint,
         )
+
+    def _build_asset_presence_from_context(self, analysis_context: AnalysisContextBundle) -> AssetPresenceSummary:
+        source_names: list[str] = []
+        ui_names: list[str] = []
+        schema_names: list[str] = []
+        sql_names: list[str] = []
+        framework_names: list[str] = []
+        doc_names: list[str] = []
+        for asset in analysis_context.assets:
+            asset_type = (asset.asset_type or "").strip().lower()
+            if asset_type == "ui":
+                ui_names.append(asset.name)
+            elif asset_type == "schema":
+                schema_names.append(asset.name)
+            elif asset_type == "sql":
+                sql_names.append(asset.name)
+            elif asset_type == "framework":
+                framework_names.append(asset.name)
+            elif asset_type == "doc":
+                doc_names.append(asset.name)
+            elif asset_type != "intent":
+                source_names.append(asset.name)
+        return AssetPresenceSummary(
+            has_source_code=bool(source_names),
+            has_ui_asset=bool(ui_names),
+            has_schema_asset=bool(schema_names),
+            has_sql_asset=bool(sql_names),
+            has_framework_hint=bool(framework_names),
+            has_docs=bool(doc_names),
+            framework_runtime_hints=self._framework_runtime_hints(framework_names),
+            source_asset_names=source_names,
+            ui_asset_names=ui_names,
+            schema_asset_names=schema_names,
+            sql_asset_names=sql_names,
+            framework_asset_names=framework_names,
+            doc_asset_names=doc_names,
+        )
+
+    def _build_context_framework_hint(self, asset_presence: AssetPresenceSummary) -> str:
+        lines: list[str] = []
+        if asset_presence.framework_asset_names:
+            lines.append("Framework assets: " + ", ".join(asset_presence.framework_asset_names))
+        if asset_presence.framework_runtime_hints:
+            lines.append("Runtime hints: " + ", ".join(asset_presence.framework_runtime_hints))
+        return "\n".join(lines)
+
+    def _collect_prepared_input_assumptions(
+        self,
+        *,
+        intent: IntentInput,
+        assets: RebuildAssetsPayload,
+        include_asset_fields: bool,
+    ) -> list[AssumptionItem]:
+        candidates: list[AssumptionItem] = []
+        if intent.goal:
+            candidates.extend(self._collect_explicit_assumption_candidates(intent.goal, source_field="goal"))
+        for index, item in enumerate(intent.constraints or []):
+            candidates.extend(
+                self._collect_explicit_assumption_candidates(
+                    str(item or ""),
+                    source_field=f"constraints[{index}]",
+                )
+            )
+        if intent.scenario:
+            candidates.extend(self._collect_explicit_assumption_candidates(intent.scenario, source_field="scenario"))
+        if include_asset_fields:
+            asset_fields = {
+                "assets.source_code": assets.source_code,
+                "assets.database_schema": assets.database_schema,
+                "assets.sql_queries": assets.sql_queries,
+                "assets.ui_template": assets.ui_template,
+                "assets.framework_info": assets.framework_info,
+            }
+            for source_field, text in asset_fields.items():
+                if text:
+                    candidates.extend(self._collect_explicit_assumption_candidates(text, source_field=source_field))
+        return self._merge_assumption_candidates(candidates)
+
+    def _collect_explicit_assumption_candidates(self, text: str, *, source_field: str) -> list[AssumptionItem]:
+        candidates: list[AssumptionItem] = []
+        for raw_line in str(text or "").splitlines():
+            line = self._normalize_assumption_source_line(raw_line)
+            if not line:
+                continue
+            labeled_match = self._ASSUMPTION_LABEL_PATTERN.match(line)
+            if labeled_match:
+                marker = labeled_match.group(1)
+                statement = self._normalize_assumption_statement(labeled_match.group("statement"))
+                if statement:
+                    candidates.append(
+                        AssumptionItem(
+                            statement=statement,
+                            source_stage="input",
+                            source_field=source_field,
+                            explicit_marker=marker,
+                        )
+                    )
+                continue
+            for marker, pattern in self._ASSUMPTION_INLINE_PATTERNS:
+                matched = pattern.match(line)
+                if matched is None:
+                    continue
+                statement = self._normalize_assumption_statement(matched.group("statement"))
+                if statement:
+                    candidates.append(
+                        AssumptionItem(
+                            statement=statement,
+                            source_stage="input",
+                            source_field=source_field,
+                            explicit_marker=marker,
+                        )
+                    )
+                break
+        return self._merge_assumption_candidates(candidates)
+
+    def _normalize_assumption_source_line(self, raw_line: str) -> str:
+        line = str(raw_line or "").strip()
+        if not line:
+            return ""
+        line = re.sub(r"^(?:[#*]+|//+|/\*+|--+|;+|-+\s)\s*", "", line).strip()
+        line = re.sub(r"\s*(?:\*/)+\s*$", "", line).strip()
+        return " ".join(line.split()).strip()
+
+    def _normalize_assumption_statement(self, statement: str) -> str:
+        return " ".join(str(statement or "").split()).strip()
+
+    def _merge_assumption_candidates(self, *candidate_groups: list[AssumptionItem]) -> list[AssumptionItem]:
+        output: list[AssumptionItem] = []
+        seen: set[tuple[str, str]] = set()
+        for group in candidate_groups:
+            for item in group or []:
+                key = (
+                    re.sub(r"\s+", " ", str(item.statement or "").strip()).lower(),
+                    str(item.explicit_marker or "").strip(),
+                )
+                if not key[0] or key in seen:
+                    continue
+                seen.add(key)
+                output.append(item)
+        return output
+
+    def _framework_runtime_hints(self, framework_asset_names: list[str]) -> list[str]:
+        hints: list[str] = []
+        joined = " ".join(name.lower() for name in framework_asset_names)
+        if "pom.xml" in joined or "gradle" in joined:
+            hints.append("java")
+        if "package.json" in joined:
+            hints.append("node")
+        if "requirements.txt" in joined or "pyproject.toml" in joined:
+            hints.append("python")
+        return self._dedupe_preserving_order(hints)
 
     def _asset_type_from_presence(
         self,

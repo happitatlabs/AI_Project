@@ -7,6 +7,7 @@ from typing import Any
 from mellow_link.modules.rebuild_assistant.schemas import RecommendedOption, RetainedContract
 
 from .narrative_axis import NarrativeAxisResolver
+from .template_support import TemplateSupport
 
 
 @dataclass
@@ -25,6 +26,7 @@ class DeterministicNarrativeBundle:
 class DeterministicNarrativeBuilder:
     def __init__(self) -> None:
         self.axis_resolver = NarrativeAxisResolver()
+        self.template_support = TemplateSupport()
 
     def build(
         self,
@@ -38,12 +40,14 @@ class DeterministicNarrativeBuilder:
     ) -> DeterministicNarrativeBundle:
         accounting = extensions.get("accounting") if isinstance(extensions, dict) else None
         governance = extensions.get("decision_governance") if isinstance(extensions, dict) else None
-        narrative_axis = self.axis_resolver.select_axis(
+        narrative_axis = str(getattr(decisions, "narrative_axis", "") or "").strip() or self.axis_resolver.select_axis(
             prepared,
             diagnosis.grounded_business_rules,
             diagnosis.retained_contracts,
             decisions.primary_judgment,
         )
+        if not narrative_axis and self.template_support._has_fx_fifo_domain(prepared):
+            narrative_axis = "fx_fifo"
         core_business_rules = self.axis_resolver.prioritize_rule_texts(
             narrative_axis,
             diagnosis.grounded_business_rules,
@@ -53,12 +57,36 @@ class DeterministicNarrativeBuilder:
             narrative_axis,
             diagnosis.retained_contracts,
         )
+        if narrative_axis == "fx_fifo":
+            core_business_rules = self._prioritize_fx_fifo_rule_texts(
+                diagnosis.grounded_business_rules,
+                diagnosis.core_business_rules,
+            )
+            retained_contracts = self._prioritize_fx_fifo_contracts(diagnosis.retained_contracts)
+        family = str(getattr(getattr(decisions, "family_classification", None), "family", "") or "").strip()
 
         if isinstance(accounting, dict):
             return self._build_accounting_bundle(
                 narrative_axis=narrative_axis,
                 accounting=accounting,
                 decisions=decisions,
+                core_business_rules=core_business_rules,
+                retained_contracts=retained_contracts,
+            )
+        if family == "operational_source":
+            return self._build_operational_source_bundle(
+                prepared=prepared,
+                diagnosis=diagnosis,
+                improvement=improvement,
+                narrative_axis=narrative_axis,
+                core_business_rules=core_business_rules,
+                retained_contracts=retained_contracts,
+            )
+        if family == "option_comparison":
+            return self._build_option_comparison_bundle(
+                decisions=decisions,
+                improvement=improvement,
+                narrative_axis=narrative_axis,
                 core_business_rules=core_business_rules,
                 retained_contracts=retained_contracts,
             )
@@ -130,6 +158,7 @@ class DeterministicNarrativeBuilder:
                 "access_control",
                 "query_filter",
                 "amount_threshold",
+                "fx_fifo",
             }:
                 one_line = f"{subject_topic} {anchor}를 기준으로 {action_plan}해야 합니다."
             else:
@@ -207,16 +236,17 @@ class DeterministicNarrativeBuilder:
         failure_label = self._accounting_issue_label(
             str(calc_status.get("blocking_issue") or fx_calc.get("failure_reason") or "")
         )
+        failure_summary = f"{failure_label}입니다." if failure_label else failure_text
 
         if not bool(calc_status.get("can_calculate")):
             one_line = f"회계 계산을 수행할 수 없습니다. {failure_text}"
             executive_summary = [
                 report_purpose,
                 "현재 입력 기준으로는 회계 계산을 수행할 수 없습니다.",
-                f"주요 사유는 {failure_label or failure_text.rstrip('.')}입니다.",
+                f"주요 사유는 {failure_summary}",
                 "필수 입력이 보완되면 재계산이 가능합니다.",
             ]
-            primary_reason = f"계산 상태가 blocked이며 주요 차단 사유는 {failure_text.rstrip('.')}입니다."
+            primary_reason = f"계산 상태가 blocked이며 주요 차단 사유는 {failure_summary}"
         elif warnings:
             one_line = (
                 f"회계 기능은 {method_label} 기준으로 계산을 수행했지만 {warning_label} 때문에 결과를 검토용 초안으로 유지해야 합니다."
@@ -252,14 +282,193 @@ class DeterministicNarrativeBuilder:
             retained_contracts=retained_contracts,
         )
 
+    def _build_operational_source_bundle(
+        self,
+        *,
+        prepared,
+        diagnosis,
+        improvement,
+        narrative_axis: str,
+        core_business_rules: list[str],
+        retained_contracts: list[RetainedContract],
+    ) -> DeterministicNarrativeBundle:
+        del diagnosis
+        profile = self.template_support.operational_analysis_profile(prepared)
+        question_axis = str(profile.get("question_axis") or "").strip()
+        report_purpose = str(profile.get("report_purpose") or "")
+        report_scope = list(profile.get("report_scope") or [])
+        report_questions = list(profile.get("report_questions") or [])
+        identity_sentence = str(profile.get("identity_sentence") or "본 자산은 데이터 저장, 후속 반영, 자동 처리 구간이 연결된 현행 운영 소스 묶음입니다.")
+        flow_sentence = str(profile.get("flow_sentence") or "데이터 반영 순서와 후속 연계 관계를 먼저 복원해야 합니다.")
+        rule_sentence = str(profile.get("rule_sentence") or "핵심 객체의 처리 순서와 유지 계약을 실제 소스 기준으로 정리해야 합니다.")
+        risk_sentence = str(profile.get("risk_sentence") or "재처리 누락과 연계 정합성 불일치를 점검해야 합니다.")
+        option_text = ""
+        if improvement.recommended_option is not None:
+            option_text = str(improvement.recommended_option.name or "").strip()
+        report_purpose_lines = self.template_support.render_operational_section_lines(
+            section_key="report_purpose",
+            prepared=prepared,
+            lines=[report_purpose],
+            fallback_lines=[report_purpose],
+        )
+        one_line = (
+            f"{identity_sentence.rstrip('.')}."
+            " "
+            "1차 목적은 현행 운영 로직과 처리 흐름, 유지 계약을 복원하는 것입니다."
+        )
+        if question_axis == "journal_linkage":
+            one_line = (
+                f"{identity_sentence.rstrip('.')}."
+                " 1차 목적은 전표/GL 연계 기준이 어긋날 가능성과 회계 영향을 진단하는 것입니다."
+            )
+        elif question_axis == "calculation_rule":
+            one_line = (
+                "우선 판단은 현행 FIFO 계산 기준을 유지하고, 환율 비교와 회계 연결 검증을 함께 두는 것입니다."
+            )
+        one_line_lines = self.template_support.render_operational_section_lines(
+            section_key="one_line_conclusion",
+            prepared=prepared,
+            lines=[one_line],
+            fallback_lines=[one_line],
+        )
+        if question_axis == "journal_linkage":
+            executive_summary = [
+                "전표 생성 기준과 GL 연결 기준이 같은 거래 기준으로 이어지는지 불명확합니다.",
+                "lot 소진 순서, 환율 기준, 취소 역처리, 회계 연결 기준이 서로 달라질 수 있습니다.",
+                "취소나 역처리 시 원거래 기준 유지 여부가 불명확합니다.",
+            ]
+        elif question_axis == "calculation_rule":
+            executive_summary = [
+                "선택지: 현행 FIFO 기준 유지, 평균 기준 단순화, 거래별 지정 기준을 비교합니다.",
+                "비교 기준: 계산 재현성, 환율 기준 일관성, 회계 연결 가능성을 우선합니다.",
+                "추천안: 현행 FIFO 기준을 유지하고 예외 검증을 보강합니다.",
+                "참조: 흐름 상세와 리스크 상세는 각각 Structure, Diagnosis 문서에서만 다룹니다.",
+            ]
+        else:
+            executive_summary = [
+                f"현행 분석: {identity_sentence}",
+                f"핵심 흐름: {flow_sentence}",
+                f"처리 단계: {rule_sentence}",
+                "참조: 리스크와 선택 기준은 Diagnosis, Decision 문서에서 별도로 다룹니다.",
+            ]
+        if option_text and question_axis not in {"calculation_rule", "journal_linkage"}:
+            executive_summary[-1] += f" 추가 확인 항목은 {option_text} 수준의 후속 검토 메모로만 남깁니다."
+        executive_summary_lines = self.template_support.render_operational_section_lines(
+            section_key="executive_summary_v2",
+            prepared=prepared,
+            lines=executive_summary,
+            fallback_lines=executive_summary,
+        )
+        primary_reason = str(
+            profile.get("primary_reason")
+            or "입력 자산이 실제 운영 처리와 후속 반영을 담당하는 현행 자산이므로 현재 단계에서는 재설계 권고보다 현행 업무 규칙과 처리 흐름 복원이 우선입니다."
+        )
+        if question_axis == "journal_linkage":
+            primary_reason = (
+                "전표 기준과 회계 연결 기준이 달라질 경우 계산 결과와 전표 반영 간 불일치가 발생할 수 있습니다."
+            )
+        elif question_axis == "calculation_rule":
+            primary_reason = (
+                "계산 규칙 판단 문서이므로 선택지, 비교 기준, 추천안을 우선 정리하고 흐름과 리스크 상세는 참조로만 둡니다."
+            )
+        primary_reason_lines = self.template_support.render_operational_section_lines(
+            section_key="primary_judgment_reason",
+            prepared=prepared,
+            lines=[primary_reason],
+            fallback_lines=[primary_reason],
+        )
+        return DeterministicNarrativeBundle(
+            narrative_axis=narrative_axis,
+            report_purpose=(report_purpose_lines[0] if report_purpose_lines else report_purpose),
+            report_scope=report_scope,
+            report_questions=report_questions,
+            primary_judgment_reason=(primary_reason_lines[0] if primary_reason_lines else primary_reason),
+            one_line_conclusion=(one_line_lines[0] if one_line_lines else one_line),
+            executive_summary_v2=(executive_summary_lines or executive_summary),
+            core_business_rules=core_business_rules,
+            retained_contracts=retained_contracts,
+        )
+
+    def _build_option_comparison_bundle(
+        self,
+        *,
+        decisions,
+        improvement,
+        narrative_axis: str,
+        core_business_rules: list[str],
+        retained_contracts: list[RetainedContract],
+    ) -> DeterministicNarrativeBundle:
+        display_strategy = str(getattr(getattr(decisions, "family_classification", None), "display_strategy", "") or "").strip()
+        display_strategy = display_strategy or "비교 기준 우선"
+        option = self._comparison_primary_option(improvement)
+        option_name = self._option_label(option)
+        structure_summary = str(getattr(option, "structure_summary", "") or "").strip() if option is not None else ""
+        selection_reason = str(getattr(option, "selection_reason", "") or "").strip() if option is not None else ""
+        option_risks = [str(item).strip() for item in getattr(option, "risks", []) or [] if str(item).strip()] if option is not None else []
+        option_count = max(len(list(improvement.design_options or [])), 1)
+        report_purpose = (
+            f"복수 선택지를 {display_strategy} 원칙으로 비교해 {self._attach_object_particle(option_name)} 우선 검토안으로 정리하기 위한 보고서입니다."
+            if option_name
+            else f"복수 선택지를 {display_strategy} 원칙으로 비교해 추천안을 정리하기 위한 보고서입니다."
+        )
+        report_scope = ["선택지 정의", "비교 기준", "추천안 근거", "선택 시 유의점"]
+        report_questions = [
+            "선택지 간 핵심 차이는 무엇인가?",
+            "어떤 비교 기준으로 우선안을 고르는가?",
+            "추천안을 적용할 때 주의할 점은 무엇인가?",
+        ]
+        primary_reason = (
+            f"비교 기준은 {selection_reason}이며, 핵심 판단 축은 {structure_summary}입니다."
+            if selection_reason and structure_summary
+            else selection_reason
+            or structure_summary
+            or "복수 선택지를 같은 기준으로 나란히 비교해 우선 검토안을 좁혔습니다."
+        )
+        if option_name and structure_summary and selection_reason:
+            one_line = f"우선 검토안은 {option_name}입니다. {structure_summary}를 기준으로 {selection_reason}"
+        elif option_name and structure_summary:
+            one_line = f"우선 검토안은 {option_name}입니다. {structure_summary}"
+        elif option_name:
+            one_line = f"우선 검토안은 {option_name}입니다."
+        else:
+            one_line = "복수 선택지를 비교한 결과 우선 검토안을 좁혔습니다."
+        executive_summary = [
+            f"비교 관점: {display_strategy} 기준으로 {option_count}개 선택지를 나란히 검토했습니다.",
+            f"우선 검토안: {option_name} - {structure_summary}" if option_name and structure_summary else f"우선 검토안: {option_name}" if option_name else "",
+            f"선택 이유: {selection_reason}" if selection_reason else "",
+            f"유의점: {option_risks[0]}" if option_risks else "",
+        ]
+        executive_summary = [item for item in executive_summary if item][:4]
+        return DeterministicNarrativeBundle(
+            narrative_axis=narrative_axis,
+            report_purpose=report_purpose,
+            report_scope=report_scope,
+            report_questions=report_questions,
+            primary_judgment_reason=primary_reason,
+            one_line_conclusion=one_line,
+            executive_summary_v2=executive_summary,
+            core_business_rules=core_business_rules,
+            retained_contracts=retained_contracts,
+        )
+
+    def _comparison_primary_option(self, improvement) -> RecommendedOption | None:
+        if improvement.recommended_option is not None:
+            return improvement.recommended_option
+        for item in list(improvement.design_options or []):
+            if bool(getattr(item, "recommended", False)):
+                return item
+        options = list(improvement.design_options or [])
+        return options[0] if options else None
+
     def _primary_reason(self, decisions, top_decision, default: str = "") -> str:
         if top_decision is None:
             return default or "상위 구조 이슈와 증거를 기준으로 개선 방향을 정리했습니다."
         score = top_decision.score_breakdown.get("final_score", top_decision.priority_score)
-        decision_rule = top_decision.explainability.decision_rule
-        return f"{top_decision.rationale} 우선순위 점수는 {score}이며, {decision_rule}"
+        return f"{top_decision.rationale} 우선순위 점수는 {score}입니다."
 
     def _primary_concept(self, prepared) -> str:
+        if self.template_support._has_fx_fifo_domain(prepared):
+            return "외화 입출금 FIFO"
         concepts = list(getattr(getattr(prepared, "signals", None), "concepts", []) or [])
         concept_map = {
             "order": "주문",
@@ -295,6 +504,7 @@ class DeterministicNarrativeBuilder:
             "validation": "차단 조건과 검증 순서",
             "query_filter": "조회 조건과 필터 조합",
             "amount_threshold": "금액 기준과 한도 정책",
+            "fx_fifo": "입금 lot, FIFO 소진, 환차손익, 전표/GL 반영 흐름",
         }
         return mapping.get(narrative_axis, "")
 
@@ -323,6 +533,7 @@ class DeterministicNarrativeBuilder:
             "access_control": "승인 권한, 승인 주체, 부서 책임을 권한 정책 계층으로 분리",
             "query_filter": "조회 조건, 필터 조합, 결과 목록 구성을 조회 모델로 분리",
             "amount_threshold": "금액 구간, 한도 정책, 고액 처리 경계를 정책 계층으로 분리",
+            "fx_fifo": "입금 lot 원장, FIFO 소진 계산, 환차손익 계산, 전표/GL 반영의 현행 단계를 순서대로 복원",
         }
         return mapping.get(narrative_axis, "정책, 화면, 데이터 계약을 책임 경계에 맞춰 분리")
 
@@ -331,6 +542,8 @@ class DeterministicNarrativeBuilder:
             return f"현재 자산에서는 {subject}의 차단 조건과 저장 전 검증이 한 흐름에 묶여 있습니다."
         if narrative_axis == "workflow":
             return f"현재 자산에서는 {subject}의 승인 흐름과 예외 처리 경계가 한 경로에 얽혀 있습니다."
+        if narrative_axis == "fx_fifo":
+            return f"현재 자산에서는 {subject}의 입금 lot 원장, FIFO 소진 계산, 환차손익, 전표/GL 반영이 같은 흐름에 얽혀 있습니다."
         if narrative_axis == "state_transition":
             return f"현재 자산에서는 {subject}의 상태 전이 판단과 처리 흐름이 같은 경로에 섞여 있습니다."
         if narrative_axis == "access_control":
@@ -348,6 +561,8 @@ class DeterministicNarrativeBuilder:
             return "이 상태가 유지되면 예외 누락과 저장 경로 재작업 위험이 커집니다."
         if narrative_axis == "workflow":
             return "이 상태가 유지되면 승인 단계 누락과 예외 경로 불일치 위험이 커집니다."
+        if narrative_axis == "fx_fifo":
+            return "이 상태가 유지되면 lot 소진 순서, 환차손익, 전표/GL 반영 결과가 서로 어긋날 수 있습니다."
         if narrative_axis == "state_transition":
             return "이 상태가 유지되면 예외 전이 누락과 상태 정합성 오류가 발생할 수 있습니다."
         if narrative_axis == "access_control":
@@ -385,6 +600,7 @@ class DeterministicNarrativeBuilder:
             "access_control": "하는 구조를 우선 정리해야 합니다.",
             "query_filter": "하는 구조를 우선 점검해야 합니다.",
             "amount_threshold": "하는 구조를 우선 정리해야 합니다.",
+            "fx_fifo": "하는 기준을 우선 검증해야 합니다.",
         }
         return mapping.get(narrative_axis, "하는 구조를 우선 정리해야 합니다.")
 
@@ -439,6 +655,33 @@ class DeterministicNarrativeBuilder:
 
     def _general_report_metadata(self, narrative_axis: str) -> tuple[str, list[str], list[str]]:
         mapping: dict[str, tuple[str, list[str], list[str]]] = {
+            "fx_fifo": (
+                "외화 입금, 출금, FIFO lot 소진, 환차손익 계산, 전표 및 GL 흐름을 분석하기 위한 보고서입니다.",
+                ["입금 lot 원장", "출금 lot 소진", "환차손익 계산", "전표 및 GL 흐름"],
+                [
+                    "어떤 lot 순서로 출금이 소진되는가?",
+                    "환차손익은 어떤 환율과 금액 기준으로 계산되는가?",
+                    "계산 결과는 전표와 GL 인터페이스에 어떻게 반영되는가?",
+                ],
+            ),
+            "interface_linkage": (
+                "외부 거래 파일 수신, 인터페이스 적재, 상태 확정, 재처리 흐름을 분석하기 위한 보고서입니다.",
+                ["수신 staging", "상태 확정/ACK", "재처리/실패 이력", "업무 테이블 연계"],
+                [
+                    "어떤 상태값과 파일 키로 staging 적재가 downstream 테이블로 이어지는가?",
+                    "ACK/확정 결과와 최신본(LST)은 어떤 순서로 갱신되는가?",
+                    "retry/fail 처리와 PAY_ORDER 연계는 어디서 보장되는가?",
+                ],
+            ),
+            "settlement_journal": (
+                "정산 확정, 전표 헤더/라인 생성, GL 인터페이스 적재, 취소 역처리 흐름을 분석하기 위한 보고서입니다.",
+                ["정산 헤더/상세", "전표 헤더/라인", "GL 인터페이스", "취소·역처리"],
+                [
+                    "정산 확정은 어떤 기준으로 TN_BKCHNO/TN_BKCHIT 생성과 연결되는가?",
+                    "전표 라인과 GL_INTERFACE reference는 어떤 거래 키로 묶이는가?",
+                    "취소·역처리 시 reverse posting과 PAY_ORDER 상태는 어떻게 맞춰지는가?",
+                ],
+            ),
             "query_filter": (
                 "조회 조건, 필터 조합, 정렬 및 결과 구성 규칙을 분석하기 위한 보고서입니다.",
                 ["조회 조건", "필터 조합", "정렬 기준", "결과 구성 규칙"],
@@ -506,6 +749,31 @@ class DeterministicNarrativeBuilder:
                 ],
             ),
         )
+
+    def _prioritize_fx_fifo_rule_texts(
+        self,
+        grounded_rules,
+        fallback: list[str],
+    ) -> list[str]:
+        prioritized = [
+            item.description.strip()
+            for item in grounded_rules
+            if item.description.strip()
+            and any(keyword in f"{item.title} {item.description}".lower() for keyword in ("fifo", "lot", "환차", "gl", "전표", "gap_amt"))
+        ]
+        ordered = prioritized or [item.description.strip() for item in grounded_rules if item.description.strip()] or fallback
+        return self._dedupe(ordered)[:4]
+
+    def _prioritize_fx_fifo_contracts(
+        self,
+        retained_contracts: list[RetainedContract],
+    ) -> list[RetainedContract]:
+        prioritized = [
+            item
+            for item in retained_contracts
+            if any(keyword in f"{item.item} {item.basis}".lower() for keyword in ("lot", "fifo", "gl", "전표", "gap_amt"))
+        ]
+        return prioritized or retained_contracts
 
     def _accounting_report_metadata(self, accounting: dict[str, Any]) -> tuple[str, list[str], list[str]]:
         del accounting
@@ -639,3 +907,14 @@ class DeterministicNarrativeBuilder:
 
     def _has_accounting_analysis_result(self, analysis: dict[str, Any]) -> bool:
         return bool(analysis.get("candidate_methods") or analysis.get("recommended_method") or analysis.get("reasons"))
+
+    def _dedupe(self, items: list[str]) -> list[str]:
+        output: list[str] = []
+        seen: set[str] = set()
+        for item in items:
+            key = re.sub(r"\s+", " ", str(item or "")).strip().lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            output.append(str(item).strip())
+        return output

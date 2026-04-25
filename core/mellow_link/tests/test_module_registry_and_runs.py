@@ -219,6 +219,33 @@ def test_rebuild_assistant_bundle_run_has_module_metadata(client, monkeypatch):
     assert body["run_kind"] == "rebuild_plan"
 
 
+def test_rebuild_assistant_bundle_run_passes_payload_goal_verbatim(client, monkeypatch):
+    from mellow_link.modules.rebuild_assistant import api as rebuild_api
+
+    captured: dict[str, str] = {}
+
+    def _capture_start(*args, **kwargs):
+        captured["goal"] = kwargs["goal"]
+
+    monkeypatch.setattr(
+        rebuild_api,
+        "start_rebuild_assistant_safe_bundle_run",
+        _capture_start,
+    )
+
+    payload = _safe_bundle_payload()
+    payload["goal"] = "이 SQL/프로시저가 실제로 어떤 처리 흐름과 계산 규칙으로 동작하는지 분석해줘."
+    headers = _user_headers()
+    res = client.post(
+        "/modules/rebuild_assistant/bundle-runs",
+        headers={**headers, "Content-Type": "application/json"},
+        json=payload,
+    )
+
+    assert res.status_code == 200, res.text
+    assert captured["goal"] == payload["goal"]
+
+
 def test_rebuild_assistant_raw_public_route_is_blocked(client):
     headers = _user_headers()
     res = client.post(
@@ -1187,7 +1214,11 @@ if claim["claim_amount"] >= 10000000 and dept_code != "CLAIM_AUDIT": return "심
 
     assert any("상태 전이" in item.name or "상태 전이" in item.structure_summary for item in order_result.design_options)
     assert any("권한" in item.name or "승인" in item.structure_summary or "부서" in item.structure_summary for item in claim_result.design_options)
-    assert any("REVIEW_REQUIRED" in " ".join(week.tasks) for week in order_result.execution_plan)
+    if order_result.family_classification.family == "operational_source":
+        assert all("주차" not in week.week_label for week in order_result.execution_plan)
+        assert any("데이터 흐름" in week.goal or "처리 흐름" in week.goal or "행동 규칙" in week.goal for week in order_result.execution_plan)
+    else:
+        assert any("REVIEW_REQUIRED" in " ".join(week.tasks) for week in order_result.execution_plan)
     assert any("300만원" in " ".join(week.tasks) or "CLAIM_AUDIT" in " ".join(week.tasks) for week in claim_result.execution_plan)
     assert all(item.linked_rules or item.linked_contracts for item in order_result.priority_split_items)
     assert all(item.linked_rules or item.linked_contracts for item in claim_result.priority_split_items)
@@ -1197,7 +1228,10 @@ if claim["claim_amount"] >= 10000000 and dept_code != "CLAIM_AUDIT": return "심
     assert [week.goal for week in order_result.execution_plan] != [week.goal for week in claim_result.execution_plan]
     assert any(token in order_result.priority_split_items[0].reason for token in ("VIP", "REVIEW_REQUIRED", "대리점"))
     assert any(token in claim_result.priority_split_items[0].reason for token in ("CLAIM_AUDIT", "승인", "부서", "권한"))
-    assert any("REVIEW_REQUIRED" in risk or "배송보류" in risk for risk in order_result.risks)
+    if order_result.family_classification.family == "operational_source":
+        assert any("정합성" in risk or "재처리" in risk for risk in order_result.risks)
+    else:
+        assert any("REVIEW_REQUIRED" in risk or "배송보류" in risk for risk in order_result.risks)
     assert any("금액 한도" in risk or "B99" in risk or "FRAUD" in risk or "CLAIM_AUDIT" in risk or "권한 규칙" in risk for risk in claim_result.risks)
 
 
@@ -1264,11 +1298,19 @@ orderRepository.save(order);
     assert "검증 순서" not in result.one_line_conclusion
     assert result.recommended_option is not None
     assert "검증 규칙 중심" not in result.recommended_option.name
-    assert any(token in result.one_line_conclusion for token in ("상태 전이", "처리 가능 상태", "전이 조건"))
-    assert any(token in " ".join(result.executive_summary_v2) for token in ("상태 전이", "처리 가능 상태"))
+    if result.family_classification.family == "operational_source":
+        assert result.one_line_conclusion.startswith("본 자산은")
+        assert result.executive_summary_v2[0].startswith("현행 분석:")
+        assert all("주차" not in week.week_label for week in result.execution_plan[:3])
+    else:
+        assert any(token in result.one_line_conclusion for token in ("상태 전이", "처리 가능 상태", "전이 조건"))
+        assert any(token in " ".join(result.executive_summary_v2) for token in ("상태 전이", "처리 가능 상태"))
     assert all("검증" not in item.statement for item in result.decision_items)
     assert all("검증" not in item.item for item in result.priority_split_items[:2])
-    assert all("검증" not in week.goal for week in result.execution_plan[:3])
+    if result.family_classification.family == "operational_source":
+        assert any("데이터 흐름" in week.goal or "행동 규칙" in week.goal for week in result.execution_plan[:3])
+    else:
+        assert all("검증" not in week.goal for week in result.execution_plan[:3])
     backend_draft = " ".join(result.recomposition_draft.backend)
     assert "검증 계층" not in backend_draft
     assert "상태 전이" in backend_draft or "처리 가능 여부" in backend_draft
@@ -1387,7 +1429,12 @@ def test_rebuild_assistant_amount_threshold_sample_applies_amount_threshold_temp
     assert any(item.template_id == "amount_threshold" for item in applied)
     assert primary is not None
     assert primary.template_id == "amount_threshold"
-    assert "금액" in result.one_line_conclusion or "한도" in result.one_line_conclusion
+    if result.family_classification.family == "operational_source":
+        assert result.report_purpose == "현행 운영 로직, 데이터 흐름, 처리 순서를 분석하기 위한 보고서입니다."
+        assert result.one_line_conclusion.startswith("본 자산은")
+        assert all("주차" not in week.week_label for week in result.execution_plan)
+    else:
+        assert "금액" in result.one_line_conclusion or "한도" in result.one_line_conclusion
     assert result.recommended_option is not None
     assert "금액 한도" in result.recommended_option.name or "한도" in result.recommended_option.selection_reason
     top_rule_text = " ".join(f"{item.title} {item.description}" for item in grounded[:3])
@@ -1415,7 +1462,10 @@ def test_rebuild_assistant_amount_threshold_sample_applies_amount_threshold_temp
     assert "검증 흐름" not in execution_text
     assert "저장 전 검증" not in execution_text
     assert "차단 조건" not in execution_text
-    assert "검증" not in " ".join(week.goal for week in result.execution_plan)
+    if result.family_classification.family == "operational_source":
+        assert any("데이터 흐름" in week.goal or "행동 규칙" in week.goal or "계산" in week.goal for week in result.execution_plan)
+    else:
+        assert "검증" not in " ".join(week.goal for week in result.execution_plan)
     rendered = "\n".join(
         result.executive_summary_v2
         + [result.one_line_conclusion]
@@ -1429,9 +1479,12 @@ def test_rebuild_assistant_amount_threshold_sample_applies_amount_threshold_temp
     )
     assert "규칙 규칙" not in rendered
     assert "검증" not in rendered
-    assert "금액 구간" in execution_text
-    assert "한도" in execution_text
-    assert "승인" in execution_text
+    if result.family_classification.family == "operational_source":
+        assert "데이터 흐름" in execution_text or "행동 규칙" in execution_text or "계산" in execution_text
+    else:
+        assert "금액 구간" in execution_text
+        assert "한도" in execution_text
+        assert "승인" in execution_text
 
 
 def test_rebuild_assistant_workflow_single_approval_detected():
@@ -1825,12 +1878,20 @@ def test_rebuild_assistant_validation_sample_uses_validation_centered_outputs():
     top_titles = [rule.title for rule in result.grounded_business_rules[:2]]
     assert any(token in " ".join(top_titles) for token in ("금액 한도", "중복 체크", "저장 전 차단", "선행"))
     assert top_titles[0] != "마감/취소 상태 조정 금지"
-    assert "차단 조건" in result.one_line_conclusion or "검증 순서" in result.one_line_conclusion
+    if result.family_classification.family == "operational_source":
+        assert result.report_purpose == "현행 운영 로직, 데이터 흐름, 처리 순서를 분석하기 위한 보고서입니다."
+        assert result.one_line_conclusion.startswith("본 자산은")
+        assert result.executive_summary_v2[0].startswith("현행 분석:")
+    else:
+        assert "차단 조건" in result.one_line_conclusion or "검증 순서" in result.one_line_conclusion
     assert result.recommended_option is not None
     assert "검증" in result.recommended_option.name
     assert "상태 전이 중심" not in result.recommended_option.name
     assert "검증" in result.priority_split_items[0].item
-    assert "검증" in result.execution_plan[0].goal
+    if result.family_classification.family == "operational_source":
+        assert result.execution_plan[0].goal == "데이터 흐름과 반영 순서를 구조화합니다."
+    else:
+        assert "검증" in result.execution_plan[0].goal
     assert "상태 전이 중심" not in result.one_line_conclusion
 
 
@@ -1967,7 +2028,10 @@ def test_rebuild_assistant_state_transition_draft_starts_with_state_transition_a
     assert "저장 전 검증" not in result.recomposition_draft.database[0]
     assert all("저장 전 검증" not in item for item in result.recomposition_draft.database[:2])
     assert result.risks
-    assert "상태 전이" in result.risks[0] or "처리 가능 상태" in result.risks[0]
+    if result.family_classification.family == "operational_source":
+        assert "정합성" in result.risks[0] or "재처리" in result.risks[0]
+    else:
+        assert "상태 전이" in result.risks[0] or "처리 가능 상태" in result.risks[0]
 
 
 def test_rebuild_assistant_state_transition_status_contract_keeps_input_and_result_statuses():

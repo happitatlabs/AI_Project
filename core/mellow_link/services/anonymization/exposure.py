@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .schemas import SafeAnalysisBundle
+from .schemas import AnonymizationReviewReport, SafeAnalysisBundle
 
 # v0 exposure invariants:
 # - preview is NOT canonical content. It is a stricter-masked derivative for debug convenience only.
@@ -116,12 +116,23 @@ ALLOWED_PREVIEW_KEYWORDS = {
     "while",
 }
 CANONICAL_TOKEN_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"\bCLS_\d+\b"), "[CLASS]"),
-    (re.compile(r"\bFUNC_\d+\b"), "[FUNCTION]"),
-    (re.compile(r"\bVAR_\d+\b"), "[VARIABLE]"),
-    (re.compile(r"\bTBL_\d+\b"), "[TABLE]"),
-    (re.compile(r"\bCOL_\d+\b"), "[COLUMN]"),
-    (re.compile(r"\bAPI_\d+\b"), "[API]"),
+    (re.compile(r"(?<![A-Za-z0-9_])CLS_\d+(?!\d)"), "[CLASS]"),
+    (re.compile(r"(?<![A-Za-z0-9_])FUNC_\d+(?!\d)"), "[FUNCTION]"),
+    (re.compile(r"(?<![A-Za-z0-9_])VAR_\d+(?!\d)"), "[VARIABLE]"),
+    (re.compile(r"(?<![A-Za-z0-9_])TBL_\d+(?!\d)"), "[TABLE]"),
+    (re.compile(r"(?<![A-Za-z0-9_])COL_\d+(?!\d)"), "[COLUMN]"),
+    (re.compile(r"(?<![A-Za-z0-9_])API_\d+(?!\d)"), "[API]"),
+    (re.compile(r"(?<![A-Za-z0-9_])COMPANY_\d+(?!\d)"), "[COMPANY]"),
+    (re.compile(r"(?<![A-Za-z0-9_])ORG_\d+(?!\d)"), "[ORG]"),
+    (re.compile(r"(?<![A-Za-z0-9_])DEPT_\d+(?!\d)"), "[DEPARTMENT]"),
+    (re.compile(r"(?<![A-Za-z0-9_])PERSON_\d+(?!\d)"), "[PERSON]"),
+    (re.compile(r"(?<![A-Za-z0-9_])PROJECT_\d+(?!\d)"), "[PROJECT]"),
+    (re.compile(r"(?<![A-Za-z0-9_])CLIENT_\d+(?!\d)"), "[CLIENT]"),
+    (re.compile(r"(?<![A-Za-z0-9_])EMAIL_\d+(?!\d)"), "[EMAIL]"),
+    (re.compile(r"(?<![A-Za-z0-9_])PHONE_\d+(?!\d)"), "[PHONE]"),
+    (re.compile(r"(?<![A-Za-z0-9_])ADDRESS_\d+(?!\d)"), "[ADDRESS]"),
+    (re.compile(r"(?<![A-Za-z0-9_])BUSINESS_\d+(?!\d)"), "[BUSINESS]"),
+    (re.compile(r"(?<![A-Za-z0-9_])CONTRACT_\d+(?!\d)"), "[CONTRACT]"),
 )
 PATH_PATTERN = re.compile(r"(https?://[^\s]+|[A-Za-z]:\\[^\s]+|/(?:[A-Za-z0-9_.-]+/?)+)")
 EMAIL_PATTERN = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
@@ -341,6 +352,7 @@ def build_debug_anonymization_report_from_bundle(
     bundle: SafeAnalysisBundle,
     *,
     dev_event_visible_in_user_stream: bool = False,
+    review_report: AnonymizationReviewReport | None = None,
 ) -> dict[str, Any]:
     provisional_summary = build_anonymization_summary_from_bundle(bundle)
     preview_candidates = _build_source_previews(bundle)
@@ -365,10 +377,32 @@ def build_debug_anonymization_report_from_bundle(
         omitted_preview_count=max(0, len(bundle.sources) - len(source_previews)),
         validation_passed=validation["passed"],
     )
-    return {
+    report = {
         "policy_version": POLICY_VERSION,
         "report_summary": report_summary,
         "validation": validation,
         "source_previews": source_previews,
         "bundle_debug": bundle_debug,
     }
+    if review_report is not None:
+        candidate_debug = _build_review_candidate_debug(review_report)
+        if candidate_debug:
+            report["candidate_debug"] = candidate_debug
+    return report
+
+
+def _build_review_candidate_debug(review_report: AnonymizationReviewReport) -> list[dict[str, Any]]:
+    entries = getattr(review_report, "debug_candidate_evidence", []) or []
+    return [
+        {
+            "severity": entry.severity,
+            "entity_type_guess": entry.entity_type_guess,
+            "asset_id": entry.asset_id,
+            "asset_name": entry.asset_name,
+            "locator": entry.locator,
+            "reason": entry.reason,
+            "raw_value": entry.raw_value,
+            "source_line": entry.source_line,
+        }
+        for entry in entries
+    ]

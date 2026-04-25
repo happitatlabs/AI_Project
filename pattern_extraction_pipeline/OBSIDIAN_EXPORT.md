@@ -6,9 +6,12 @@ tags:
   - training-data
   - pipeline
 created: 2026-04-06
+status: archived-reference
 ---
 
 # Pattern Extraction Pipeline 구축 메모
+
+> 현재 이 루트 폴더는 문서용 셸이며, 실제 파이프라인 코드는 [`_archive/pipelines/pattern_extraction_pipeline`](/C:/Users/Hyein/ClaudeAI/AI_Project/_archive/pipelines/pattern_extraction_pipeline)에 보관되어 있다.
 
 ## 개요
 
@@ -67,31 +70,35 @@ created: 2026-04-06
 
 ## 생성 파일 목록
 
-- `pattern_extraction_pipeline/pipeline/README.md`
-- `pattern_extraction_pipeline/pipeline/input_loader.py`
-- `pattern_extraction_pipeline/pipeline/normalizer.py`
-- `pattern_extraction_pipeline/pipeline/pattern_extractor.py`
-- `pattern_extraction_pipeline/pipeline/pattern_serializer.py`
-- `pattern_extraction_pipeline/pipeline/training_bundle_builder.py`
-- `pattern_extraction_pipeline/pipeline/main.py`
+- `_archive/pipelines/pattern_extraction_pipeline/pipeline/README.md`
+- `_archive/pipelines/pattern_extraction_pipeline/pipeline/input_loader.py`
+- `_archive/pipelines/pattern_extraction_pipeline/pipeline/normalizer.py`
+- `_archive/pipelines/pattern_extraction_pipeline/pipeline/pattern_extractor.py`
+- `_archive/pipelines/pattern_extraction_pipeline/pipeline/pattern_serializer.py`
+- `_archive/pipelines/pattern_extraction_pipeline/pipeline/training_bundle_builder.py`
+- `_archive/pipelines/pattern_extraction_pipeline/pipeline/main.py`
 - `pattern_extraction_pipeline/OBSIDIAN_EXPORT.md`
 
 ## 디렉터리 구조
 
 ```text
-pattern_extraction_pipeline/
-├─ OBSIDIAN_EXPORT.md
-└─ pipeline/
-   ├─ README.md
-   ├─ input_loader.py
-   ├─ normalizer.py
-   ├─ pattern_extractor.py
-   ├─ pattern_serializer.py
-   ├─ training_bundle_builder.py
-   ├─ main.py
-   └─ output/
-      ├─ sample_sql_001_patterns.json
-      └─ training_bundle.json
+AI_Project/
+├─ pattern_extraction_pipeline/
+│  └─ OBSIDIAN_EXPORT.md
+└─ _archive/
+   └─ pipelines/
+      └─ pattern_extraction_pipeline/
+         └─ pipeline/
+            ├─ README.md
+            ├─ input_loader.py
+            ├─ normalizer.py
+            ├─ pattern_extractor.py
+            ├─ pattern_serializer.py
+            ├─ training_bundle_builder.py
+            ├─ main.py
+            └─ output/
+               ├─ sample_sql_001_patterns.json
+               └─ training_bundle.json
 ```
 
 ## 실행 방법
@@ -99,7 +106,7 @@ pattern_extraction_pipeline/
 프로젝트 루트에서:
 
 ```powershell
-python pattern_extraction_pipeline/pipeline/main.py
+python _archive/pipelines/pattern_extraction_pipeline/pipeline/main.py
 ```
 
 또는 `pipeline` 디렉터리에서:
@@ -110,8 +117,8 @@ python main.py
 
 ## 실행 결과 경로
 
-- 결과 JSON: `pattern_extraction_pipeline/pipeline/output/sample_sql_001_patterns.json`
-- bundle JSON: `pattern_extraction_pipeline/pipeline/output/training_bundle.json`
+- 결과 JSON: `_archive/pipelines/pattern_extraction_pipeline/pipeline/output/sample_sql_001_patterns.json`
+- bundle JSON: `_archive/pipelines/pattern_extraction_pipeline/pipeline/output/training_bundle.json`
 
 ## 검증 결과
 
@@ -168,7 +175,7 @@ python main.py
 프로젝트 루트에서:
 
 ```powershell
-python pattern_extraction_pipeline/pipeline/main.py
+python _archive/pipelines/pattern_extraction_pipeline/pipeline/main.py
 ```
 
 또는 `pipeline` 디렉터리에서:
@@ -177,7 +184,7 @@ python pattern_extraction_pipeline/pipeline/main.py
 python main.py
 ```
 
-실행 후 `pipeline/output/` 아래에 패턴 결과 JSON과 training bundle JSON이 생성됩니다.
+실행 후 `_archive/pipelines/pattern_extraction_pipeline/pipeline/output/` 아래에 패턴 결과 JSON과 training bundle JSON이 생성됩니다.
 ```
 
 ### `pipeline/input_loader.py`

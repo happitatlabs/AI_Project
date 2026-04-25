@@ -2,7 +2,7 @@
 RAG Service - Retrieval-Augmented Generation for Mellow-Link
 
 This module provides document embedding and retrieval capabilities:
-- Document text extraction (PDF, DOCX, TXT, MD)
+- Document text extraction (PDF, DOCX, PPT/PPTX, TXT, MD)
 - Embedding generation via Ollama
 - Vector storage in SQLite with JSON serialization
 - Cosine similarity search
@@ -27,6 +27,8 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
 
 import httpx
+
+from mellow_link.services.presentation_extraction import extract_presentation_sml
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +92,10 @@ def extract_text_from_file(file_path: Path, content_bytes: bytes = None) -> str:
     """
     Extract text from various file formats.
 
-    Supports: PDF, DOCX, TXT, MD, HTML
+    Supports: PDF, DOCX, PPT/PPTX, TXT, MD, HTML
+
+    PPT/PPTX is normalized into SML, a canonical text representation used for
+    anonymization and analysis pre-processing rather than a final output format.
     """
     suffix = file_path.suffix.lower()
 
@@ -105,6 +110,9 @@ def extract_text_from_file(file_path: Path, content_bytes: bytes = None) -> str:
 
         elif suffix == ".docx":
             return _extract_docx(file_path, content_bytes)
+
+        elif suffix == ".pptx" or suffix == ".ppt":
+            return extract_presentation_sml(file_path, content_bytes)
 
         elif suffix == ".html" or suffix == ".htm":
             return _extract_html(file_path, content_bytes)

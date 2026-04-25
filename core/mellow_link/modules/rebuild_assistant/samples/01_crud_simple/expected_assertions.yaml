@@ -7,7 +7,7 @@ assertions:
     primary_judgment: query_filter
     structural_judgment: observation_only
     selected_narrative_judgment: query_filter
-    report_purpose: 조회 조건, 필터 조합, 정렬 및 결과 구성 규칙을 분석하기 위한 보고서입니다.
+    report_purpose: 현행 운영 로직, 데이터 흐름, 처리 순서를 분석하기 위한 보고서입니다.
     recommended_strategy: 리팩터링 우선
     first_entry_point: ui:CrudPage#submit
     top_decision_type: null
@@ -15,7 +15,7 @@ assertions:
     decision_count: 0
     feature_slice_count: 1
   stable_hashes:
-    execution_plan: 4684ffd85b644a699103a04cd55a2fe885639de8
+    execution_plan: 6f38ba356c5eeab5e4bcd88f139f61a374ac541c
     design_options: 771342c6b21f542bda46adcb348a5932833a61c9
     recommended_option: fa9a476a3ee21e8712a30f261c51a1b67c7bcef0
   issue_expectations:
@@ -28,9 +28,9 @@ assertions:
       - validation_guard_leak
   planning_expectations:
     recommended_option_title: "옵션 A. 조회 모델 중심 모듈형 구조"
-    execution_stage_count: 4
-    first_execution_stage_title: "1주차"
-    last_execution_stage_title: "4주차"
+    execution_stage_count: 3
+    first_execution_stage_title: "1단계"
+    last_execution_stage_title: "3단계"
     must_link_decision_ids: true
   ai_narrative_expectations:
     allowed_to_change_fields:
@@ -42,7 +42,7 @@ assertions:
   draft_notes:
     status: promoted_expansion_regression
     sample_role: expansion_candidate
-    current_report_purpose: 조회 조건, 필터 조합, 정렬 및 결과 구성 규칙을 분석하기 위한 보고서입니다.
+    current_report_purpose: 현행 운영 로직, 데이터 흐름, 처리 순서를 분석하기 위한 보고서입니다.
     promotion_reason:
       - low-signal 샘플에서도 structural_judgment와 narrative_axis가 분리되는지 검증한다.
       - decision_count 0인 경우에도 설명 surface가 구조 판단을 과장하지 않는지 고정한다.

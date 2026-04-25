@@ -53,6 +53,7 @@ from .database import (
     ModernizationProject,
     ProjectAsset,
     ProjectRunHistory,
+    AnalysisContext,
     # Helper Functions
     create_default_folders_for_user,
     ensure_user_has_folders,
@@ -138,6 +139,7 @@ __all__ = [
     "ModernizationProject",
     "ProjectAsset",
     "ProjectRunHistory",
+    "AnalysisContext",
     # Run Events
     "create_run",
     "emit_event",

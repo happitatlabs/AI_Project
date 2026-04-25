@@ -1,0 +1,3 @@
+승인(workflow)이나 generic redesign 결론으로 밀지 마라.
+재설계 로드맵보다 현행 정산-전표-GL 체인과 취소 역처리를 우선 복원하라.
+TN_SETTLE_HDR, TN_SETTLE_DTL, TN_BKCHNO, TN_BKCHIT, GL_INTERFACE, TN_PAY_ORDER_DTL 중심으로 설명하라.
