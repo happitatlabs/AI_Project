@@ -55,7 +55,7 @@ _SOURCE_EXTENSIONS = {
     ".hpp",
 }
 _UI_EXTENSIONS = {".html", ".htm", ".jsp", ".jspx", ".ftl", ".vue", ".svelte"}
-_DOC_EXTENSIONS = {".md", ".txt", ".rst", ".adoc"}
+_DOC_EXTENSIONS = {".md", ".txt", ".rst", ".adoc", ".ppt", ".pptx"}
 
 
 class AnalysisContextBuilder:
@@ -345,6 +345,8 @@ class AnalysisContextBuilder:
             return "source"
         if suffix == ".json":
             return "json"
+        if any(token in hint for token in ("presentation", "slide", "deck")):
+            return "doc"
         if suffix in _DOC_EXTENSIONS:
             return "doc"
         return hint or "other"

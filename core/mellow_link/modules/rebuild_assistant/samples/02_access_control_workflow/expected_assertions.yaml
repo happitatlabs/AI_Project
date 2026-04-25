@@ -4,7 +4,7 @@ assertions:
     primary_judgment: workflow
     structural_judgment: refactor
     selected_narrative_judgment: workflow
-    report_purpose: 승인 트리거, 승인 단계, 예외 처리 흐름을 분석하기 위한 보고서입니다.
+    report_purpose: 현행 운영 로직, 데이터 흐름, 처리 순서를 분석하기 위한 보고서입니다.
     recommended_strategy: 리팩터링 우선
     first_entry_point: ui:ClaimApprovalPage#approve
     top_decision_type: refactor
@@ -12,7 +12,7 @@ assertions:
     decision_count: 4
     feature_slice_count: 1
   stable_hashes:
-    execution_plan: 8631b6887a5f3febf81e05b0b321671dfe9e89da
+    execution_plan: f03266caa68dfb4e367f19b86b78c458c0da241a
     design_options: a80315403d0596075de59dc23b10adae16d6b40c
     recommended_option: be694f5b1833a7417e1dea80e08ff83a595442dc
   issue_expectations:
@@ -23,9 +23,9 @@ assertions:
     must_not_include_detectors: []
   planning_expectations:
     recommended_option_title: "옵션 A. 승인 흐름 중심 모듈형 구조"
-    execution_stage_count: 5
-    first_execution_stage_title: "1주차"
-    last_execution_stage_title: "5주차"
+    execution_stage_count: 3
+    first_execution_stage_title: "1단계"
+    last_execution_stage_title: "3단계"
     must_link_decision_ids: true
   ai_narrative_expectations:
     allowed_to_change_fields:
@@ -37,7 +37,7 @@ assertions:
   draft_notes:
     status: promoted_expansion_regression
     sample_role: expansion_candidate
-    current_report_purpose: 승인 트리거, 승인 단계, 예외 처리 흐름을 분석하기 위한 보고서입니다.
+    current_report_purpose: 현행 운영 로직, 데이터 흐름, 처리 순서를 분석하기 위한 보고서입니다.
     measured_axes:
       - workflow
       - duplicate_logic_candidate

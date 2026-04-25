@@ -58,7 +58,7 @@ class PlanningSynthesizer:
         prepared.pattern_candidates = list(decisions.pattern_candidates or [])
         applied_templates = self._template_source(decisions)
         if not applied_templates:
-            raise ValueError("DecisionArtifacts.applied_templates is required for planning.")
+            return []
         return self.helper._ordered_templates_for_generation(prepared, applied_templates, grounded_rules)
 
     def build_priority_split_items(

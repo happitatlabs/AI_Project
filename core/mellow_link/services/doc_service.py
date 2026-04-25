@@ -69,6 +69,7 @@ class DocumentRequest:
     metadata: Dict[str, str] = field(default_factory=dict)
     style_options: Dict[str, Any] = field(default_factory=dict)
     filename: Optional[str] = None
+    payload: Any = None
 
 
 @dataclass
@@ -247,7 +248,8 @@ class DocumentService:
                     request.content,
                     output_path,
                     request.title,
-                    request.style_options
+                    request.style_options,
+                    request.payload,
                 )
             elif request.output_type == DocumentType.PDF:
                 result = await self._generate_pdf(
@@ -355,7 +357,8 @@ class DocumentService:
         content: str,
         output_path: Path,
         title: str,
-        options: Dict[str, Any]
+        options: Dict[str, Any],
+        payload: Any = None,
     ) -> DocumentResult:
         """
         Generate PPTX document using python-pptx.
@@ -375,6 +378,11 @@ class DocumentService:
                 )
 
             prs = Presentation()
+
+            if options.get("renderer") == "slide_schema" and isinstance(payload, dict):
+                self._render_slide_schema_pptx(prs, payload, title=title, font_size=options.get("font_size", 20))
+                prs.save(str(output_path))
+                return max(1, len(prs.slides))
 
             title_slide = prs.slides.add_slide(prs.slide_layouts[0])
             title_slide.shapes.title.text = title
@@ -608,6 +616,7 @@ class DocumentService:
             metadata=request_data.get("metadata", {}),
             style_options=request_data.get("style_options", {}),
             filename=request_data.get("filename"),
+            payload=request_data.get("payload"),
         )
         return await self.generate(request)
 
@@ -714,6 +723,519 @@ class DocumentService:
         if not lines:
             return [["내용 없음"]]
         return [lines[index:index + size] for index in range(0, len(lines), size)]
+
+    def _render_slide_schema_pptx(
+        self,
+        prs: Any,
+        payload: Dict[str, Any],
+        *,
+        title: str,
+        font_size: int,
+    ) -> None:
+        from pptx.util import Inches
+
+        from mellow_link.modules.rebuild_assistant.postprocess.schemas import SlideSchemaDeck
+
+        deck = SlideSchemaDeck.model_validate(payload)
+        blank_layout = prs.slide_layouts[6]
+        for slide_schema in deck.slides:
+            slide = prs.slides.add_slide(blank_layout)
+            self._render_slide_schema_header(slide, slide_schema, fallback_title=title)
+            if slide_schema.slide_type == "overview":
+                self._render_overview_slide(slide, slide_schema, font_size=font_size)
+            elif slide_schema.slide_type == "as_is_gap":
+                self._render_as_is_gap_slide(slide, slide_schema, font_size=font_size)
+            elif slide_schema.slide_type == "flow":
+                self._render_flow_slide(slide, slide_schema, font_size=font_size)
+            elif slide_schema.slide_type == "design":
+                self._render_design_slide(slide, slide_schema, font_size=font_size)
+            elif slide_schema.slide_type == "vision":
+                self._render_vision_slide(slide, slide_schema, font_size=font_size)
+            if slide_schema.absorbed_summary_text:
+                self._render_absorbed_summary_note(slide, slide_schema)
+
+    def _render_slide_schema_header(self, slide: Any, slide_schema: Any, *, fallback_title: str) -> None:
+        from pptx.util import Inches
+
+        theme = self._slide_type_theme(slide_schema.slide_type)
+        rendered_title = slide_schema.title or fallback_title
+        if slide_schema.is_continuation or slide_schema.sequence > 1:
+            rendered_title = f"{rendered_title} ({slide_schema.sequence})"
+        self._add_textbox(
+            slide,
+            Inches(0.45),
+            Inches(0.3),
+            Inches(6.6),
+            Inches(0.45),
+            rendered_title,
+            font_size=28,
+            bold=True,
+            text_rgb=theme["accent"],
+        )
+        if slide_schema.is_continuation:
+            self._render_continuation_badge(slide, slide_schema, theme=theme)
+        if slide_schema.headline:
+            self._render_headline_band(slide, slide_schema.headline, theme=theme)
+
+    def _render_continuation_badge(self, slide: Any, slide_schema: Any, *, theme: Dict[str, tuple[int, int, int]]) -> None:
+        from pptx.util import Inches
+
+        badge_text = "독립 연속 장표" if slide_schema.continuation_value == "retain" else "보조 연속 장표"
+        self._add_textbox(
+            slide,
+            Inches(6.95),
+            Inches(0.26),
+            Inches(1.9),
+            Inches(0.44),
+            badge_text,
+            font_size=11,
+            bold=True,
+            fill_rgb=theme["accent"],
+            text_rgb=(255, 255, 255),
+            line_rgb=theme["accent"],
+            center=True,
+        )
+
+    def _render_headline_band(self, slide: Any, headline: str, *, theme: Dict[str, tuple[int, int, int]]) -> None:
+        from pptx.util import Inches
+
+        self._add_textbox(
+            slide,
+            Inches(0.45),
+            Inches(0.84),
+            Inches(8.35),
+            Inches(0.52),
+            headline,
+            font_size=16,
+            fill_rgb=theme["panel"],
+            line_rgb=theme["border"],
+            text_rgb=theme["accent"],
+        )
+
+    def _render_overview_slide(self, slide: Any, slide_schema: Any, *, font_size: int) -> None:
+        from pptx.util import Inches
+
+        items = list(slide_schema.context_bullets or [])
+        scope_items = list(slide_schema.scope_bullets or [])
+        constraint_items = list(slide_schema.constraint_bullets or [])
+        layout = slide_schema.layout_hint or "overview_context_only"
+        if layout == "overview_context_scope_constraints":
+            self._add_bullet_box(slide, Inches(0.55), Inches(1.4), Inches(5.0), Inches(4.8), "현행 요약", items, font_size=font_size, style_key="overview")
+            self._add_bullet_box(slide, Inches(5.8), Inches(1.4), Inches(3.0), Inches(2.15), "범위", scope_items, font_size=max(14, font_size - 2), style_key="overview_meta")
+            self._add_bullet_box(slide, Inches(5.8), Inches(3.8), Inches(3.0), Inches(2.15), "제약", constraint_items, font_size=max(14, font_size - 2), style_key="overview_meta")
+            return
+        if layout == "overview_context_scope":
+            self._add_bullet_box(slide, Inches(0.55), Inches(1.4), Inches(5.6), Inches(4.8), "현행 요약", items, font_size=font_size, style_key="overview")
+            self._add_bullet_box(
+                slide,
+                Inches(6.35),
+                Inches(1.4),
+                Inches(2.7),
+                Inches(4.8),
+                "범위 / 제약",
+                scope_items + constraint_items,
+                font_size=max(14, font_size - 2),
+                style_key="overview_meta",
+            )
+            return
+        if layout == "overview_meta_split":
+            self._add_bullet_box(slide, Inches(0.55), Inches(1.4), Inches(4.1), Inches(4.8), "추가 배경", items, font_size=max(14, font_size - 1), style_key="overview")
+            self._add_bullet_box(slide, Inches(4.9), Inches(1.4), Inches(1.95), Inches(4.8), "범위", scope_items, font_size=max(13, font_size - 3), style_key="overview_meta")
+            self._add_bullet_box(slide, Inches(7.0), Inches(1.4), Inches(2.0), Inches(4.8), "제약", constraint_items, font_size=max(13, font_size - 3), style_key="overview_meta")
+            return
+        self._add_bullet_box(slide, Inches(0.55), Inches(1.4), Inches(8.4), Inches(4.9), "현행 요약", items, font_size=font_size, style_key="overview")
+
+    def _render_as_is_gap_slide(self, slide: Any, slide_schema: Any, *, font_size: int) -> None:
+        from pptx.util import Inches
+
+        if slide_schema.layout_hint == "gap_risk_continuation":
+            self._add_bullet_box(
+                slide,
+                Inches(0.55),
+                Inches(1.4),
+                Inches(5.0),
+                Inches(4.2),
+                "핵심 GAP",
+                list(slide_schema.gap_bullets or []),
+                font_size=max(14, font_size - 2),
+                style_key="approach_core",
+            )
+            self._add_bullet_box(
+                slide,
+                Inches(5.8),
+                Inches(1.4),
+                Inches(3.1),
+                Inches(4.2),
+                "검토 포인트",
+                list(slide_schema.risk_bullets or []),
+                font_size=13,
+                style_key="approach_risk",
+            )
+            if slide_schema.decision_message:
+                self._add_textbox(slide, Inches(0.65), Inches(5.8), Inches(8.1), Inches(0.55), slide_schema.decision_message, font_size=13, bold=True, fill_rgb=(247, 244, 240), line_rgb=(190, 172, 154))
+            return
+        self._add_bullet_box(
+            slide,
+            Inches(0.45),
+            Inches(1.4),
+            Inches(2.7),
+            Inches(3.65),
+            "AS-IS",
+            list(slide_schema.as_is_bullets or []),
+            font_size=max(14, font_size - 2),
+            style_key="approach_as_is",
+        )
+        self._add_bullet_box(
+            slide,
+            Inches(3.35),
+            Inches(1.4),
+            Inches(2.7),
+            Inches(3.65),
+            "GAP",
+            list(slide_schema.gap_bullets or []),
+            font_size=max(14, font_size - 2),
+            style_key="approach_core",
+        )
+        self._add_bullet_box(
+            slide,
+            Inches(6.25),
+            Inches(1.4),
+            Inches(2.7),
+            Inches(3.65),
+            "TO-BE",
+            list(slide_schema.to_be_bullets or []),
+            font_size=max(14, font_size - 2),
+            style_key="approach_to_be",
+        )
+        if slide_schema.risk_bullets:
+            self._add_bullet_box(
+                slide,
+                Inches(0.55),
+                Inches(5.25),
+                Inches(8.5),
+                Inches(1.35),
+                "검토 포인트",
+                list(slide_schema.risk_bullets or []),
+                font_size=13,
+                style_key="approach_risk",
+            )
+
+    def _render_flow_slide(self, slide: Any, slide_schema: Any, *, font_size: int) -> None:
+        from pptx.util import Inches
+
+        steps = list(slide_schema.steps or [])
+        if slide_schema.layout_hint == "timeline_horizontal" and steps:
+            card_width = Inches(1.95)
+            left_positions = [Inches(0.55), Inches(2.72), Inches(4.89), Inches(7.06)]
+            for index, step in enumerate(steps[:4]):
+                self._add_bullet_box(
+                    slide,
+                    left_positions[index],
+                    Inches(1.65),
+                    card_width,
+                    Inches(2.9),
+                    step.step_label,
+                    [step.step_text],
+                    font_size=max(13, font_size - 3),
+                    style_key="flow_step",
+                )
+            if slide_schema.action_bullets:
+                self._add_bullet_box(slide, Inches(0.75), Inches(4.95), Inches(8.0), Inches(1.35), "중점 실행 과제", list(slide_schema.action_bullets or []), font_size=13, style_key="flow_actions")
+            return
+        if slide_schema.layout_hint in ("stacked_flow", "flow_continuation"):
+            step_lines = [f"{step.step_label} | {step.step_text}" for step in steps]
+            self._add_bullet_box(
+                slide,
+                Inches(0.55),
+                Inches(1.4),
+                Inches(5.6),
+                Inches(4.85),
+                "단계별 추진 흐름",
+                step_lines,
+                font_size=max(14, font_size - 1),
+                style_key="flow_stack",
+            )
+            if slide_schema.action_bullets:
+                self._add_bullet_box(slide, Inches(6.4), Inches(1.4), Inches(2.55), Inches(2.6), "중점 실행 과제", list(slide_schema.action_bullets or []), font_size=13, style_key="flow_actions")
+            if slide_schema.footer_note:
+                self._add_textbox(slide, Inches(6.4), Inches(4.35), Inches(2.45), Inches(0.9), slide_schema.footer_note, font_size=12, bold=False, fill_rgb=(242, 245, 248), line_rgb=(176, 188, 201))
+            return
+        step_lines = [f"{step.step_label} | {step.step_text}" for step in steps]
+        self._add_bullet_box(slide, Inches(0.55), Inches(1.4), Inches(8.4), Inches(4.5), "단계별 추진 흐름", step_lines, font_size=max(14, font_size - 1), style_key="flow_stack")
+
+    def _render_design_slide(self, slide: Any, slide_schema: Any, *, font_size: int) -> None:
+        from pptx.util import Inches
+
+        if not list(slide_schema.rule_cards or []) and slide_schema.flow_bullets:
+            self._add_bullet_box(
+                slide,
+                Inches(0.75),
+                Inches(1.75),
+                Inches(7.95),
+                Inches(3.8),
+                "계산 / 전표 / GL 흐름",
+                list(slide_schema.flow_bullets or []),
+                font_size=14,
+                style_key="design_flow",
+            )
+            return
+        use_meta_sidebar = slide_schema.layout_hint == "rule_cards_with_meta_sidebar"
+        positions = [
+            (Inches(0.55), Inches(1.4)),
+            (Inches(3.9), Inches(1.4)),
+            (Inches(0.55), Inches(3.4)),
+            (Inches(3.9), Inches(3.4)),
+        ] if use_meta_sidebar else [
+            (Inches(0.55), Inches(1.4)),
+            (Inches(4.85), Inches(1.4)),
+            (Inches(0.55), Inches(3.4)),
+            (Inches(4.85), Inches(3.4)),
+        ]
+        card_width = Inches(2.95) if use_meta_sidebar else Inches(3.7)
+        for index, card in enumerate(slide_schema.rule_cards or []):
+            if index >= len(positions):
+                break
+            left, top = positions[index]
+            self._add_bullet_box(
+                slide,
+                left,
+                top,
+                card_width,
+                Inches(1.55),
+                card.title,
+                [card.body],
+                font_size=13,
+                style_key="design_card",
+            )
+        if slide_schema.layout_hint == "rule_cards_with_meta_sidebar":
+            self._add_bullet_box(
+                slide,
+                Inches(7.15),
+                Inches(1.4),
+                Inches(1.7),
+                Inches(2.1),
+                "엔터티",
+                list(slide_schema.entity_blocks or []),
+                font_size=11,
+                style_key="design_meta",
+            )
+            self._add_bullet_box(
+                slide,
+                Inches(7.15),
+                Inches(3.75),
+                Inches(1.7),
+                Inches(2.1),
+                "연계",
+                list(slide_schema.interface_points or []),
+                font_size=11,
+                style_key="design_meta",
+            )
+            if slide_schema.flow_bullets:
+                self._add_bullet_box(
+                    slide,
+                    Inches(0.55),
+                    Inches(5.25),
+                    Inches(6.3),
+                    Inches(1.2),
+                    "계산 / 전표 / GL 흐름",
+                    list(slide_schema.flow_bullets or []),
+                    font_size=12,
+                    style_key="design_flow",
+                )
+            return
+        if slide_schema.flow_bullets:
+            self._add_bullet_box(slide, Inches(0.55), Inches(5.25), Inches(8.3), Inches(1.2), "계산 / 전표 / GL 흐름", list(slide_schema.flow_bullets or []), font_size=13, style_key="design_flow")
+
+    def _render_vision_slide(self, slide: Any, slide_schema: Any, *, font_size: int) -> None:
+        from pptx.util import Inches
+
+        items = list(slide_schema.future_state_bullets or [])
+        if slide_schema.layout_hint == "future_state_with_effect":
+            self._add_bullet_box(slide, Inches(0.6), Inches(1.6), Inches(4.1), Inches(3.9), "적용 방향", items, font_size=max(14, font_size - 1), style_key="vision_core")
+            self._add_bullet_box(slide, Inches(4.95), Inches(1.6), Inches(3.95), Inches(3.9), "기대 효과", list(slide_schema.effect_bullets or []), font_size=13, style_key="vision_effect")
+            if slide_schema.closing_statement:
+                self._add_textbox(slide, Inches(0.8), Inches(5.8), Inches(8.0), Inches(0.45), slide_schema.closing_statement, font_size=13, bold=True, fill_rgb=(243, 244, 241), line_rgb=(181, 188, 176))
+            return
+        if slide_schema.layout_hint == "future_state_pillars" and len(items) <= 3 and items:
+            widths = [Inches(2.55), Inches(2.55), Inches(2.55)]
+            for index, item in enumerate(items):
+                self._add_bullet_box(
+                    slide,
+                    Inches(0.6 + (index * 2.85)),
+                    Inches(1.75),
+                    widths[index],
+                    Inches(3.8),
+                    f"방향 {index + 1}",
+                    [item],
+                    font_size=14,
+                    style_key="vision_pillar",
+                )
+            if slide_schema.closing_statement:
+                self._add_textbox(slide, Inches(0.85), Inches(5.8), Inches(7.9), Inches(0.45), slide_schema.closing_statement, font_size=12, bold=True, fill_rgb=(243, 244, 241), line_rgb=(181, 188, 176))
+            return
+        self._add_bullet_box(slide, Inches(0.6), Inches(1.6), Inches(8.3), Inches(4.6), "적용 방향", items, font_size=max(14, font_size - 2), style_key="vision_core")
+        if slide_schema.closing_statement:
+            self._add_textbox(slide, Inches(0.8), Inches(5.8), Inches(8.0), Inches(0.45), slide_schema.closing_statement, font_size=12, bold=True, fill_rgb=(243, 244, 241), line_rgb=(181, 188, 176))
+
+    def _render_absorbed_summary_note(self, slide: Any, slide_schema: Any) -> None:
+        from pptx.util import Inches
+
+        theme = self._slide_type_theme(slide_schema.slide_type)
+        self._add_textbox(
+            slide,
+            Inches(0.55),
+            Inches(6.62),
+            Inches(8.25),
+            Inches(0.42),
+            f"보강 메모 | {slide_schema.absorbed_summary_text}",
+            font_size=10,
+            bold=False,
+            fill_rgb=theme["panel"],
+            line_rgb=theme["border"],
+            text_rgb=theme["accent"],
+        )
+
+    def _slide_type_theme(self, slide_type: str) -> Dict[str, tuple[int, int, int]]:
+        palette = {
+            "overview": {"accent": (78, 92, 108), "panel": (244, 246, 248), "border": (185, 194, 203)},
+            "as_is_gap": {"accent": (132, 88, 61), "panel": (248, 243, 239), "border": (202, 182, 168)},
+            "flow": {"accent": (77, 103, 133), "panel": (241, 246, 250), "border": (179, 193, 206)},
+            "design": {"accent": (76, 103, 86), "panel": (241, 245, 242), "border": (181, 193, 184)},
+            "vision": {"accent": (96, 90, 78), "panel": (246, 245, 241), "border": (193, 189, 181)},
+        }
+        return palette.get(slide_type, palette["overview"])
+
+    def _add_bullet_box(
+        self,
+        slide: Any,
+        left: Any,
+        top: Any,
+        width: Any,
+        height: Any,
+        heading: str,
+        items: List[str],
+        *,
+        font_size: int,
+        style_key: str = "",
+    ) -> None:
+        from pptx.util import Pt
+
+        shape = slide.shapes.add_textbox(left, top, width, height)
+        text_frame = shape.text_frame
+        text_frame.clear()
+        self._apply_text_frame_style(text_frame, style_key=style_key)
+        fill_rgb, line_rgb, heading_rgb = self._box_style(style_key)
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = self._rgb(fill_rgb)
+        shape.line.color.rgb = self._rgb(line_rgb)
+        if heading:
+            first = text_frame.paragraphs[0]
+            first.text = heading
+            first.font.size = Pt(font_size + 1)
+            first.font.bold = True
+            first.font.color.rgb = self._rgb(heading_rgb)
+            self._apply_paragraph_style(first, role="heading", style_key=style_key, font_size=font_size + 1)
+        for item in items:
+            paragraph = text_frame.add_paragraph()
+            paragraph.text = f"- {item}"
+            paragraph.font.size = Pt(font_size if not self._is_meta_style(style_key) else max(11, font_size - 1))
+            paragraph.level = 0
+            self._apply_paragraph_style(paragraph, role="body", style_key=style_key, font_size=font_size)
+
+    def _add_textbox(
+        self,
+        slide: Any,
+        left: Any,
+        top: Any,
+        width: Any,
+        height: Any,
+        text: str,
+        *,
+        font_size: int,
+        bold: bool = False,
+        fill_rgb: tuple[int, int, int] | None = None,
+        line_rgb: tuple[int, int, int] | None = None,
+        text_rgb: tuple[int, int, int] | None = None,
+        center: bool = False,
+    ) -> None:
+        from pptx.enum.text import PP_ALIGN
+        from pptx.util import Pt
+
+        shape = slide.shapes.add_textbox(left, top, width, height)
+        text_frame = shape.text_frame
+        text_frame.clear()
+        self._apply_text_frame_style(text_frame, style_key="textbox")
+        if fill_rgb:
+            shape.fill.solid()
+            shape.fill.fore_color.rgb = self._rgb(fill_rgb)
+        if line_rgb:
+            shape.line.color.rgb = self._rgb(line_rgb)
+        paragraph = text_frame.paragraphs[0]
+        paragraph.text = text
+        paragraph.font.size = Pt(font_size)
+        paragraph.font.bold = bold
+        self._apply_paragraph_style(paragraph, role="textbox", style_key="textbox", font_size=font_size)
+        if text_rgb:
+            paragraph.font.color.rgb = self._rgb(text_rgb)
+        if center:
+            paragraph.alignment = PP_ALIGN.CENTER
+
+    def _apply_text_frame_style(self, text_frame: Any, *, style_key: str) -> None:
+        from pptx.enum.text import MSO_AUTO_SIZE, MSO_VERTICAL_ANCHOR
+        from pptx.util import Inches
+
+        text_frame.word_wrap = True
+        text_frame.auto_size = MSO_AUTO_SIZE.NONE
+        text_frame.vertical_anchor = MSO_VERTICAL_ANCHOR.TOP
+        compact = self._is_meta_style(style_key)
+        text_frame.margin_left = Inches(0.1 if compact else 0.12)
+        text_frame.margin_right = Inches(0.08 if compact else 0.1)
+        text_frame.margin_top = Inches(0.05 if compact else 0.07)
+        text_frame.margin_bottom = Inches(0.04 if compact else 0.06)
+
+    def _apply_paragraph_style(self, paragraph: Any, *, role: str, style_key: str, font_size: int) -> None:
+        from pptx.util import Pt
+
+        if role == "heading":
+            paragraph.space_after = Pt(5)
+            paragraph.space_before = Pt(0)
+            return
+        if role == "textbox":
+            paragraph.space_after = Pt(0)
+            paragraph.space_before = Pt(0)
+            paragraph.line_spacing = 1.02
+            return
+        paragraph.space_before = Pt(0)
+        paragraph.space_after = Pt(2 if self._is_meta_style(style_key) else 3)
+        paragraph.line_spacing = 1.05 if self._is_meta_style(style_key) else 1.08
+
+    def _is_meta_style(self, style_key: str) -> bool:
+        return style_key in {"overview_meta", "design_meta"} or style_key.endswith("_meta")
+
+    def _box_style(self, style_key: str) -> tuple[tuple[int, int, int], tuple[int, int, int], tuple[int, int, int]]:
+        styles = {
+            "overview": ((244, 246, 248), (185, 194, 203), (78, 92, 108)),
+            "overview_meta": ((249, 250, 251), (198, 205, 212), (78, 92, 108)),
+            "approach_as_is": ((247, 244, 240), (206, 190, 178), (120, 93, 72)),
+            "approach_core": ((248, 240, 235), (192, 165, 146), (132, 88, 61)),
+            "approach_to_be": ((243, 247, 242), (181, 196, 182), (84, 110, 88)),
+            "approach_risk": ((250, 244, 241), (207, 180, 171), (132, 88, 61)),
+            "flow_step": ((241, 246, 250), (179, 193, 206), (77, 103, 133)),
+            "flow_actions": ((246, 248, 250), (190, 201, 211), (77, 103, 133)),
+            "flow_stack": ((242, 247, 251), (179, 193, 206), (77, 103, 133)),
+            "design_card": ((241, 245, 242), (181, 193, 184), (76, 103, 86)),
+            "design_meta": ((247, 249, 247), (190, 199, 192), (76, 103, 86)),
+            "design_flow": ((244, 248, 244), (181, 193, 184), (76, 103, 86)),
+            "vision_core": ((246, 245, 241), (193, 189, 181), (96, 90, 78)),
+            "vision_effect": ((248, 247, 243), (203, 198, 189), (96, 90, 78)),
+            "vision_pillar": ((246, 245, 241), (193, 189, 181), (96, 90, 78)),
+        }
+        return styles.get(style_key, ((248, 248, 248), (204, 204, 204), (80, 80, 80)))
+
+    def _rgb(self, color: tuple[int, int, int]) -> Any:
+        from pptx.dml.color import RGBColor
+
+        return RGBColor(*color)
 
     async def health_check(self) -> Dict[str, Any]:
         """Perform health check."""

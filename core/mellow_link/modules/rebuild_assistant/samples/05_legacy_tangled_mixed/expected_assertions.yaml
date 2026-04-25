@@ -5,17 +5,17 @@ source_documents:
 assertions:
   deterministic_core:
     primary_judgment: state_transition
-    structural_judgment: redesign
+    structural_judgment: refactor
     selected_narrative_judgment: state_transition
-    report_purpose: 상태 전이 규칙과 처리 흐름을 분석하기 위한 보고서입니다.
-    recommended_strategy: 재설계 우선
+    report_purpose: 현행 운영 로직, 데이터 흐름, 처리 순서를 분석하기 위한 보고서입니다.
+    recommended_strategy: 리팩터링 우선
     first_entry_point: ui:LegacyReportPage#submit
-    top_decision_type: redesign
-    top_priority_score: 15
+    top_decision_type: refactor
+    top_priority_score: 14
     decision_count: 37
     feature_slice_count: 1
   stable_hashes:
-    execution_plan: cd7d0e21f56fd621419d1f21d727258dccc28043
+    execution_plan: 4e8467b21e2099851350a3b3156ad929bb0f033b
     design_options: 5cab01966144f61452341bfd38c2087b4ad500ec
     recommended_option: d053706bdbd515d95149cb5915b3d6d7b938f156
   issue_expectations:
@@ -30,9 +30,9 @@ assertions:
     must_not_include_detectors: []
   planning_expectations:
     recommended_option_title: "옵션 A. 상태 전이 중심 모듈형 구조"
-    execution_stage_count: 4
-    first_execution_stage_title: "1주차"
-    last_execution_stage_title: "4주차"
+    execution_stage_count: 3
+    first_execution_stage_title: "1단계"
+    last_execution_stage_title: "3단계"
     must_link_decision_ids: true
   ai_narrative_expectations:
     allowed_to_change_fields:
@@ -43,7 +43,7 @@ assertions:
     deterministic_fields_must_match: true
   draft_notes:
     status: promoted_expansion_regression
-    current_report_purpose: 상태 전이 규칙과 처리 흐름을 분석하기 위한 보고서입니다.
+    current_report_purpose: 현행 운영 로직, 데이터 흐름, 처리 순서를 분석하기 위한 보고서입니다.
     measured_behavior:
-      - boundary_mismatch, rule_scatter, ui_data_access_coupling가 함께 발생하며 top decision이 redesign으로 올라간다.
+      - boundary_mismatch, rule_scatter, ui_data_access_coupling가 함께 발생해도 현재 family 철학에서는 operational_source를 우선 유지하고 top decision은 refactor에 머문다.
       - regression source는 markdown가 아니라 현재 measured anchor를 우선 사용한다.

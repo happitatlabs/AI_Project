@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -113,6 +114,80 @@ class AnonymizationRunRequest(BaseModel):
     export_visibility_policy: ExportVisibilityPolicy = Field(default_factory=ExportVisibilityPolicy)
 
 
+class ReviewRoleTokenSummary(BaseModel):
+    role_kind: str
+    token_prefix: str
+    label: str
+    generated_count: int = 0
+
+
+class ReviewDetectedType(BaseModel):
+    type_key: str
+    label: str
+    count: int = 0
+    source: Literal["document_role_token"] = "document_role_token"
+
+
+class ReviewEntityCandidate(BaseModel):
+    severity: Literal["risk", "warning"]
+    entity_type_guess: str
+    label: str
+    asset_id: str
+    asset_name: str = ""
+    locator: str
+    reason: str
+    masked_preview: str
+
+
+class ReviewDebugCandidateEvidence(BaseModel):
+    severity: Literal["risk", "warning"]
+    entity_type_guess: str
+    asset_id: str
+    asset_name: str = ""
+    locator: str
+    reason: str
+    raw_value: str = Field(default="", exclude=True, repr=False)
+    source_line: str = Field(default="", exclude=True, repr=False)
+
+
+class ReviewStructureCheck(BaseModel):
+    severity: Literal["ok", "warning", "risk"]
+    code: str
+    message: str
+    asset_id: str = ""
+    asset_name: str = ""
+
+
+class ReviewAssetPreview(BaseModel):
+    asset_id: str
+    asset_name: str = ""
+    preview_text: str
+    role_token_count: int = 0
+    risk_count: int = 0
+    warning_count: int = 0
+
+
+class AnonymizationReviewReport(BaseModel):
+    applied: bool = False
+    status: Literal["ready", "review_required", "blocked"] = "ready"
+    llm_send_allowed: bool = True
+    masking_level: MaskingLevel = MaskingLevel.FULL
+    target_asset_count: int = 0
+    role_token_summary: list[ReviewRoleTokenSummary] = Field(default_factory=list)
+    detected_original_types: list[ReviewDetectedType] = Field(default_factory=list)
+    label_less_risks: list[ReviewEntityCandidate] = Field(default_factory=list)
+    label_less_warnings: list[ReviewEntityCandidate] = Field(default_factory=list)
+    structure_checks: list[ReviewStructureCheck] = Field(default_factory=list)
+    asset_previews: list[ReviewAssetPreview] = Field(default_factory=list)
+    preview_quality_status: Literal["pass", "warning", "fail"] = "pass"
+    replacement_ratio: float = 0.0
+    candidate_density: float = 0.0
+    hidden_line_ratio: float = 0.0
+    overredaction_warnings: list[str] = Field(default_factory=list)
+    low_conf_replacements_blocked: int = 0
+    debug_candidate_evidence: list[ReviewDebugCandidateEvidence] = Field(default_factory=list, exclude=True, repr=False)
+
+
 class AnonymizationRunResult(BaseModel):
     project_id: str
     bundle_id: str
@@ -122,6 +197,7 @@ class AnonymizationRunResult(BaseModel):
     available_export_levels: list[MaskingLevel] = Field(default_factory=list)
     canonical_source_count: int = 0
     structure_count: int = 0
+    review_report: AnonymizationReviewReport | None = None
 
 
 class PublicExportSource(BaseModel):

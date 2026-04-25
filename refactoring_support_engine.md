@@ -233,13 +233,43 @@ EvidenceLink:
   - `decision_summary`
   - `improvement_plan_bundle`
   - `appendix`
+- AI rewrite 입력은 `authoritative_payload`에서 만든 deterministic explanation block으로 제한한다.
+- narrative 단계는 새 판단 생성 단계가 아니라 `rephrase-only` 단계다.
 - Phase 1.8에서 AI가 수정 가능한 필드는 아래 4개로 고정한다.
   - `report_purpose`
   - `primary_judgment_reason`
   - `one_line_conclusion`
   - `executive_summary_v2`
 - AI는 `판단`, `점수`, `evidence`, `priority`, `execution stage linkage`를 수정하지 않는다.
-- AI validator는 허용 필드 외 key, 빈 값, 새 숫자/고유 토큰, 점수 불일치를 막고 실패 시 deterministic fallback으로 내려간다.
+- Narrative Guard Contract는 아래로 고정한다.
+  - `Narrative must:`
+    - `only rephrase existing facts`
+    - `preserve all critical facts present in the input block`
+    - `not introduce new claims`
+    - `not change priority or recommendation`
+    - `not generalize beyond given evidence`
+    - `not omit decision-driving evidence`
+    - `not merge distinct facts into ambiguous statements`
+  - `If validation fails:`
+    - `fallback: deterministic explanation block`
+- 각 explanation block은 아래 메타를 함께 가진다.
+  - `critical_facts`
+  - `decision_driving_evidence`
+  - `locked_fields`
+- `locked_fields`는 최소 아래를 포함한다.
+  - `recommended_strategy`
+  - `decision_type`
+  - `priority_score`
+  - `score_breakdown`
+- AI validator는 아래를 차단한다.
+  - 허용 필드 외 key
+  - 빈 값
+  - 새 숫자/고유 토큰
+  - 점수 불일치
+  - critical fact coverage 누락
+  - decision-driving evidence coverage 누락
+  - distinct fact merge로 인한 ambiguous statement
+- validator 실패 시 AI rewrite 결과는 폐기하고 입력으로 사용한 deterministic explanation block을 그대로 반환한다.
 
 **Phase 3 Presentation Layer**
 - Phase 3는 `deterministic engine core`를 유지한 채 설명/표현/상호작용 레이어만 확장한다.

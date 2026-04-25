@@ -12,7 +12,11 @@ from mellow_link.services.refactoring_support_engine.decision_catalog import (
     get_judgment_template_specs,
 )
 from mellow_link.services.refactoring_support_engine.input_assembler import InputAssembler
-from mellow_link.services.refactoring_support_engine.schemas import FeatureSignals, PreparedRebuildInput
+from mellow_link.services.refactoring_support_engine.schemas import (
+    AnalysisContextBundle,
+    FeatureSignals,
+    PreparedRebuildInput,
+)
 from mellow_link.services.refactoring_support_engine.template_support import TemplateSupport
 
 from .decision_document import build_decision_brief, render_decision_brief_markdown
@@ -71,7 +75,39 @@ class RebuildAssistantService:
         "게시판", "댓글", "보고서", "예약", "직원", "권한", "상태", "정책", "감사", "검색",
         "필터", "조회", "저장", "등록", "검증",
     )
-    SOURCE_ASSET_EXTENSIONS = (".java", ".py", ".js", ".jsx", ".ts", ".tsx", ".cs", ".kt", ".rb", ".php", ".go", ".scala")
+    SQL_RESERVED_CONCEPT_TOKENS = {
+        "select",
+        "from",
+        "where",
+        "group",
+        "order",
+        "by",
+        "join",
+        "left",
+        "right",
+        "inner",
+        "outer",
+        "on",
+        "limit",
+        "offset",
+        "insert",
+        "update",
+        "delete",
+        "create",
+        "table",
+        "merge",
+        "into",
+        "values",
+        "set",
+    }
+    SOURCE_ASSET_EXTENSIONS = (".java", ".py", ".js", ".jsx", ".ts", ".tsx", ".cs", ".kt", ".rb", ".php", ".go", ".scala", ".prc", ".trg", ".pls", ".pkb", ".pks")
+    DOCUMENT_DOMAIN_GROUPS = (
+        ("원가", ("원가", "원가체계", "원가분석", "원가계산", "재료비", "노무비", "제조경비", "배부", "배부기준", "손익", "손익분석", "기준정보")),
+        ("업무프로세스", ("업무프로세스", "프로세스", "통합재무", "인적자원", "기금", "이행계획", "변화관리", "요구사항", "bpr", "ismp")),
+        ("수용가", ("수용가", "민원", "요금", "자재", "자산", "예산", "회계")),
+        ("선박", ("선박", "영업", "운항", "장비", "재무", "총무", "협력업체", "해운")),
+    )
+    DOCUMENT_GENERIC_TERMS = ("현행", "개선", "구조", "계획", "방향", "요구사항", "비교", "기준")
 
     def prepare_input(
         self,
@@ -122,6 +158,7 @@ class RebuildAssistantService:
 
     def build_missing_context_details(self, prepared: PreparedRebuildInput) -> list[MissingContextItem]:
         missing: list[MissingContextItem] = []
+        is_fx_fifo = self._has_fx_fifo_domain(prepared)
         has_source = self._has_source_code_evidence(prepared)
         has_ui = self._has_ui_evidence(prepared)
         has_schema = self._has_schema_evidence(prepared)
@@ -162,7 +199,7 @@ class RebuildAssistantService:
                     reason="현대화 설계안의 기술 제약과 전환 경계를 정확히 잡기 어렵습니다.",
                 )
             )
-        if not prepared.signals.status_permissions and not prepared.signals.search_filters and not prepared.signals.save_validation:
+        if not is_fx_fifo and not prepared.signals.status_permissions and not prepared.signals.search_filters and not prepared.signals.save_validation:
             missing.append(
                 MissingContextItem(
                     required_material="권한/조회/저장 흐름이 드러나는 추가 코드 또는 문서",
@@ -172,36 +209,112 @@ class RebuildAssistantService:
         return missing
 
     def _has_source_code_evidence(self, prepared: PreparedRebuildInput) -> bool:
-        if prepared.safe_bundle is not None:
-            return bool(prepared.asset_presence.has_source_code)
         return bool(prepared.asset_presence.has_source_code or (prepared.assets.source_code or "").strip())
 
     def _has_ui_evidence(self, prepared: PreparedRebuildInput) -> bool:
-        if prepared.safe_bundle is not None:
-            return bool(prepared.asset_presence.has_ui_asset)
         return bool(prepared.asset_presence.has_ui_asset or (prepared.assets.ui_template or "").strip())
 
     def _has_schema_evidence(self, prepared: PreparedRebuildInput) -> bool:
-        if prepared.safe_bundle is not None:
-            return bool(prepared.asset_presence.has_schema_asset)
         return bool(prepared.asset_presence.has_schema_asset or (prepared.assets.database_schema or "").strip())
 
     def _has_sql_evidence(self, prepared: PreparedRebuildInput) -> bool:
-        if prepared.safe_bundle is not None:
-            return bool(prepared.asset_presence.has_sql_asset)
-        return bool(prepared.asset_presence.has_sql_asset or (prepared.assets.sql_queries or "").strip())
+        if prepared.asset_presence.has_sql_asset or (prepared.assets.sql_queries or "").strip():
+            return True
+        source_code = str(prepared.assets.source_code or "")
+        return bool(
+            re.search(
+                r"\b(create\s+or\s+replace\s+(?:procedure|trigger)|cursor\b|select\s+.+\s+from|insert\s+into|update\s+[a-z_][a-z0-9_]*\s+set)\b",
+                source_code,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+        )
 
     def _has_framework_evidence(self, prepared: PreparedRebuildInput) -> bool:
-        if prepared.safe_bundle is not None:
-            return bool(prepared.asset_presence.has_framework_hint)
         return bool(prepared.asset_presence.has_framework_hint or (prepared.assets.framework_info or "").strip())
+
+    def _is_document_only_input(self, prepared: PreparedRebuildInput) -> bool:
+        asset_presence = getattr(prepared, "asset_presence", None)
+        has_docs = bool(
+            getattr(asset_presence, "has_docs", False)
+            or (getattr(prepared, "supporting_docs", "") or "").strip()
+        )
+        has_operational_assets = any(
+            (
+                bool(getattr(asset_presence, "has_source_code", False)),
+                bool(getattr(asset_presence, "has_ui_asset", False)),
+                bool(getattr(asset_presence, "has_schema_asset", False)),
+                bool(getattr(asset_presence, "has_sql_asset", False)),
+                bool((prepared.assets.source_code or "").strip()),
+                bool((prepared.assets.database_schema or "").strip()),
+                bool((prepared.assets.sql_queries or "").strip()),
+            )
+        )
+        return has_docs and not has_operational_assets
+
+    def _document_source_text(self, prepared: PreparedRebuildInput) -> str:
+        return " ".join(
+            [
+                " ".join(prepared.asset_presence.doc_asset_names),
+                prepared.supporting_docs,
+            ]
+        ).lower()
+
+    def _document_domain_terms(self, prepared: PreparedRebuildInput) -> list[str]:
+        text = self._document_source_text(prepared)
+        if not text.strip():
+            return []
+        group_matches: list[tuple[int, str, list[str]]] = []
+        for anchor, keywords in self.DOCUMENT_DOMAIN_GROUPS:
+            group_hits = [keyword for keyword in keywords if keyword.lower() in text]
+            if group_hits:
+                group_matches.append((len(group_hits), anchor, group_hits))
+        matched: list[str] = []
+        if group_matches:
+            _, anchor, group_hits = max(group_matches, key=lambda item: (item[0], len(item[1])))
+            matched.append(anchor)
+            for keyword in group_hits:
+                if keyword not in matched:
+                    matched.append(keyword)
+            for keyword in self.DOCUMENT_GENERIC_TERMS:
+                if keyword.lower() in text and keyword not in matched:
+                    matched.append(keyword)
+            return matched[:8]
+        for keyword in self.DOCUMENT_GENERIC_TERMS:
+            if keyword.lower() in text and keyword not in matched:
+                matched.append(keyword)
+        return matched[:6]
 
     def extract_feature_signals(self, prepared: PreparedRebuildInput) -> FeatureSignals:
         bundle = prepared.legacy_bundle.lower()
+        is_fx_fifo = self._has_fx_fifo_domain(prepared)
+        is_document_only = self._is_document_only_input(prepared)
+        if is_document_only and not is_fx_fifo:
+            technical: list[str] = []
+            if any(name.lower().endswith((".ppt", ".pptx")) for name in prepared.asset_presence.doc_asset_names):
+                technical.append("presentation_sml")
+            return FeatureSignals(
+                concepts=self._document_domain_terms(prepared),
+                status_permissions=[],
+                search_filters=[],
+                save_validation=[],
+                technical=technical,
+                scores={
+                    "status_permissions": 0.0,
+                    "search_filters": 0.0,
+                    "save_validation": 0.0,
+                },
+                primary_feature_mode="general",
+                secondary_feature_mode=None,
+            )
         concepts = self._extract_concepts(prepared)
         status_permissions = self._extract_status_permission_signals(bundle)
         search_filters = self._extract_search_filter_signals(bundle)
         save_validation = self._extract_save_validation_signals(bundle)
+        if is_fx_fifo:
+            concepts = ["외화 입출금 FIFO", "lot", "환차손익", "전표", "GL"]
+            status_permissions = []
+            search_filters = []
+            save_validation = []
         technical = []
         if self._looks_like_jsp(prepared):
             technical.append("JSP/서버 템플릿 렌더링")
@@ -218,6 +331,8 @@ class RebuildAssistantService:
             save_validation=save_validation,
         )
         primary_mode, secondary_mode = self._pick_feature_modes(scores)
+        if is_fx_fifo:
+            primary_mode, secondary_mode = "", None
         return FeatureSignals(
             concepts=concepts,
             status_permissions=status_permissions,
@@ -656,6 +771,7 @@ class RebuildAssistantService:
 
         method_label = context["method_label"]
         failure_text = context["humanized_failure"]
+        failure_label = context["humanized_failure_label"] or failure_text.rstrip(".")
         warning_text = context["warning_text"]
         voucher_status = context["voucher_status"]
         voucher_issue = context["voucher_issue"]
@@ -671,7 +787,7 @@ class RebuildAssistantService:
                 ),
                 self._make_accounting_grounded_rule(
                     "계산 차단 사유",
-                    f"현재 계산 차단 사유는 {failure_text.rstrip('.')}입니다.",
+                    f"현재 계산 차단 사유는 {failure_label}입니다.",
                     ["입력 검증", "회계 계산"],
                     confidence="확정",
                     needs_verification=False,
@@ -1722,6 +1838,8 @@ class RebuildAssistantService:
         return "\n".join(part for part in parts if part).lower()
 
     def _workflow_actor_signal_count(self, prepared: PreparedRebuildInput) -> int:
+        if self._has_fx_fifo_domain(prepared):
+            return 0
         text = self._workflow_signal_text(prepared)
         patterns = [
             r"\bapproverrole\b",
@@ -1743,7 +1861,7 @@ class RebuildAssistantService:
         count += sum(1 for token in korean_patterns if token in text)
         role_literals = {
             token
-            for token in ("manager", "finance", "hr", "director", "team_lead", "auditor")
+            for token in ("manager", "director", "team_lead", "auditor")
             if re.search(rf"""["']{re.escape(token)}["']""", text)
         }
         if role_literals:
@@ -1753,6 +1871,8 @@ class RebuildAssistantService:
         return count
 
     def _workflow_stage_signal_count(self, prepared: PreparedRebuildInput) -> int:
+        if self._has_fx_fifo_domain(prepared):
+            return 0
         text = self._workflow_signal_text(prepared)
         direct_groups = [
             ("approvalstep", "approval_step", "approvallevel", "approval_level", "approvalstage", "approval_stage"),
@@ -1774,39 +1894,43 @@ class RebuildAssistantService:
         return count
 
     def _workflow_gate_signal_count(self, prepared: PreparedRebuildInput) -> int:
+        if self._has_fx_fifo_domain(prepared):
+            return 0
         text = self._workflow_signal_text(prepared)
         groups = [
             ("approve(", ".approve(", "approved", "\"approved\"", "'approved'", "승인", "auto_approved", "자동 승인"),
             ("reject", "rejected", "반려"),
-            ("hold", "on_hold", "보류"),
             ("delegate", "delegated", "대리 승인", "위임"),
             ("escalation", "escalate"),
         ]
         return sum(1 for tokens in groups if any(token in text for token in tokens))
 
     def _workflow_progression_signal_count(self, prepared: PreparedRebuildInput) -> int:
+        if self._has_fx_fifo_domain(prepared):
+            return 0
         text = self._workflow_signal_text(prepared)
         groups = [
             ("requested", "submitted", "request_status"),
             ("approvalstep", "approval_step", "approvallevel", "approval_level", "getnextstep", "nextstep"),
             ("delegate", "delegated", "pending_delegate_assignment"),
-            ("reject", "rejected", "hold", "on_hold"),
+            ("reject", "rejected"),
         ]
         return sum(1 for tokens in groups if any(token in text for token in tokens))
 
     def _has_workflow_pattern(self, prepared: PreparedRebuildInput) -> bool:
+        if self._has_fx_fifo_domain(prepared):
+            return False
         actor_count = self._workflow_actor_signal_count(prepared)
         stage_count = self._workflow_stage_signal_count(prepared)
         gate_count = self._workflow_gate_signal_count(prepared)
         progression_count = self._workflow_progression_signal_count(prepared)
-        satisfied = sum(
-            (
-                actor_count >= 1,
-                stage_count >= 1,
-                gate_count >= 1,
-            )
+        total_strength = actor_count + stage_count + gate_count + progression_count
+        return (
+            actor_count >= 1
+            and progression_count >= 1
+            and total_strength >= 3
+            and (stage_count >= 1 or gate_count >= 1)
         )
-        return satisfied >= 2 and progression_count >= 1
 
     def _ordered_templates_for_generation(
         self,
@@ -2117,13 +2241,59 @@ class RebuildAssistantService:
         return normalized
 
     def _extract_concepts(self, prepared: PreparedRebuildInput) -> list[str]:
+        if self._is_document_only_input(prepared):
+            return self._document_domain_terms(prepared)
+        non_sql_text = " ".join(
+            [
+                prepared.goal,
+                " ".join(prepared.asset_presence.source_asset_names),
+                " ".join(prepared.asset_presence.ui_asset_names),
+                " ".join(prepared.asset_presence.schema_asset_names),
+                " ".join(prepared.asset_presence.doc_asset_names),
+                prepared.assets.source_code,
+                prepared.assets.ui_template,
+                prepared.assets.database_schema,
+                prepared.supporting_docs,
+            ]
+        ).lower()
+        sql_text = " ".join(
+            [
+                " ".join(prepared.asset_presence.sql_asset_names),
+                prepared.assets.sql_queries,
+            ]
+        ).lower()
+        non_sql_tokens = {
+            token
+            for token in re.findall(r"[a-z가-힣][a-z0-9가-힣]+", non_sql_text, flags=re.IGNORECASE)
+            if token not in self.SQL_RESERVED_CONCEPT_TOKENS
+        }
+        sql_tokens = {
+            token
+            for token in re.findall(r"[a-z가-힣][a-z0-9가-힣]+", sql_text, flags=re.IGNORECASE)
+            if token not in self.SQL_RESERVED_CONCEPT_TOKENS
+        }
+        tokens = non_sql_tokens | sql_tokens
+        found: list[str] = []
+        for token in self.CONCEPT_PATTERNS:
+            normalized = token.lower()
+            if normalized == "order":
+                if not self._has_business_order_anchor(prepared):
+                    continue
+            elif normalized not in tokens:
+                continue
+            if token not in found:
+                found.append(token)
+        return found[:6]
+
+    def _has_business_order_anchor(self, prepared: PreparedRebuildInput) -> bool:
         text = " ".join(
             [
+                prepared.goal,
+                " ".join(prepared.constraints),
                 " ".join(prepared.asset_presence.source_asset_names),
                 " ".join(prepared.asset_presence.ui_asset_names),
                 " ".join(prepared.asset_presence.schema_asset_names),
                 " ".join(prepared.asset_presence.sql_asset_names),
-                " ".join(prepared.asset_presence.doc_asset_names),
                 prepared.assets.source_code,
                 prepared.assets.ui_template,
                 prepared.assets.sql_queries,
@@ -2131,11 +2301,59 @@ class RebuildAssistantService:
                 prepared.supporting_docs,
             ]
         ).lower()
-        found: list[str] = []
-        for token in self.CONCEPT_PATTERNS:
-            if token.lower() in text and token not in found:
-                found.append(token)
-        return found[:6]
+        patterns = (
+            r"\border[_/\-]",
+            r"\b[a-z0-9]+_order\b",
+            r"\bpurchase_order\b",
+            r"\bsales_order\b",
+            r"\border_(id|no|amount|type|status|date)\b",
+            r"\border\s+(flow|approval|closure|creation|submit|screen|page|service|controller|repository)\b",
+            r"\borders\b",
+            r"주문",
+        )
+        return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns)
+
+    def _fx_fifo_signal_text(self, prepared: PreparedRebuildInput) -> str:
+        return " ".join(
+            [
+                prepared.goal,
+                " ".join(prepared.constraints),
+                " ".join(prepared.asset_presence.source_asset_names),
+                " ".join(prepared.asset_presence.ui_asset_names),
+                " ".join(prepared.asset_presence.schema_asset_names),
+                " ".join(prepared.asset_presence.sql_asset_names),
+                prepared.assets.source_code,
+                prepared.assets.ui_template,
+                prepared.assets.sql_queries,
+                prepared.assets.database_schema,
+                prepared.supporting_docs,
+            ]
+        ).lower()
+
+    def _fx_fifo_signal_buckets(self, prepared: PreparedRebuildInput) -> set[str]:
+        text = self._fx_fifo_signal_text(prepared)
+        bucket_keywords = {
+            "currency": ("외화", "currency", "currency_code", "mney_unit", "환율", "exch_rate"),
+            "fifo_lot": ("fifo", "선입선출", "lot", "tn_forins", "tn_forout", "tn_foroud", "tn_bkchno", "tn_bkchit", "rmn_famt", "outf_amt"),
+            "gain_loss": ("환차손익", "환차", "exchange p/l", "gap_amt", "gain_loss", "out_amt0"),
+            "voucher": ("전표", "voucher", "journal", "gl_interface", "glintf", "user_je_source_name", "user_je_category_name", "reference4", "reference6"),
+            "gl": ("gl", "ledger", "set_of_books_id", "code_combination", "segment1", "segment2", "segment3", "entered_dr", "entered_cr"),
+            "flow": ("입금", "출금", "deposit", "payment", "forins", "forout"),
+        }
+        return {
+            bucket
+            for bucket, keywords in bucket_keywords.items()
+            if any(keyword in text for keyword in keywords)
+        }
+
+    def _has_fx_fifo_domain(self, prepared: PreparedRebuildInput) -> bool:
+        buckets = self._fx_fifo_signal_buckets(prepared)
+        return (
+            len(buckets) >= 3
+            and "fifo_lot" in buckets
+            and ("gain_loss" in buckets or "currency" in buckets)
+            and ("voucher" in buckets or "gl" in buckets)
+        )
 
     def _extract_status_permission_signals(self, text: str) -> list[str]:
         checks = [
@@ -2169,7 +2387,7 @@ class RebuildAssistantService:
             return "회계"
         if prepared.signals.primary_feature_mode == "search_filters":
             selected_judgment = str(
-                getattr(prepared, "selected_primary_judgment", "") or getattr(prepared, "selected_narrative_judgment", "")
+                getattr(prepared, "selected_narrative_judgment", "") or getattr(prepared, "selected_primary_judgment", "")
             ).strip()
             if selected_judgment in {"workflow", "access_control", "state_transition"}:
                 concept_map = {
@@ -2567,7 +2785,7 @@ class RebuildAssistantService:
         lowered = (name or "").strip().lower()
         if self._is_intent_asset_name(lowered):
             return False
-        return lowered.startswith("readme") or lowered.endswith((".md", ".txt", ".rst", ".adoc"))
+        return lowered.startswith("readme") or lowered.endswith((".md", ".txt", ".rst", ".adoc", ".ppt", ".pptx"))
 
     def _feature_mode_label(self, mode: str) -> str:
         mapping = {
@@ -2579,6 +2797,8 @@ class RebuildAssistantService:
         return mapping.get(mode, "일반 기능")
 
     def _resolve_domain_anchor(self, prepared: PreparedRebuildInput) -> str | None:
+        if self._has_fx_fifo_domain(prepared):
+            return "외화 입출금 FIFO"
         text = " ".join(
             [
                 " ".join(prepared.asset_presence.source_asset_names),
@@ -2618,6 +2838,9 @@ class RebuildAssistantService:
             token in text for token in ("vip", "agency", "deliveryhold", "review_required", "배송보류")
         ):
             return "주문 마감"
+        document_terms = self._document_domain_terms(prepared)
+        if document_terms:
+            return document_terms[0]
         return None
 
     def extract_core_business_rules(self, prepared: PreparedRebuildInput) -> list[str]:
@@ -2636,7 +2859,64 @@ class RebuildAssistantService:
         if self._primary_concept(prepared) == "청구 조정":
             rules = self._extract_python_claim_rules(text)
             return rules[:5]
+        if self._primary_concept(prepared) == "외화 입출금 FIFO":
+            rules = self._extract_fx_fifo_rules(text)
+            return rules[:5]
+        if self._is_document_only_input(prepared):
+            return self._extract_document_business_rules(prepared)[:5]
         return self._extract_general_business_rules(text)
+
+    def _extract_document_business_rules(self, prepared: PreparedRebuildInput) -> list[str]:
+        terms = self._document_domain_terms(prepared)
+        text = self._document_source_text(prepared)
+        primary_anchor = terms[0] if terms else ""
+        term_set = set(terms)
+        rules: list[str] = []
+        if primary_anchor == "원가":
+            rules.append("원가체계와 기준정보는 현행 원가계산 기준에 맞춰 구조화해야 합니다.")
+            if any(keyword in text for keyword in ("재료비", "노무비", "제조경비")):
+                rules.append("재료비, 노무비, 제조경비의 집계 기준은 서로 분리해 정리해야 합니다.")
+            if any(keyword in text for keyword in ("배부", "배부기준")):
+                rules.append("배부 기준과 배부 대상은 같은 원가 계산 기준으로 정리해야 합니다.")
+            if any(keyword in text for keyword in ("손익", "손익분석")):
+                rules.append("원가 계산 결과와 손익분석 연결 기준은 별도 판단 근거로 정리해야 합니다.")
+        elif primary_anchor == "업무프로세스":
+            rules.append("업무프로세스와 요구사항은 현행 기준으로 구조화해야 합니다.")
+            if any(keyword in text for keyword in ("통합재무", "인적자원", "기금")):
+                matched = ", ".join(term for term in ("통합재무", "인적자원", "기금") if term in text)
+                rules.append(f"{matched} 관련 업무 연계 기준은 프로세스 단위로 정리해야 합니다.")
+            if any(keyword in text for keyword in ("이행계획", "변화관리")):
+                rules.append("이행계획과 변화관리 기준은 후속 실행 단계와 분리해 정리해야 합니다.")
+        elif primary_anchor == "수용가":
+            rules.append("수용가, 민원, 요금 흐름은 현행 서비스 기준으로 정리해야 합니다.")
+            if any(keyword in text for keyword in ("자재", "자산", "예산", "회계")):
+                matched = ", ".join(term for term in ("자재", "자산", "예산", "회계") if term in text)
+                rules.append(f"{matched} 연계 기준은 같은 업무 구조 기준으로 정리해야 합니다.")
+        elif primary_anchor == "선박":
+            rules.append("선박, 영업, 운항 흐름은 현행 운영 기준으로 정리해야 합니다.")
+            if any(keyword in text for keyword in ("장비", "재무", "총무", "협력업체")):
+                matched = ", ".join(term for term in ("장비", "재무", "총무", "협력업체") if term in text)
+                rules.append(f"{matched} 연계 기준은 역할별 책임과 함께 정리해야 합니다.")
+        if not rules:
+            if term_set:
+                lead = ", ".join(terms[:3])
+                rules.append(f"{lead} 관련 현행 구조와 판단 기준은 source 기준으로 먼저 정리해야 합니다.")
+            rules.append("문서에서 직접 확인되지 않은 상세 구현 방식은 추가 확인이 필요합니다.")
+            rules.append("핵심 비교 기준과 누락 정보는 별도 판단 축으로 정리해야 합니다.")
+        return self._dedupe_list(rules)
+
+    def _extract_fx_fifo_rules(self, text: str) -> list[str]:
+        rules: list[str] = []
+        lowered = text.lower()
+        if any(token in lowered for token in ("tn_forins", "tn_forout", "tn_foroud", "rmn_famt", "outf_amt", "order by tr_date, tr_date_seq")):
+            rules.append("외화 출금은 입금 lot 잔량을 FIFO 순서로 차감해야 합니다.")
+        if any(token in lowered for token in ("gap_amt", "exchange p/l", "out_amt0", "exch_rate", "환차")):
+            rules.append("lot별 취득 환율과 출금 환율 차이로 환차손익을 계산해야 합니다.")
+        if any(token in lowered for token in ("tn_bkchit", "gl_interface", "user_je_category_name", "reference4", "reference6", "deposit", "payment")):
+            rules.append("입출금 및 환차손익 결과는 전표와 GL 인터페이스에 동일 기준번호로 반영해야 합니다.")
+        if any(token in lowered for token in ("currency_code", "mney_unit", "bank_cd", "acnt_no", "invoice_no")):
+            rules.append("통화 코드와 계좌 식별 값은 lot 계산, 전표, GL 반영 전 과정에서 일관되게 유지해야 합니다.")
+        return self._dedupe_list(rules)
 
     def _extract_java_closure_rules(self, text: str) -> list[str]:
         rules: list[str] = []
@@ -2670,11 +2950,11 @@ class RebuildAssistantService:
         rules: list[str] = []
         lowered = text.lower()
         if "status" in lowered or "state" in lowered:
-            rules.append("상태 전이와 액션 노출 조건을 분리해 검증해야 합니다.")
+            rules.append("상태 전이와 액션 노출 기준을 분리해 정리해야 합니다.")
         if "duplicate" in lowered or "중복" in lowered:
-            rules.append("저장 전 중복 체크 규칙을 별도 검증 단계로 추출해야 합니다.")
+            rules.append("중복 처리 기준은 선행 규칙으로 분리해 정리해야 합니다.")
         if "where" in lowered or "query" in lowered or "filter" in lowered:
-            rules.append("조회 조건과 SQL 파라미터 조합 규칙을 명시적으로 정리해야 합니다.")
+            rules.append("조회 조건과 필터 조합 기준을 명시적으로 정리해야 합니다.")
         return self._dedupe_list(rules)[:4]
 
     def build_executive_summary_v2(
@@ -2724,6 +3004,9 @@ class RebuildAssistantService:
                 )
             )
         if not grounded:
+            default_targets = ["정책 서비스", "검증 흐름"]
+            if self._is_document_only_input(prepared):
+                default_targets = ["문서 구조", "비교 기준"]
             for rule in core_rules[:3]:
                 evidence = self._collect_evidence_refs(prepared, rule.split(), ("source", "ui", "sql", "schema"))
                 confidence, confidence_reason = self._resolve_confidence(evidence)
@@ -2732,7 +3015,7 @@ class RebuildAssistantService:
                         title=rule[:32],
                         description=rule,
                         evidence=evidence,
-                        design_targets=["정책 서비스", "검증 흐름"],
+                        design_targets=default_targets,
                         confidence=confidence,
                         confidence_reason=confidence_reason,
                         needs_verification=confidence != "확정",
@@ -3238,6 +3521,29 @@ class RebuildAssistantService:
         prepared: PreparedRebuildInput,
         grounded: list[GroundedBusinessRule],
     ) -> list[GroundedBusinessRule]:
+        if self._primary_concept(prepared) == "외화 입출금 FIFO":
+            scored: list[tuple[float, int, GroundedBusinessRule]] = []
+            for index, rule in enumerate(grounded):
+                text = " ".join(
+                    [
+                        rule.title,
+                        rule.description,
+                        " ".join(rule.design_targets),
+                        " ".join(evidence.excerpt for evidence in rule.evidence),
+                    ]
+                ).lower()
+                score = 0.0
+                if any(token in text for token in ("fifo", "lot", "tn_forins", "tn_forout", "rmn_famt", "outf_amt")):
+                    score += 6.0
+                if any(token in text for token in ("환차", "gap_amt", "exchange p/l", "exch_rate", "out_amt0")):
+                    score += 5.5
+                if any(token in text for token in ("전표", "gl_interface", "voucher", "reference4", "reference6")):
+                    score += 5.0
+                if any(token in text for token in ("currency", "mney_unit", "bank_cd", "acnt_no")):
+                    score += 3.0
+                scored.append((score, -index, rule))
+            ordered = [item for _, _, item in sorted(scored, key=lambda entry: (entry[0], entry[1]), reverse=True)]
+            return ordered[:5]
         claim_access_focus = self._has_claim_access_control_focus(prepared, grounded)
         if self._has_workflow_pattern(prepared):
             scored: list[tuple[float, int, GroundedBusinessRule]] = []
@@ -5079,6 +5385,28 @@ class RebuildAssistantService:
         table_name = self._detect_primary_table_name(prepared)
         specs: list[dict[str, object]] = []
         seen: set[str] = set()
+        if self._has_fx_fifo_domain(prepared):
+            for item, keywords, basis in (
+                (
+                    "입금 lot 잔량(RMN_FAMT/RMN_AMT) 계산 계약은 유지하는 것이 필요합니다.",
+                    ("tn_forins", "rmn_famt", "rmn_amt", "acnt_seq"),
+                    "입금 lot 잔량이 바뀌면 FIFO 출금 순서와 잔량 계산 결과가 달라질 수 있습니다.",
+                ),
+                (
+                    "출금 lot 소진 순서(TR_DATE, TR_DATE_SEQ 기준 FIFO) 계약은 유지하는 것이 필요합니다.",
+                    ("tn_forout", "tn_foroud", "tr_date", "tr_date_seq", "tr_date_seq0", "order by"),
+                    "lot 소진 순서가 달라지면 동일 출금 건의 원가와 환차손익 결과가 달라질 수 있습니다.",
+                ),
+                (
+                    "환차손익(GAP_AMT) 계산 및 전표/GL_INTERFACE 반영 계약은 유지하는 것이 필요합니다.",
+                    ("gap_amt", "gl_interface", "reference4", "reference6", "user_je_category_name"),
+                    "환차손익 계산과 전표 반영 기준이 바뀌면 회계 결과와 GL 연계 흐름이 달라질 수 있습니다.",
+                ),
+            ):
+                built = self._contract_spec(item=item, keywords=keywords, basis=basis, seen=seen)
+                if built:
+                    specs.append(built)
+            return [item for item in specs if item]
         candidate_ids = self._candidate_template_ids(prepared, grounded_rules)
         validation_primary = self._is_validation_primary(prepared)
         access_control_primary = self._should_enrich_access_control(prepared, grounded_rules) or self._has_claim_access_control_focus(prepared, grounded_rules)
@@ -5432,6 +5760,37 @@ class RebuildAssistantService:
         return output[:5]
 
     def _rule_templates_for_concept(self, concept: str) -> list[dict]:
+        if concept == "외화 입출금 FIFO":
+            return [
+                {
+                    "title": "FIFO lot 소진 순서",
+                    "statement": "외화 출금은 입금 lot 잔량을 FIFO 순서로 차감해야 합니다.",
+                    "keywords": ("tn_forins", "tn_forout", "tn_foroud", "rmn_famt", "outf_amt", "tr_date_seq0"),
+                    "preferred_types": ("source", "sql", "schema"),
+                    "design_targets": ("lot 계산", "출금 처리", "데이터 계약"),
+                },
+                {
+                    "title": "환차손익 계산",
+                    "statement": "lot별 취득 환율과 출금 환율 차이로 환차손익을 계산해야 합니다.",
+                    "keywords": ("gap_amt", "exchange p/l", "exch_rate", "out_amt0", "환차"),
+                    "preferred_types": ("source", "sql"),
+                    "design_targets": ("환차 계산", "정책 서비스", "검증 흐름"),
+                },
+                {
+                    "title": "전표 및 GL 반영",
+                    "statement": "입출금 및 환차손익 결과는 전표와 GL 인터페이스에 동일 기준번호로 반영해야 합니다.",
+                    "keywords": ("gl_interface", "user_je_category_name", "reference4", "reference6", "deposit", "payment"),
+                    "preferred_types": ("source", "sql", "schema"),
+                    "design_targets": ("전표 생성", "GL 인터페이스", "데이터 계약"),
+                },
+                {
+                    "title": "통화 및 계좌 식별값 유지",
+                    "statement": "통화 코드와 계좌 식별 값은 lot 계산, 전표, GL 반영 전 과정에서 일관되게 유지해야 합니다.",
+                    "keywords": ("currency_code", "mney_unit", "bank_cd", "acnt_no", "invoice_no"),
+                    "preferred_types": ("source", "sql", "schema"),
+                    "design_targets": ("데이터 계약", "입출금 처리", "GL 인터페이스"),
+                },
+            ]
         if concept == "주문 마감":
             return [
                 {"title": "VIP 야간 마감 제한", "statement": "VIP 고객은 야간 시간대에 주문 마감을 수행할 수 없습니다.", "keywords": ("vip", "22", "23", "00", "야간", "마감"), "preferred_types": ("source", "ui", "constraint"), "design_targets": ("정책 서비스", "상태 전이", "검증 흐름")},

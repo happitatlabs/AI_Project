@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from mellow_link.services.anonymization.schemas import SafeAnalysisBundle
+from mellow_link.services.anonymization.schemas import AnonymizationReviewReport, SafeAnalysisBundle
+from mellow_link.services.refactoring_support_engine.question_guard_schemas import (
+    GuardedUserQuestion,
+    QuestionGuardSummary,
+    SourceQuestionCandidate,
+)
 
 
 class RebuildAssetsPayload(BaseModel):
@@ -91,6 +96,14 @@ class ExtractedRulesEnvelope(BaseModel):
 class MissingContextItem(BaseModel):
     required_material: str
     reason: str
+
+
+class AssumptionItem(BaseModel):
+    statement: str
+    source_stage: Literal["input", "diagnosis", "decision", "planning"]
+    source_field: str
+    explicit_marker: Literal["가정", "전제", "조건부", "if_clause"]
+    applies_to: list[str] = Field(default_factory=list)
 
 
 class CompanyRuleProfile(BaseModel):
@@ -194,41 +207,6 @@ class ExecutionPlanWeek(BaseModel):
     deliverables: list[str] = Field(default_factory=list)
 
 
-class CanonicalRequestContext(BaseModel):
-    goal: str = ""
-    constraints: list[str] = Field(default_factory=list)
-    scope_limited: bool = False
-
-
-class CanonicalFunctionClassification(BaseModel):
-    primary_judgment: str = ""
-    template_judgment: str = ""
-    structural_judgment: str = ""
-    narrative_axis: str = ""
-    feature_signal_mode: str = ""
-    pattern_candidates: list[PatternCandidate] = Field(default_factory=list)
-
-
-class CanonicalRebuildPayload(BaseModel):
-    request_context: CanonicalRequestContext = Field(default_factory=CanonicalRequestContext)
-    function_classification: CanonicalFunctionClassification = Field(default_factory=CanonicalFunctionClassification)
-    structure_snapshot: dict[str, Any] = Field(default_factory=dict)
-    diagnosis_report: dict[str, Any] = Field(default_factory=dict)
-    decision_summary: dict[str, Any] = Field(default_factory=dict)
-    analysis_summary: list[str] = Field(default_factory=list)
-    core_business_rules: list[str] = Field(default_factory=list)
-    grounded_business_rules: list[GroundedBusinessRule] = Field(default_factory=list)
-    decision_items: list[DecisionItem] = Field(default_factory=list)
-    retained_contracts: list[RetainedContract] = Field(default_factory=list)
-    design_options: list[DesignOption] = Field(default_factory=list)
-    recommended_option: RecommendedOption | None = None
-    execution_plan: list[ExecutionPlanWeek] = Field(default_factory=list)
-    recommended_directions: list[str] = Field(default_factory=list)
-    risks: list[str] = Field(default_factory=list)
-    missing_context_details: list[MissingContextItem] = Field(default_factory=list)
-    appendix: dict[str, Any] = Field(default_factory=dict)
-
-
 class InputFamilyClassification(BaseModel):
     family: str = ""
     confidence: float = 0.0
@@ -284,16 +262,162 @@ class InputFamilyClassification(BaseModel):
         return max(0.0, min(1.0, numeric))
 
 
-class StructuredRebuildResult(BaseModel):
-    context_id: str = ""
-    input_fingerprint: str = ""
-    safe_bundle_id: str = ""
-    evidence_refs: list[str] = Field(default_factory=list)
+class CanonicalRequestContext(BaseModel):
+    goal: str = ""
+    constraints: list[str] = Field(default_factory=list)
+    scope_limited: bool = False
+    question_axis: str = ""
+    primary_feature_mode: str = ""
+    secondary_feature_mode: str = ""
+    concept_signals: list[str] = Field(default_factory=list)
+    accounting_asset_name: str = ""
+
+
+class CanonicalFunctionClassification(BaseModel):
     primary_judgment: str = ""
     template_judgment: str = ""
     structural_judgment: str = ""
     narrative_axis: str = ""
     feature_signal_mode: str = ""
+    pattern_candidates: list[PatternCandidate] = Field(default_factory=list)
+
+
+class CanonicalRebuildPayload(BaseModel):
+    request_context: CanonicalRequestContext = Field(default_factory=CanonicalRequestContext)
+    function_classification: CanonicalFunctionClassification = Field(default_factory=CanonicalFunctionClassification)
+    input_family_classification: InputFamilyClassification = Field(default_factory=InputFamilyClassification)
+    structure_snapshot: dict[str, Any] = Field(default_factory=dict)
+    diagnosis_report: dict[str, Any] = Field(default_factory=dict)
+    decision_summary: dict[str, Any] = Field(default_factory=dict)
+    analysis_summary: list[str] = Field(default_factory=list)
+    core_business_rules: list[str] = Field(default_factory=list)
+    grounded_business_rules: list[GroundedBusinessRule] = Field(default_factory=list)
+    decision_items: list[DecisionItem] = Field(default_factory=list)
+    retained_contracts: list[RetainedContract] = Field(default_factory=list)
+    design_options: list[DesignOption] = Field(default_factory=list)
+    recommended_option: RecommendedOption | None = None
+    execution_plan: list[ExecutionPlanWeek] = Field(default_factory=list)
+    recommended_directions: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    missing_context_details: list[MissingContextItem] = Field(default_factory=list)
+    appendix: dict[str, Any] = Field(default_factory=dict)
+
+
+class NarrativeStatement(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
+    evidence_refs: list[str] = Field(default_factory=list)
+
+
+class ConsultingDeckOutlineChapter(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    chapter_key: str
+    headline: str
+    evidence_refs: list[str] = Field(default_factory=list)
+
+
+class RebuildNarrativeLayer(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    report_purpose: str = ""
+    executive_summary_v2: list[str] = Field(default_factory=list)
+    one_line_conclusion: str = ""
+    primary_judgment_reason: str = ""
+    recommended_option: str = ""
+    execution_plan: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    decision_narrative: list[NarrativeStatement] = Field(default_factory=list)
+    consulting_deck_outline: list[ConsultingDeckOutlineChapter] = Field(default_factory=list)
+
+
+class NarrativeCriticalFact(BaseModel):
+    fact_id: str
+    text: str
+
+
+class NarrativeDecisionDrivingEvidence(BaseModel):
+    evidence_id: str = ""
+    asset_name: str = ""
+    locator: str = ""
+    summary: str = ""
+
+
+class NarrativeLockedFields(BaseModel):
+    recommended_strategy: str = ""
+    recommended_option_aliases: list[str] = Field(default_factory=list)
+    decision_type: str = ""
+    family: str = ""
+    display_strategy: str = ""
+    priority_score: int | None = None
+    score_breakdown: dict[str, Any] = Field(default_factory=dict)
+
+
+class NarrativeBlockRewriteMetadata(BaseModel):
+    block_id: str
+    source: Literal["ai", "deterministic_fallback"] = "deterministic_fallback"
+    validation_passed: bool = False
+    failure_reason: str = ""
+    match_mode: Literal["exact", "normalized", "semantic", "failed"] = "failed"
+    fields_rewritten: list[str] = Field(default_factory=list)
+
+
+class NarrativeValidationResult(BaseModel):
+    block_id: str
+    validation_passed: bool = False
+    failure_reason: str = ""
+    match_mode: Literal["exact", "normalized", "semantic", "failed"] = "failed"
+    unsupported_claims: list[str] = Field(default_factory=list)
+    missing_critical_fact_ids: list[str] = Field(default_factory=list)
+    missing_evidence_ids: list[str] = Field(default_factory=list)
+    mutated_locked_fields: list[str] = Field(default_factory=list)
+    ambiguous_fact_merge_detected: bool = False
+
+
+class DeterministicExplanationBlock(BaseModel):
+    block_id: str
+    field_type: Literal["text", "list"] = "text"
+    deterministic_lines: list[str] = Field(default_factory=list)
+    resolved_lines: list[str] = Field(default_factory=list)
+    critical_facts: list[NarrativeCriticalFact] = Field(default_factory=list)
+    decision_driving_evidence: list[NarrativeDecisionDrivingEvidence] = Field(default_factory=list)
+    locked_fields: NarrativeLockedFields = Field(default_factory=NarrativeLockedFields)
+    rewrite_metadata: NarrativeBlockRewriteMetadata | None = None
+
+
+class NarrativeValidationMetadata(BaseModel):
+    source: str = "deterministic_fallback"
+    match_mode: Literal["exact", "normalized", "semantic", "failed", "mixed"] = "failed"
+    fields_rewritten: list[str] = Field(default_factory=list)
+    model: str = ""
+    prompt_version: str = ""
+    validation_passed: bool = False
+    failure_reason: str = ""
+    axis: str = ""
+    llm_invoked: bool = False
+    llm_call_count: int = 0
+    fallback_used: bool = True
+    slim_payload_hash: str = ""
+    block_match_modes: dict[str, str] = Field(default_factory=dict)
+    block_results: list[NarrativeValidationResult] = Field(default_factory=list)
+    block_rewrite_metadata: list[NarrativeBlockRewriteMetadata] = Field(default_factory=list)
+
+
+class StructuredRebuildResult(BaseModel):
+    context_id: str = ""
+    input_fingerprint: str = ""
+    safe_bundle_id: str = ""
+    evidence_refs: list[str] = Field(default_factory=list)
+    stage_control: dict[str, Any] = Field(default_factory=dict)
+    validation_result: dict[str, Any] = Field(default_factory=dict)
+    primary_judgment: str = ""
+    template_judgment: str = ""
+    structural_judgment: str = ""
+    narrative_axis: str = ""
+    question_axis: str = ""
+    feature_signal_mode: str = ""
+    family_classification: InputFamilyClassification = Field(default_factory=InputFamilyClassification)
     primary_judgment_reason: str = ""
     pattern_candidates: list[PatternCandidate] = Field(default_factory=list)
     report_purpose: str = ""
@@ -320,13 +444,19 @@ class StructuredRebuildResult(BaseModel):
     confidence: float = 0.0
     missing_context: list[str] = Field(default_factory=list)
     missing_context_details: list[MissingContextItem] = Field(default_factory=list)
+    assumptions: list[AssumptionItem] = Field(default_factory=list)
     extensions: dict[str, Any] = Field(default_factory=dict)
     structure_snapshot: dict[str, Any] = Field(default_factory=dict)
     diagnosis_report: dict[str, Any] = Field(default_factory=dict)
     decision_summary: dict[str, Any] = Field(default_factory=dict)
     improvement_plan_bundle: dict[str, Any] = Field(default_factory=dict)
+    judgment_canvas: dict[str, Any] = Field(default_factory=dict)
     appendix: dict[str, Any] = Field(default_factory=dict)
     canonical_payload: CanonicalRebuildPayload | None = None
+    narrative_layer: RebuildNarrativeLayer | None = None
+    narrative_metadata: NarrativeValidationMetadata | None = None
+    validated_explanation_blocks: list[DeterministicExplanationBlock] = Field(default_factory=list)
+    narrative_guard_metadata: NarrativeValidationMetadata | None = None
 
     @field_validator("confidence", mode="before")
     @classmethod
@@ -377,6 +507,7 @@ class ProjectAssetItem(BaseModel):
 class ProjectStartRequest(BaseModel):
     project_name: str = Field(..., description="Commercial modernization project name")
     client_name: str = Field(..., description="Customer or account name")
+    goal: str = Field("", description="Canonical user goal for this analysis")
     upload_session_id: str = Field(..., description="Temp upload session ID")
     asset_manifest: list[ProjectAssetItem] = Field(default_factory=list)
     template_key: str = Field("default_modernization_v1")
@@ -390,10 +521,44 @@ class ProjectStartRequest(BaseModel):
             raise ValueError("required field cannot be blank")
         return stripped
 
+    @field_validator("goal", mode="before")
+    @classmethod
+    def normalize_goal(cls, value: Any) -> str:
+        return str(value or "").strip()
+
     @field_validator("constraints")
     @classmethod
     def normalize_constraints(cls, value: list[str]) -> list[str]:
         return [item.strip() for item in (value or []) if (item or "").strip()]
+
+
+class ProjectAnonymizationPreviewRequest(BaseModel):
+    upload_session_id: str = Field(..., description="Temp upload session ID")
+    asset_manifest: list[ProjectAssetItem] = Field(default_factory=list)
+    goal: str = ""
+    constraints: list[str] = Field(default_factory=list)
+
+    @field_validator("upload_session_id")
+    @classmethod
+    def validate_upload_session_id(cls, value: str) -> str:
+        stripped = (value or "").strip()
+        if not stripped:
+            raise ValueError("upload_session_id cannot be blank")
+        return stripped
+
+
+class ProjectAnonymizationPreviewResponse(BaseModel):
+    review_report: AnonymizationReviewReport | None = None
+    display_review_report: dict[str, Any] | None = None
+    high_risk_detected: bool = False
+    label_less_risk_count: int = 0
+    label_less_warning_count: int = 0
+    structure_issue_count: int = 0
+    structure_risk_detected: bool = False
+    source_question_candidates: list[SourceQuestionCandidate] = Field(default_factory=list)
+    blocked_user_questions: list[GuardedUserQuestion] = Field(default_factory=list)
+    review_user_questions: list[GuardedUserQuestion] = Field(default_factory=list)
+    question_guard_summary: QuestionGuardSummary = Field(default_factory=QuestionGuardSummary)
 
 
 class ProjectStartResponse(BaseModel):
@@ -445,6 +610,7 @@ class ResultExplanationSectionView(BaseModel):
 class ResultExplanationCoreJudgmentView(BaseModel):
     structural_judgment: str = ""
     recommended_strategy: str = ""
+    display_strategy: str = ""
     top_decision_type: str = ""
 
 
@@ -481,6 +647,7 @@ class ResultExplanationResponse(BaseModel):
     surface_mode: Literal["internal", "external"] = "internal"
     taxonomy_view: ResultExplanationTaxonomyView = Field(default_factory=ResultExplanationTaxonomyView)
     review_diff_preview: ResultExplanationReviewDiffPreview = Field(default_factory=ResultExplanationReviewDiffPreview)
+    judgment_canvas: dict[str, Any] = Field(default_factory=dict)
     summary_cards: list[ResultExplanationSummaryCard] = Field(default_factory=list)
     section_views: list[ResultExplanationSectionView] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)

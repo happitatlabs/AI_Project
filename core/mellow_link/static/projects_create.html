@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>레거시 현대화 분석</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/static/anonymization_display.js"></script>
     <style>
         body { font-family: "Pretendard", "Segoe UI", sans-serif; }
     </style>
@@ -63,9 +64,15 @@
                     </div>
 
                     <label class="block">
-                        <span class="mb-2 block text-sm text-stone-300">고객이 원하는 방향</span>
+                        <span class="mb-2 block text-sm text-stone-300">분석 목표</span>
+                        <textarea id="goal" rows="4" placeholder="예: 이 SQL/프로시저가 실제로 어떤 처리 흐름과 계산 규칙으로 동작하는지 분석해줘." class="w-full rounded-3xl border border-white/10 bg-stone-950/70 px-4 py-4 text-sm"></textarea>
+                        <span class="mt-2 block text-xs leading-6 text-stone-500">이 값이 canonical goal로 저장됩니다. 비워두면 `goal.txt`, 그것도 없으면 프로젝트명/고객사 기준 기본 목표를 사용합니다.</span>
+                    </label>
+
+                    <label class="block">
+                        <span class="mb-2 block text-sm text-stone-300">고객이 원하는 방향 (보조 메모)</span>
                         <textarea id="customerIntent" rows="4" placeholder="줄바꿈 기준으로 입력하세요.&#10;예: 화면은 최대한 유지하고 백엔드만 분리&#10;예: 단계적 전환을 원함&#10;예: React + REST 기준을 선호" class="w-full rounded-3xl border border-white/10 bg-stone-950/70 px-4 py-4 text-sm"></textarea>
-                        <span class="mt-2 block text-xs leading-6 text-stone-500">고객이 원하는 결과나 선호 방식을 적습니다. 구조 판단 시 일반 제약과 구분되도록 함께 전달됩니다.</span>
+                        <span class="mt-2 block text-xs leading-6 text-stone-500">고객 선호, 단계적 전환 여부, 특정 기술 선호 같은 보조 메모입니다. canonical goal을 덮어쓰지 않고 제약/선호 신호로만 함께 전달됩니다.</span>
                     </label>
 
                     <section class="rounded-3xl border border-white/10 bg-stone-950/40 p-5">
@@ -82,6 +89,55 @@
                             <span id="uploadStatus" class="text-sm text-stone-400">아직 업로드한 파일이 없습니다.</span>
                         </div>
                         <div id="assetList" class="mt-4 grid gap-3 md:grid-cols-2"></div>
+                    </section>
+
+                    <section id="anonymizationReviewSection" class="rounded-3xl border border-sky-300/15 bg-sky-500/5 p-5">
+                        <div class="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                                <h3 class="text-lg font-medium">입력 익명화 리뷰</h3>
+                                <p class="mt-1 text-xs text-stone-400">SML 문서형 익명화 결과를 기준으로 role token, label-less candidate, 구조 보존 여부, safe preview를 확인합니다.</p>
+                            </div>
+                            <div id="reviewStatusBadge" class="rounded-full border border-white/10 px-3 py-1 text-xs text-stone-300">대기 중</div>
+                        </div>
+                        <div id="reviewStatusText" class="mt-4 text-sm text-stone-400">업로드된 자산이 아직 없습니다. 파일 업로드 후 safe preview가 표시됩니다.</div>
+                        <div id="reviewDisplayNotice" class="mt-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-xs leading-6 text-stone-400">
+                            표시 안내: [PERSON], [ORG], [PROJECT], [TERM] 등은 익명 처리된 민감정보입니다.
+                        </div>
+                        <div id="reviewRiskNotice" class="hidden mt-4 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100"></div>
+                        <div id="reviewMetrics" class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4"></div>
+                        <div class="mt-4 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+                            <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                                <div class="text-xs uppercase tracking-[0.2em] text-stone-500">Source Question Guard</div>
+                                <div id="questionGuardStatus" class="mt-3 text-sm leading-7 text-stone-300">업로드된 safe source를 기준으로 질문 후보를 추출하면 여기 표시됩니다.</div>
+                                <div id="questionGuardMetrics" class="mt-3 grid gap-3 md:grid-cols-2"></div>
+                            </div>
+                            <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                                <div class="text-xs uppercase tracking-[0.2em] text-stone-500">질문 후보</div>
+                                <div id="sourceQuestionCandidates" class="mt-3 space-y-3"></div>
+                                <div class="mt-4 text-xs uppercase tracking-[0.2em] text-stone-500">차단 / 재검토 질문</div>
+                                <div id="guardedUserQuestions" class="mt-3 space-y-3"></div>
+                            </div>
+                        </div>
+                        <div class="mt-4 grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
+                            <div class="space-y-4">
+                                <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                                    <div class="text-xs uppercase tracking-[0.2em] text-stone-500">Role Token 요약</div>
+                                    <div id="reviewRoleSummary" class="mt-3 flex flex-wrap gap-2"></div>
+                                </div>
+                                <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                                    <div class="text-xs uppercase tracking-[0.2em] text-stone-500">감지된 원문 유형</div>
+                                    <div id="reviewDetectedTypes" class="mt-3 flex flex-wrap gap-2"></div>
+                                </div>
+                                <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                                    <div class="text-xs uppercase tracking-[0.2em] text-stone-500">구조 점검</div>
+                                    <div id="reviewStructureChecks" class="mt-3 space-y-2"></div>
+                                </div>
+                            </div>
+                            <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                                <div class="text-xs uppercase tracking-[0.2em] text-stone-500">Safe Preview</div>
+                                <div id="reviewSafePreview" class="mt-3 space-y-3"></div>
+                            </div>
+                        </div>
                     </section>
 
                     <label class="block">
@@ -196,6 +252,7 @@
                 ? window.crypto.randomUUID()
                 : ('project-' + Date.now()),
             assets: [],
+            reviewPreview: null,
         };
 
         function getToken() {
@@ -313,11 +370,284 @@
             el.textContent = message;
         }
 
+        function escapeHtml(value) {
+            return String(value == null ? '' : value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function anonymizationDisplay() {
+            return window.AnonymizationDisplay || null;
+        }
+
+        function displayNoticeText() {
+            return anonymizationDisplay() && typeof anonymizationDisplay().displayNoticeText === 'function'
+                ? anonymizationDisplay().displayNoticeText()
+                : '표시 안내: [PERSON], [ORG], [PROJECT], [TERM] 등은 익명 처리된 민감정보입니다.';
+        }
+
+        function applyDisplayMarkers(root) {
+            if (anonymizationDisplay() && typeof anonymizationDisplay().applyToElement === 'function') {
+                anonymizationDisplay().applyToElement(root);
+            }
+        }
+
+        function reviewBadgeTone(status) {
+            if (status === 'blocked') return 'border-rose-300/30 bg-rose-500/10 text-rose-200';
+            if (status === 'review_required') return 'border-amber-300/30 bg-amber-500/10 text-amber-100';
+            if (status === 'ready') return 'border-emerald-300/30 bg-emerald-500/10 text-emerald-200';
+            return 'border-white/10 bg-white/5 text-stone-300';
+        }
+
+        function reviewStatusLabel(status, reportApplied) {
+            if (!reportApplied) return '대상 없음';
+            if (status === 'blocked') return 'HIGH RISK';
+            if (status === 'review_required') return 'REVIEW';
+            if (status === 'ready') return 'READY';
+            return '대기 중';
+        }
+
+        function metricCardHtml(title, value, toneClass) {
+            return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
+                '<div class="text-xs uppercase tracking-[0.2em] text-stone-500">' + escapeHtml(title) + '</div>' +
+                '<div class="mt-3 text-2xl font-semibold ' + toneClass + '">' + escapeHtml(value) + '</div>' +
+                '</div>';
+        }
+
+        function tokenChipsHtml(items, labelKey, countKey, emptyText) {
+            if (!items || !items.length) {
+                return '<div class="text-sm text-stone-500">' + escapeHtml(emptyText) + '</div>';
+            }
+            return items.map(function (item) {
+                const label = item[labelKey] || item.role_kind || item.type_key || '-';
+                const count = item[countKey] || 0;
+                return '<div class="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-stone-200">' +
+                    escapeHtml(label) + ' · ' + escapeHtml(count) +
+                    '</div>';
+            }).join('');
+        }
+
+        function structureCheckTone(severity) {
+            if (severity === 'risk') return 'text-rose-200 border-rose-300/20 bg-rose-500/10';
+            if (severity === 'warning') return 'text-amber-100 border-amber-300/20 bg-amber-500/10';
+            return 'text-emerald-200 border-emerald-300/20 bg-emerald-500/10';
+        }
+
+        function questionTone(status) {
+            if (status === 'blocked') return 'border-rose-300/20 bg-rose-500/10 text-rose-100';
+            if (status === 'needs_review') return 'border-amber-300/20 bg-amber-500/10 text-amber-100';
+            return 'border-white/10 bg-white/5 text-stone-200';
+        }
+
+        function renderQuestionCandidates(items) {
+            if (!items || !items.length) {
+                return '<div class="text-sm text-stone-500">생성된 source question candidate가 없습니다.</div>';
+            }
+            return items.map(function (item) {
+                return '<div class="rounded-2xl border border-white/10 bg-stone-950/60 px-4 py-4">' +
+                    '<div class="flex flex-wrap items-center justify-between gap-3">' +
+                    '<div class="text-sm font-medium text-stone-100">' + escapeHtml(item.question || '-') + '</div>' +
+                    '<div class="text-[11px] text-stone-500">' + escapeHtml(item.confidence || 'medium') + ' · ' + escapeHtml(item.question_type || '-') + '</div>' +
+                    '</div>' +
+                    '<div class="mt-2 text-xs leading-6 text-stone-400">' + escapeHtml(item.evidence_snippet || '') + '</div>' +
+                    '</div>';
+            }).join('');
+        }
+
+        function renderGuardedUserQuestions(blockedItems, reviewItems) {
+            const items = []
+                .concat((blockedItems || []).map(function (item) {
+                    item.__status = 'blocked';
+                    return item;
+                }))
+                .concat((reviewItems || []).map(function (item) {
+                    item.__status = 'needs_review';
+                    return item;
+                }));
+            if (!items.length) {
+                return '<div class="text-sm text-stone-500">차단되거나 재검토 상태인 질문이 없습니다.</div>';
+            }
+            return items.map(function (item) {
+                return '<div class="rounded-2xl border px-4 py-4 text-sm ' + questionTone(item.__status) + '">' +
+                    '<div class="font-medium">' + escapeHtml(item.question || '-') + '</div>' +
+                    '<div class="mt-1 text-xs leading-6">' + escapeHtml(item.blocked_reason || item.status || item.__status) + '</div>' +
+                    (item.evidence_snippet ? '<div class="mt-2 text-[11px] leading-6 text-stone-300">' + escapeHtml(item.evidence_snippet) + '</div>' : '') +
+                    '</div>';
+            }).join('');
+        }
+
+        function renderAnonymizationReview(payload) {
+            state.reviewPreview = payload || null;
+            const badge = document.getElementById('reviewStatusBadge');
+            const statusText = document.getElementById('reviewStatusText');
+            const displayNotice = document.getElementById('reviewDisplayNotice');
+            const riskNotice = document.getElementById('reviewRiskNotice');
+            const metrics = document.getElementById('reviewMetrics');
+            const roleSummary = document.getElementById('reviewRoleSummary');
+            const detectedTypes = document.getElementById('reviewDetectedTypes');
+            const structureChecks = document.getElementById('reviewStructureChecks');
+            const safePreview = document.getElementById('reviewSafePreview');
+            const questionGuardStatus = document.getElementById('questionGuardStatus');
+            const questionGuardMetrics = document.getElementById('questionGuardMetrics');
+            const sourceQuestionCandidates = document.getElementById('sourceQuestionCandidates');
+            const guardedUserQuestions = document.getElementById('guardedUserQuestions');
+
+            const rawReport = payload && payload.review_report ? payload.review_report : null;
+            const report = payload && payload.display_review_report ? payload.display_review_report : rawReport;
+            const questionSummary = payload && payload.question_guard_summary ? payload.question_guard_summary : null;
+            const candidateItems = payload && payload.source_question_candidates ? payload.source_question_candidates : [];
+            const blockedItems = payload && payload.blocked_user_questions ? payload.blocked_user_questions : [];
+            const reviewItems = payload && payload.review_user_questions ? payload.review_user_questions : [];
+            const applied = Boolean(rawReport && rawReport.applied);
+            const structureItems = report ? (report.structure_checks || []) : [];
+            const structureWarnings = structureItems.filter(function (item) { return item.severity === 'warning'; }).length;
+            const structureRisks = structureItems.filter(function (item) { return item.severity === 'risk'; }).length;
+            const structureLabel = structureRisks
+                ? '구조 훼손 위험'
+                : structureWarnings
+                    ? '구조 검토 필요'
+                    : applied
+                        ? '구조 유지'
+                        : '해당 없음';
+
+            badge.className = 'rounded-full border px-3 py-1 text-xs ' + reviewBadgeTone(rawReport ? rawReport.status : '');
+            badge.textContent = reviewStatusLabel(rawReport ? rawReport.status : '', applied);
+            displayNotice.textContent = displayNoticeText();
+
+            if (!state.assets.length) {
+                statusText.textContent = '업로드된 자산이 아직 없습니다. 파일 업로드 후 safe preview가 표시됩니다.';
+            } else if (!applied) {
+                statusText.textContent = '현재 업로드 자산에는 SML 문서형 익명화 review 대상이 없습니다.';
+            } else {
+                statusText.textContent = '익명화 결과를 기반으로 safe preview와 구조 보존 상태를 검토할 수 있습니다.';
+            }
+
+            if (!state.assets.length) {
+                questionGuardStatus.textContent = '업로드된 safe source가 아직 없습니다.';
+            } else if (!questionSummary || !questionSummary.guard_input_source_count) {
+                questionGuardStatus.textContent = '질문 guard가 읽을 safe source가 아직 준비되지 않았습니다.';
+            } else if (questionSummary.source_question_candidate_count > 0) {
+                questionGuardStatus.textContent = '업로드된 safe source에서 질문 후보를 추출했습니다.';
+            } else {
+                const reasons = (questionSummary.no_candidate_reasons || []).join(', ');
+                questionGuardStatus.textContent = reasons
+                    ? '질문 후보가 충분하지 않습니다. 원인: ' + reasons
+                    : '질문 후보가 충분하지 않아 일반 fallback 또는 추가 검토가 필요합니다.';
+            }
+
+            if (payload && payload.high_risk_detected) {
+                riskNotice.classList.remove('hidden');
+                riskNotice.textContent = 'High risk 후보가 감지되었습니다. 자동 치환은 수행하지 않았고, 분석 실행 전 preview 확인을 권장합니다.';
+            } else {
+                riskNotice.classList.add('hidden');
+                riskNotice.textContent = '';
+            }
+
+            metrics.innerHTML = [
+                metricCardHtml('Role Token', applied ? String((rawReport.role_token_summary || []).reduce(function (sum, item) { return sum + (item.generated_count || 0); }, 0)) : '0', 'text-sky-200'),
+                metricCardHtml('감지된 원문 유형', applied ? String((rawReport.detected_original_types || []).length) : '0', 'text-stone-100'),
+                metricCardHtml('Label-less Candidate', (payload ? String(payload.label_less_risk_count || 0) : '0') + ' risk / ' + (payload ? String(payload.label_less_warning_count || 0) : '0') + ' warning', payload && payload.high_risk_detected ? 'text-rose-200' : 'text-amber-100'),
+                metricCardHtml('구조 훼손 여부', structureLabel, structureRisks ? 'text-rose-200' : structureWarnings ? 'text-amber-100' : 'text-emerald-200'),
+            ].join('');
+
+            questionGuardMetrics.innerHTML = [
+                metricCardHtml('Guard Source', questionSummary ? String(questionSummary.guard_input_source_count || 0) : '0', 'text-stone-100'),
+                metricCardHtml('Guard Chars', questionSummary ? String(questionSummary.guard_input_total_chars || 0) : '0', 'text-sky-200'),
+                metricCardHtml('질문 후보', questionSummary ? String(questionSummary.source_question_candidate_count || 0) : '0', questionSummary && questionSummary.source_question_candidate_count ? 'text-emerald-200' : 'text-amber-100'),
+                metricCardHtml('SML Chars', questionSummary ? String(questionSummary.sml_text_length || 0) : '0', 'text-stone-100'),
+            ].join('');
+
+            roleSummary.innerHTML = tokenChipsHtml(rawReport ? rawReport.role_token_summary : [], 'label', 'generated_count', '생성된 role token이 없습니다.');
+            detectedTypes.innerHTML = tokenChipsHtml(rawReport ? rawReport.detected_original_types : [], 'label', 'count', '감지된 문서형 원문 유형이 없습니다.');
+            sourceQuestionCandidates.innerHTML = renderQuestionCandidates(candidateItems);
+            guardedUserQuestions.innerHTML = renderGuardedUserQuestions(blockedItems, reviewItems);
+
+            if (!structureItems.length) {
+                structureChecks.innerHTML = '<div class="text-sm text-stone-500">구조 점검 결과가 없습니다.</div>';
+            } else {
+                structureChecks.innerHTML = structureItems.map(function (item) {
+                    return '<div class="rounded-2xl border px-3 py-3 text-sm ' + structureCheckTone(item.severity) + '">' +
+                        '<div class="font-medium">' + escapeHtml(item.code || '-') + '</div>' +
+                        '<div class="mt-1 text-xs leading-6">' + escapeHtml(item.message || '') + '</div>' +
+                        '</div>';
+                }).join('');
+            }
+
+            if (!report || !report.asset_previews || !report.asset_previews.length) {
+                safePreview.innerHTML = '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-stone-500">표시할 safe preview가 없습니다.</div>';
+            } else {
+                safePreview.innerHTML = report.asset_previews.map(function (item) {
+                    return '<div class="rounded-2xl border border-white/10 bg-stone-950/70 px-4 py-4">' +
+                        '<div class="flex flex-wrap items-center justify-between gap-3">' +
+                        '<div class="text-sm font-medium text-stone-100">' + escapeHtml(item.asset_name || item.asset_id || '-') + '</div>' +
+                        '<div class="text-[11px] text-stone-500">token ' + escapeHtml(item.role_token_count || 0) + ' · risk ' + escapeHtml(item.risk_count || 0) + ' · warning ' + escapeHtml(item.warning_count || 0) + '</div>' +
+                        '</div>' +
+                        '<pre class="mt-3 overflow-x-auto whitespace-pre-wrap rounded-2xl border border-white/10 bg-black/30 px-4 py-4 text-xs leading-6 text-stone-200">' + escapeHtml(item.preview_text || '') + '</pre>' +
+                        '</div>';
+                }).join('');
+            }
+            applyDisplayMarkers(document.getElementById('anonymizationReviewSection'));
+        }
+
+        async function refreshAnonymizationReview() {
+            if (!state.assets.length) {
+                renderAnonymizationReview(null);
+                return;
+            }
+            const badge = document.getElementById('reviewStatusBadge');
+            const statusText = document.getElementById('reviewStatusText');
+            badge.className = 'rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-stone-300';
+            badge.textContent = '검사 중';
+            statusText.textContent = '익명화 review를 생성하는 중입니다.';
+            try {
+                const res = await fetch('/projects/anonymization-review', {
+                    method: 'POST',
+                    headers: headers({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({
+                        upload_session_id: state.uploadSessionId,
+                        goal: document.getElementById('goal') ? (document.getElementById('goal').value || '') : '',
+                        constraints: buildConstraintPayload(),
+                        asset_manifest: state.assets.map(function (asset) {
+                            return {
+                                name: asset.name,
+                                temp_file_id: asset.temp_file_id,
+                                size: asset.size || 0,
+                                category_hint: asset.category_hint || '',
+                            };
+                        }),
+                    }),
+                });
+                const payload = await res.json().catch(function () { return {}; });
+                if (!res.ok) {
+                    throw new Error(payload.detail || '익명화 review를 불러오지 못했습니다.');
+                }
+                renderAnonymizationReview(payload);
+            } catch (error) {
+                renderAnonymizationReview(null);
+                document.getElementById('reviewStatusBadge').className = 'rounded-full border border-rose-300/30 bg-rose-500/10 px-3 py-1 text-xs text-rose-200';
+                document.getElementById('reviewStatusBadge').textContent = '오류';
+                document.getElementById('reviewStatusText').textContent = error && error.message
+                    ? error.message
+                    : '익명화 review를 불러오지 못했습니다.';
+            }
+        }
+
+        function formatLocalDate(value) {
+            if (!value) return '-';
+            const parsed = new Date(value);
+            if (Number.isNaN(parsed.getTime())) return String(value);
+            return parsed.toLocaleString();
+        }
+
         function renderAssets() {
             const list = document.getElementById('assetList');
             if (!state.assets.length) {
                 list.innerHTML = '';
                 document.getElementById('uploadStatus').textContent = '아직 업로드한 파일이 없습니다.';
+                renderAnonymizationReview(null);
                 return;
             }
             document.getElementById('uploadStatus').textContent = state.assets.length + '개 파일이 업로드되었습니다.';
@@ -395,10 +725,10 @@
             const changes = [];
             if (normalizedName === 'goal.txt') {
                 const goalLine = firstNonEmptyLine(text);
-                const projectNameInput = document.getElementById('projectName');
-                if (goalLine && projectNameInput && !String(projectNameInput.value || '').trim()) {
-                    projectNameInput.value = goalLine;
-                    changes.push('프로젝트명 자동 채움');
+                const goalInput = document.getElementById('goal');
+                if (goalLine && goalInput && !String(goalInput.value || '').trim()) {
+                    goalInput.value = goalLine;
+                    changes.push('분석 목표 자동 채움');
                 }
             }
             if (normalizedName === 'constraints.txt') {
@@ -448,6 +778,7 @@
                     name: file.name,
                     temp_file_id: payload.temp_file_id,
                     size: file.size,
+                    category_hint: '',
                 });
                 const autofillChanges = applyAssetAutofill(file.name, payload.extracted_text || '');
                 if (autofillChanges.length) {
@@ -456,32 +787,104 @@
             }
             renderAssets();
             input.value = '';
+            await refreshAnonymizationReview();
         }
 
-        function renderProjects(projects) {
+        function normalizeRecentEntries(items) {
+            return (items || []).map(function (item) {
+                const projectId = item.project_id || item.id || '';
+                const status = String(item.status || 'running').toLowerCase();
+                const runId = item.run_id || '';
+                const workspaceUrl = item.workspace_url || ('/projects/' + encodeURIComponent(projectId));
+                let resultUrl = item.result_url || '';
+                if (!resultUrl && status === 'completed') {
+                    resultUrl = '/projects/' + encodeURIComponent(projectId) + '/result';
+                    if (runId) {
+                        resultUrl += '?run_id=' + encodeURIComponent(runId);
+                    }
+                }
+                return {
+                    project_id: projectId,
+                    run_id: runId,
+                    project_name: item.project_name || '-',
+                    client_name: item.client_name || '-',
+                    status: status,
+                    status_bucket: item.status_bucket || (
+                        status === 'completed'
+                            ? 'completed'
+                            : status === 'failed'
+                                ? 'failed'
+                                : ['pending', 'waiting', 'queued'].includes(status)
+                                    ? 'pending'
+                                    : 'running'
+                    ),
+                    sequence_no: item.sequence_no || null,
+                    trigger_kind: item.trigger_kind || '',
+                    created_at: item.created_at || item.updated_at || '',
+                    asset_count: typeof item.asset_count === 'number'
+                        ? item.asset_count
+                        : (Array.isArray(item.asset_manifest) ? item.asset_manifest.length : 0),
+                    is_latest: Boolean(item.is_latest),
+                    workspace_url: workspaceUrl,
+                    result_url: resultUrl
+                };
+            });
+        }
+
+        function humanizeRunStatus(status) {
+            const normalized = String(status || '').toLowerCase();
+            if (normalized === 'completed') return '완료';
+            if (normalized === 'failed') return '실패';
+            if (['pending', 'waiting', 'queued'].includes(normalized)) return '대기';
+            if (normalized === 'running') return '실행 중';
+            return normalized || '-';
+        }
+
+        function renderProjects(items) {
             const list = document.getElementById('projectList');
-            if (!projects.length) {
+            const entries = normalizeRecentEntries(items);
+            if (!entries.length) {
                 list.innerHTML = '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-stone-500">표시할 프로젝트가 없습니다.</div>';
                 return;
             }
-            list.innerHTML = projects.map(function (project) {
-                const assetCount = Array.isArray(project.asset_manifest) ? project.asset_manifest.length : 0;
-                const statusTone = project.status === 'completed'
-                    ? 'text-emerald-300'
-                    : project.status === 'failed'
-                        ? 'text-rose-300'
-                        : 'text-amber-300';
-                const resultLink = project.status === 'completed'
-                    ? '<a href="/projects/' + encodeURIComponent(project.id) + '/result" class="text-amber-300 hover:text-amber-200">결과 보기</a>'
-                    : '<span class="text-stone-500">결과 대기</span>';
-                return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
-                    '<div class="flex items-start justify-between gap-3">' +
-                    '<div><div class="text-base font-medium text-stone-100">' + project.project_name + '</div>' +
-                    '<div class="mt-1 text-sm text-stone-400">' + project.client_name + '</div></div>' +
-                    '<div class="text-xs ' + statusTone + '">' + project.status + '</div></div>' +
-                    '<div class="mt-3 text-xs text-stone-500">자산 ' + assetCount + '개 · ' + (project.created_at ? new Date(project.created_at).toLocaleString() : '-') + '</div>' +
-                    '<div class="mt-4 flex items-center gap-4 text-sm"><a href="/projects/' + encodeURIComponent(project.id) + '" class="text-stone-200 hover:text-white">워크스페이스</a>' +
-                    resultLink + '</div></div>';
+            const sections = [
+                { key: 'running', title: '실행 중', items: entries.filter(function (entry) { return entry.status_bucket === 'running'; }) },
+                { key: 'pending', title: '대기 / 시작 안 됨', items: entries.filter(function (entry) { return entry.status_bucket === 'pending'; }) },
+                { key: 'completed', title: '완료된 결과', items: entries.filter(function (entry) { return entry.status_bucket === 'completed'; }) },
+                { key: 'failed', title: '실패', items: entries.filter(function (entry) { return entry.status_bucket === 'failed'; }) },
+                { key: 'other', title: '기타', items: entries.filter(function (entry) { return entry.status_bucket === 'other'; }) }
+            ].filter(function (section) { return section.items.length; });
+
+            list.innerHTML = sections.map(function (section) {
+                return '<div class="space-y-3">' +
+                    '<div class="text-xs uppercase tracking-[0.2em] text-stone-500">' + escapeHtml(section.title) + '</div>' +
+                    section.items.map(function (entry) {
+                        const statusTone = entry.status === 'completed'
+                            ? 'text-emerald-300'
+                            : entry.status === 'failed'
+                                ? 'text-rose-300'
+                                : ['pending', 'waiting', 'queued'].includes(entry.status)
+                                    ? 'text-sky-300'
+                                    : 'text-amber-300';
+                        const runMeta = entry.sequence_no
+                            ? '실행 #' + escapeHtml(entry.sequence_no) + (entry.trigger_kind ? ' · ' + escapeHtml(entry.trigger_kind) : '')
+                            : '프로젝트';
+                        const latestBadge = entry.is_latest
+                            ? '<span class="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-200">최신</span>'
+                            : '<span class="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-stone-300">이전 실행</span>';
+                        const resultLink = entry.result_url
+                            ? '<a href="' + escapeHtml(entry.result_url) + '" class="text-amber-300 hover:text-amber-200">결과 보기</a>'
+                            : '<span class="text-stone-500">결과 대기</span>';
+                        return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
+                            '<div class="flex items-start justify-between gap-3">' +
+                            '<div><div class="text-base font-medium text-stone-100">' + escapeHtml(entry.project_name) + '</div>' +
+                            '<div class="mt-1 text-sm text-stone-400">' + escapeHtml(entry.client_name) + '</div></div>' +
+                            '<div class="flex flex-wrap items-center justify-end gap-2"><span class="text-xs ' + statusTone + '">' + escapeHtml(humanizeRunStatus(entry.status)) + '</span>' + latestBadge + '</div></div>' +
+                            '<div class="mt-3 text-xs text-stone-500">' + runMeta + ' · 자산 ' + escapeHtml(entry.asset_count) + '개 · ' + escapeHtml(formatLocalDate(entry.created_at)) + '</div>' +
+                            '<div class="mt-4 flex items-center gap-4 text-sm"><a href="' + escapeHtml(entry.workspace_url) + '" class="text-stone-200 hover:text-white">워크스페이스</a>' +
+                            resultLink + '</div></div>';
+                    }).join('') +
+                    '</div>';
             }).join('');
         }
 
@@ -492,7 +895,7 @@
                 return;
             }
             const payload = await res.json();
-            renderProjects(payload.projects || []);
+            renderProjects(payload.recent_entries || payload.projects || []);
         }
 
         async function createProject(event) {
@@ -505,6 +908,7 @@
             }
             const projectName = (document.getElementById('projectName').value || '').trim();
             const clientName = (document.getElementById('clientName').value || '').trim();
+            const goal = (document.getElementById('goal').value || '').trim();
             if (!projectName || !clientName) {
                 setFormError('프로젝트명과 고객사명을 입력하세요.');
                 return;
@@ -521,6 +925,7 @@
                 body: JSON.stringify({
                     project_name: projectName,
                     client_name: clientName,
+                    goal: goal,
                     upload_session_id: state.uploadSessionId,
                     asset_manifest: state.assets,
                     template_key: document.getElementById('templateKey').value,
@@ -551,6 +956,7 @@
         document.getElementById('uploadBtn').addEventListener('click', uploadFiles);
         document.getElementById('projectForm').addEventListener('submit', createProject);
         document.getElementById('refreshProjectsBtn').addEventListener('click', loadProjects);
+        renderAnonymizationReview(null);
         refreshAuth();
     </script>
 </body>

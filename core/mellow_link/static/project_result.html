@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>판단판</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/static/anonymization_display.js"></script>
     <style>
         body { font-family: "Pretendard", "Segoe UI", sans-serif; }
         summary { list-style: none; }
@@ -53,6 +54,9 @@
                 <p class="text-xs uppercase tracking-[0.24em] text-slate-500">프로젝트</p>
                 <h2 id="projectTitle" class="mt-3 text-3xl font-semibold">-</h2>
                 <p id="projectMeta" class="mt-3 text-sm text-slate-400">-</p>
+                <div id="anonymizationDisplayNote" class="mt-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-xs leading-6 text-slate-400">
+                    표시 안내: [PERSON], [ORG], [PROJECT], [TERM] 등은 익명 처리된 민감정보입니다.
+                </div>
             </section>
 
             <div id="internalSurface" class="space-y-6">
@@ -1095,6 +1099,22 @@
             renderAccountingWarnings(bundle);
         }
 
+        function anonymizationDisplay() {
+            return window.AnonymizationDisplay || null;
+        }
+
+        function displayNoticeText() {
+            return anonymizationDisplay() && typeof anonymizationDisplay().displayNoticeText === 'function'
+                ? anonymizationDisplay().displayNoticeText()
+                : '표시 안내: [PERSON], [ORG], [PROJECT], [TERM] 등은 익명 처리된 민감정보입니다.';
+        }
+
+        function applyDisplayMarkers(root) {
+            if (anonymizationDisplay() && typeof anonymizationDisplay().applyToElement === 'function') {
+                anonymizationDisplay().applyToElement(root);
+            }
+        }
+
         function escapeHtml(value) {
             return String(value == null ? '' : value)
                 .replace(/&/g, '&amp;')
@@ -1677,6 +1697,7 @@
             document.getElementById('workspaceLink').href = '/projects/' + encodeURIComponent(projectId);
             document.getElementById('projectTitle').textContent = pkg.project.project_name || '프로젝트';
             document.getElementById('projectMeta').textContent = (pkg.project.client_name || '-') + ' · 상태 ' + (pkg.project.status || '-') + ' · 템플릿 ' + (pkg.project.template_key || '-');
+            document.getElementById('anonymizationDisplayNote').textContent = displayNoticeText();
             setSurfaceModeButtons();
             toggleSurfaceContainers();
         }
@@ -2163,6 +2184,7 @@
             }
             document.getElementById('externalSectionsBox').innerHTML = renderExternalSections(explanation || {});
             bindCollapsibleDetails(document.getElementById('externalSectionsBox'));
+            applyDisplayMarkers(document.getElementById('resultView'));
         }
 
         function renderProvenance(provenance) {
@@ -2370,6 +2392,7 @@
             );
             document.getElementById('appendixBox').innerHTML = appendixSections.join('');
             bindCollapsibleDetails(document.getElementById('internalSurface'));
+            applyDisplayMarkers(document.getElementById('resultView'));
         }
 
         async function bootstrap() {

@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
+from mellow_link.modules.rebuild_assistant.schemas import AssumptionItem
+
+from .family_classifier import FamilyClassifier
 from .judgment_synthesizer import JudgmentSynthesizer
 from .narrative_axis import NarrativeAxisResolver
 from .policies import get_detector_policy, load_engine_policy_bundle
+from .runtime_contracts import assert_stage_action
+from .template_support import TemplateSupport
 from .schemas import (
     DecisionArtifacts,
     DecisionExplainability,
@@ -62,11 +68,20 @@ class DecisionEngine:
         "재작성 금지",
         "재작성 제외",
     )
+    _ASSUMPTION_ALLOWED_MARKERS = {"가정", "전제", "조건부", "if_clause"}
+    _ASSUMPTION_EXCLUDED_PREFIXES = ("가능하다면", "일반적으로", "통상적으로", "보통")
+    _ASSUMPTION_EXCLUDED_PHRASES = ("추가 확인이 필요",)
+    _ASSUMPTION_EXCLUDED_ACTION_PATTERNS = (
+        re.compile(r".*해야\s+합니다[.]?$"),
+        re.compile(r".*해야\s+한다[.]?$"),
+    )
 
     def __init__(self, policy_bundle=None) -> None:
         self.policy_bundle = policy_bundle or load_engine_policy_bundle()
         self.narrative_axis_resolver = NarrativeAxisResolver()
         self.judgment_synthesizer: JudgmentSynthesizer | None = None
+        self.template_support = TemplateSupport()
+        self.family_classifier = FamilyClassifier(self.template_support)
 
     def run(
         self,
@@ -74,7 +89,22 @@ class DecisionEngine:
         structure: StructureAnalysisResult,
         diagnosis: DiagnosisArtifacts,
         legacy_service: Any | None = None,
+        *,
+        stage_control: dict[str, object] | None = None,
+        retry_hint: str = "",
     ) -> DecisionArtifacts:
+        assert_stage_action(
+            stage_control or getattr(prepared, "stage_control", None),
+            expected_stage="decision",
+            action="generate_decision_summary",
+            goal=str(getattr(prepared, "goal", "") or ""),
+        )
+        family_classification = self.family_classifier.classify(
+            prepared,
+            structure=structure,
+            diagnosis=diagnosis,
+        )
+        setattr(prepared, "family_classification", family_classification)
         judgment_synthesizer = self.judgment_synthesizer or JudgmentSynthesizer()
         applied_templates = judgment_synthesizer.build_applied_templates(
             prepared,
@@ -92,6 +122,12 @@ class DecisionEngine:
             diagnosis.retained_contracts,
             primary_judgment,
         )
+        if self._can_use_operational_analysis_profile(prepared):
+            profile = self.template_support.operational_analysis_profile(prepared)
+            if bool(profile.get("active")):
+                domain = str(profile.get("domain") or "").strip()
+                if domain in {"fx_fifo", "interface_linkage", "settlement_journal"}:
+                    selected_narrative_judgment = domain
         prepared.selected_narrative_judgment = selected_narrative_judgment
         decision_items = judgment_synthesizer.build_decision_items(
             prepared,
@@ -99,14 +135,22 @@ class DecisionEngine:
             applied_templates,
             decision_count_hint=len(diagnosis.diagnosis_report.issues),
         )
+        assumptions = self._gatekeep_assumptions(prepared)
         setattr(prepared, "decision_constraint_filters", self._blocked_recommendation_types(prepared))
         decisions, synthetic_signal_detected = self._build_decisions(prepared, structure, diagnosis, decision_items)
+        decisions = self._apply_retry_hint(
+            decisions,
+            diagnosis=diagnosis,
+            prepared=prepared,
+            retry_hint=retry_hint,
+        )
         decision_summary = self._build_summary(prepared, decisions)
         structural_judgment = self._structural_judgment(decision_summary)
         return DecisionArtifacts(
             decision_summary=decision_summary,
             applied_templates=applied_templates,
             pattern_candidates=pattern_candidates,
+            family_classification=family_classification,
             primary_judgment=primary_judgment,
             template_judgment=primary_judgment,
             structural_judgment=structural_judgment,
@@ -115,8 +159,48 @@ class DecisionEngine:
             primary_judgment_reason=primary_judgment_reason,
             selected_narrative_judgment=selected_narrative_judgment,
             decision_items=decision_items,
+            assumptions=assumptions,
             synthetic_signal_detected=synthetic_signal_detected,
         )
+
+    def _apply_retry_hint(
+        self,
+        decisions: list[DecisionRecord],
+        *,
+        diagnosis: DiagnosisArtifacts,
+        prepared: Any,
+        retry_hint: str,
+    ) -> list[DecisionRecord]:
+        hint = str(retry_hint or "").strip().lower()
+        if not hint:
+            return decisions
+        filtered = list(decisions)
+        if "evidence" in hint:
+            filtered = [item for item in filtered if item.evidence_ids]
+        blocked = {str(item or "").strip() for item in list(getattr(prepared, "decision_constraint_filters", []) or []) if str(item or "").strip()}
+        if "forbidden" in hint or "constraint" in hint:
+            filtered = [item for item in filtered if item.decision_type not in blocked]
+        if "conflict" in hint:
+            deduped: dict[str, DecisionRecord] = {}
+            for item in filtered:
+                issue_key = ",".join(sorted(item.issue_ids))
+                if not issue_key:
+                    issue_key = item.decision_id
+                current = deduped.get(issue_key)
+                if current is None or item.priority_score > current.priority_score:
+                    deduped[issue_key] = item
+            filtered = list(deduped.values())
+        if "stage" in hint:
+            filtered = [item.model_copy(deep=True) for item in filtered]
+        if filtered == decisions:
+            return filtered
+        evidence_ids = {item.evidence_id for item in diagnosis.evidence_index}
+        sanitized: list[DecisionRecord] = []
+        for item in filtered:
+            valid_refs = [evidence_id for evidence_id in item.evidence_ids if evidence_id in evidence_ids]
+            sanitized.append(item.model_copy(update={"evidence_ids": valid_refs or list(item.evidence_ids)}))
+        sanitized.sort(key=lambda item: (-item.priority_score, -item.confidence, item.decision_id))
+        return sanitized
 
     def _build_decisions(
         self,
@@ -138,9 +222,9 @@ class DecisionEngine:
             decision_type = self._decision_type_for_issue(prepared, issue, asset_migration_support=asset_migration_support)
             score_breakdown = self._score_breakdown(issue, decision_type, hotspot_scores, scoring_policy)
             priority_score = score_breakdown["final_score"]
-            rationale = self._rationale_for_issue(issue, decision_type, rationale_fallback)
+            rationale = self._rationale_for_issue(prepared, issue, decision_type, rationale_fallback)
             decision_breakdowns[issue.issue_id] = score_breakdown
-            decision_explainability[issue.issue_id] = self._build_explainability(issue, decision_type, score_breakdown, scoring_policy)
+            decision_explainability[issue.issue_id] = self._build_explainability(issue, decision_type, score_breakdown, scoring_policy, prepared=prepared)
             decisions.append(
                 DecisionRecord(
                     decision_id=make_stable_id("DEC", issue.issue_id, decision_type),
@@ -169,7 +253,8 @@ class DecisionEngine:
         return decisions, synthetic_signal_detected
 
     def _decision_type_for_issue(self, prepared: Any, issue, *, asset_migration_support: bool | None = None) -> str:
-        del prepared
+        if self._should_prioritize_operational_analysis(prepared):
+            return "refactor"
         if (asset_migration_support if asset_migration_support is not None else False) and self._issue_supports_migration(issue):
             return "migration_consideration"
         if issue.detector_id == "boundary_mismatch":
@@ -181,6 +266,44 @@ class DecisionEngine:
         if issue.detector_id == "ui_data_access_coupling" and issue.severity >= 5 and issue.blast_radius >= 4:
             return "redesign"
         return "refactor"
+
+    def _gatekeep_assumptions(self, prepared: Any) -> list[AssumptionItem]:
+        output: list[AssumptionItem] = []
+        seen: set[tuple[str, str]] = set()
+        for raw_item in list(getattr(prepared, "assumption_candidates", []) or []):
+            try:
+                item = raw_item if isinstance(raw_item, AssumptionItem) else AssumptionItem.model_validate(raw_item)
+            except Exception:
+                continue
+            marker = str(item.explicit_marker or "").strip()
+            statement = " ".join(str(item.statement or "").split()).strip()
+            if not statement or marker not in self._ASSUMPTION_ALLOWED_MARKERS:
+                continue
+            if self._is_excluded_assumption_statement(statement):
+                continue
+            key = (re.sub(r"\s+", " ", statement).lower(), marker)
+            if key in seen:
+                continue
+            seen.add(key)
+            output.append(
+                item.model_copy(
+                    update={
+                        "statement": statement,
+                        "applies_to": list(item.applies_to or []),
+                    }
+                )
+            )
+        return output
+
+    def _is_excluded_assumption_statement(self, statement: str) -> bool:
+        normalized = " ".join(str(statement or "").split()).strip()
+        if not normalized:
+            return True
+        if normalized.startswith(self._ASSUMPTION_EXCLUDED_PREFIXES):
+            return True
+        if any(phrase in normalized for phrase in self._ASSUMPTION_EXCLUDED_PHRASES):
+            return True
+        return any(pattern.match(normalized) for pattern in self._ASSUMPTION_EXCLUDED_ACTION_PATTERNS)
 
     def _score_breakdown(self, issue, decision_type: str, hotspot_scores: dict[str, int], scoring_policy) -> dict[str, int]:
         detector_policy = self._policy_for(issue.detector_id)
@@ -218,9 +341,9 @@ class DecisionEngine:
             "final_score": final_score,
         }
 
-    def _build_explainability(self, issue, decision_type: str, score_breakdown: dict[str, int], scoring_policy) -> DecisionExplainability:
+    def _build_explainability(self, issue, decision_type: str, score_breakdown: dict[str, int], scoring_policy, *, prepared: Any | None = None) -> DecisionExplainability:
         return DecisionExplainability(
-            decision_rule=self._decision_rule_text(issue, decision_type),
+            decision_rule=self._decision_rule_text(issue, decision_type, prepared=prepared),
             score_formula=self._score_formula_text(scoring_policy),
             score_summary=self._score_summary_text(issue, score_breakdown, scoring_policy),
             evidence_count=len(issue.evidence_ids),
@@ -351,16 +474,33 @@ class DecisionEngine:
             )
         return guarded, guard_triggered
 
-    def _rationale_for_issue(self, issue, decision_type: str, fallback: str) -> str:
+    def _rationale_for_issue(self, prepared: Any, issue, decision_type: str, fallback: str) -> str:
+        del fallback
+        if self._should_prioritize_operational_analysis(prepared) and decision_type == "refactor" and issue.detector_id in {
+            "boundary_mismatch",
+            "rule_scatter",
+            "state_transition_leak",
+            "validation_guard_leak",
+            "ui_data_access_coupling",
+        }:
+            return f"{issue.summary}. 현재 단계에서는 현행 운영 규칙과 처리 흐름을 복원하는 기준으로 점검하는 편이 적절합니다."
         if decision_type == "redesign":
             return f"{issue.summary}. 현재 경계를 바로 고정하기보다 다시 정의하는 쪽을 우선 검토하는 편이 안전합니다."
         if decision_type == "migration_consideration":
             return f"{issue.summary}. 구조 개선과 별도로 단계적 전환 필요성을 함께 검토하는 편이 적절합니다."
         return f"{issue.summary}. 데이터 계약 변경 없이 책임 분리 후보로 다루는 편이 적절합니다."
 
-    def _decision_rule_text(self, issue, decision_type: str) -> str:
+    def _decision_rule_text(self, issue, decision_type: str, *, prepared: Any | None = None) -> str:
         if decision_type == "migration_consideration":
             return f"detector_id={issue.detector_id}와 asset-derived migration support를 함께 확인해 migration_consideration으로 분기했습니다."
+        if self._should_prioritize_operational_analysis(prepared) and decision_type == "refactor" and issue.detector_id in {
+            "boundary_mismatch",
+            "rule_scatter",
+            "state_transition_leak",
+            "validation_guard_leak",
+            "ui_data_access_coupling",
+        }:
+            return f"detector_id={issue.detector_id} 감지는 있었지만 운영 소스 분석 우선 게이트에 따라 refactor로 유지했습니다."
         if issue.detector_id == "boundary_mismatch":
             return "detector_id=boundary_mismatch 기준으로 redesign으로 분기했습니다."
         if issue.detector_id in {"rule_scatter", "state_transition_leak", "validation_guard_leak"} and (
@@ -400,7 +540,9 @@ class DecisionEngine:
             return DecisionSummary(recommended_strategy="리팩터링 우선", priority_queue=[])
         redesign_count = sum(1 for item in decisions if item.decision_type == "redesign")
         migration_count = sum(1 for item in decisions if item.decision_type == "migration_consideration")
-        if migration_count and decisions[0].decision_type == "migration_consideration":
+        if self._should_prioritize_operational_analysis(prepared):
+            strategy = "리팩터링 우선"
+        elif migration_count and decisions[0].decision_type == "migration_consideration":
             strategy = "마이그레이션 고려"
         elif redesign_count:
             strategy = "재설계 우선"
@@ -422,3 +564,14 @@ class DecisionEngine:
         if strategy == "재설계 우선" or decisions[0].decision_type == "redesign":
             return "redesign"
         return "refactor"
+
+    def _can_use_operational_analysis_profile(self, prepared: Any) -> bool:
+        return hasattr(prepared, "assets") and hasattr(prepared, "asset_presence")
+
+    def _should_prioritize_operational_analysis(self, prepared: Any) -> bool:
+        family_classification = getattr(prepared, "family_classification", None)
+        if str(getattr(family_classification, "family", "") or "").strip() == "operational_source":
+            return True
+        if not self._can_use_operational_analysis_profile(prepared):
+            return False
+        return bool(self.template_support._has_operational_source_analysis_priority(prepared))

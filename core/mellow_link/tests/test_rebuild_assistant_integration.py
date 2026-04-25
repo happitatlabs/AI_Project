@@ -258,8 +258,49 @@ def test_rebuild_assistant_strong_scenario_keeps_recommendation_as_insufficient_
     assert "구조 근거가 부족" in result.one_line_conclusion
     assert [line.split(":", 1)[0] for line in result.executive_summary_v2[:4]] == ["문제", "영향", "조치", "다음 단계"]
     assert "검토용 초안" in result.executive_summary_v2[2]
-    assert result.extensions["decision_governance"]["document_outline"]["rationale"].startswith("직접 연결된 코드")
-    assert "런타임 근거" in result.extensions["decision_governance"]["document_outline"]["next_step"]
+
+
+def test_rebuild_assistant_explicit_goal_is_preserved_as_canonical_request_context():
+    service = RebuildAssistantService()
+    goal = "이 SQL/프로시저가 실제로 어떤 처리 흐름과 계산 규칙으로 동작하는지 분석해줘."
+    bundle = build_safe_bundle(
+        [
+            {
+                "name": "fx_fifo_proc.sql",
+                "content": """
+CREATE OR REPLACE PROCEDURE p_fx_fifo IS
+BEGIN
+    INSERT INTO tn_forout_hist(amount_krw)
+    SELECT SUM(out_amt0) FROM tn_forins WHERE status_cd = 'READY';
+END;
+                """,
+            },
+            {
+                "name": "fx_fifo_tables.sql",
+                "content": """
+CREATE TABLE tn_forins (
+    txn_no varchar(30),
+    in_amt numeric(18,2),
+    out_amt0 numeric(18,2),
+    status_cd varchar(20)
+);
+                """,
+            },
+        ]
+    )
+
+    prepared = service.prepare_safe_bundle_input(goal=goal, safe_bundle=bundle, constraints=[])
+    result = service.build_result(prepared)
+
+    assert prepared.goal == goal
+    assert result.canonical_payload is not None
+    assert result.canonical_payload.request_context.goal == goal
+    assert result.canonical_payload.request_context.question_axis == "processing_flow"
+    assert result.question_axis == "processing_flow"
+    assert result.family_classification.family == "operational_source"
+    assert "보고서" in result.report_purpose
+    assert "1차 목적은 현행 운영 로직과 처리 흐름" in result.one_line_conclusion
+    assert result.extensions["decision_governance"]["document_outline"]["next_step"]
 
 
 def test_rebuild_assistant_constraints_affect_recommendation_filter_metadata_only():
@@ -629,6 +670,7 @@ def test_rebuild_assistant_runner_emits_authoritative_payload(monkeypatch):
     assert len(finished) == 1
     payload = finished[0]["payload"]
     assert set(payload["authoritative_payload"].keys()) == {
+        "family_classification",
         "structure_snapshot",
         "diagnosis_report",
         "decision_summary",
@@ -674,7 +716,7 @@ def test_rebuild_assistant_runner_applies_ai_narrative_only_to_top_fields(monkey
 
     monkeypatch.setattr(rebuild_runner.threading, "Thread", InlineThread)
     monkeypatch.setattr(rebuild_runner, "emit_event", fake_emit)
-    monkeypatch.setattr(app_state, "llm_service", FakeLLM(), raising=False)
+    monkeypatch.setattr(app_state, "narrative_llm_service", FakeLLM(), raising=False)
     monkeypatch.setattr(app_state, "TEMP_CONTEXT_STORE", {"rebuild-temp": "<% String sql = \"SELECT * FROM orders\"; %>"}, raising=False)
 
     getattr(rebuild_compat, "start_rebuild_assistant_run_compat")(
