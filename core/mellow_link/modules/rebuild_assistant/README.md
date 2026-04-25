@@ -119,6 +119,12 @@ inline unmask 토글은 제공하지 않는다.
 
 raw `assets` / `temp_session_id` 입력은 공개 API에서 사용하지 않습니다.
 
+명시적 전제 문장은 입력 단계에서 별도 candidate로 수집될 수 있습니다.
+
+- 수집 대상은 `가정:`, `전제:`, `...를 전제로`, `...라고 가정하면`, `...경우에만`, `...경우에 한해`처럼 marker가 있는 문장뿐입니다.
+- `goal`, `constraints`, source block text에 이런 marker가 직접 있을 때만 후보가 됩니다.
+- 일반 문장, 목표 문장, 제약 문장을 assumption으로 추론하거나 자동 승격하지 않습니다.
+
 ## 업로드 보조 기능
 
 프로젝트 UI는 기존 temp upload 저장소를 재사용하지만, 분석 실행 전에 반드시 익명화 파이프라인을 거칩니다.
@@ -230,6 +236,33 @@ raw `assets` / `temp_session_id` 입력은 공개 API에서 사용하지 않습�
 - `recommended_option: RecommendedOption | None`
 - `execution_plan: list[ExecutionPlanWeek]`
 - `recommended_directions: list[str]`
+- `assumptions: list[AssumptionItem]`
+
+`AssumptionItem`은 아래 메타를 함께 가진다.
+
+- `statement: str`
+- `source_stage: Literal["input", "diagnosis", "decision", "planning"]`
+- `source_field: str`
+- `explicit_marker: Literal["가정", "전제", "조건부", "if_clause"]`
+- `applies_to: list[str]`
+
+`assumptions`는 근거나 결론이 아니라 판단의 조건/전제를 담는 별도 필드다.
+
+- `InputAssembler`
+  - explicit marker가 있는 raw candidate만 수집한다
+- `DecisionEngine`
+  - assumption 생성기가 아니라 gatekeeper다
+  - explicit marker가 없는 문장은 통과시키지 않는다
+  - `가능하다면`, `일반적으로`, `통상적으로`, `보통`, `추가 확인이 필요`, `...해야 한다`류 문장은 제외한다
+- `ResultPackager`
+  - `DecisionArtifacts.assumptions`를 `StructuredRebuildResult.assumptions`로 그대로 전달한다
+
+아래 규칙은 현재 고정이다.
+
+- 명시적 전제 문장이 없으면 `assumptions == []`
+- `assumptions`는 `analysis_summary`에 합치지 않는다
+- `assumptions`는 `grounded_business_rules`, `retained_contracts`, evidence 계열 필드로 승격하지 않는다
+- 1차 구현에서는 canonical payload에 포함하지 않는다
 
 `decision_summary.decisions[*]`는 아래 설명 필드를 함께 가진다.
 

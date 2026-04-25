@@ -135,9 +135,49 @@ structured_result
 AI 재서술은 optional hook로만 설계한다.
 
 - 기본값: `use_ai_rewrite=False`
+- 입력은 `structured_result` 전체가 아니라 deterministic explanation block으로 제한한다.
 - schema 검증 필수
 - preserved facts 누락 금지
 - deterministic 결과와 충돌 시 deterministic 우선
+
+AI 재서술 입력 블록은 아래를 포함해야 한다.
+
+- `block_id`
+- `original_text`
+- `critical_facts`
+- `decision_driving_evidence`
+- `locked_fields`
+
+`locked_fields`는 최소 아래를 포함한다.
+
+- `recommended_strategy`
+- `decision_type`
+- `priority_score`
+- `score_breakdown`
+
+Narrative Guard Contract:
+
+- `Narrative must:`
+  - `only rephrase existing facts`
+  - `preserve all critical facts present in the input block`
+  - `not introduce new claims`
+  - `not change priority or recommendation`
+  - `not generalize beyond given evidence`
+  - `not omit decision-driving evidence`
+  - `not merge distinct facts into ambiguous statements`
+- `If validation fails:`
+  - `fallback: deterministic explanation block`
+
+validator는 아래를 실패로 본다.
+
+- `critical_facts` coverage 누락
+- `decision_driving_evidence` coverage 누락
+- `locked_fields` 값 변경
+- 입력 블록에 없는 신규 주장 추가
+- evidence를 벗어난 일반화
+- 서로 다른 사실을 하나의 애매한 문장으로 병합한 경우
+
+실패 시 AI 결과는 버리고, 입력 deterministic explanation block을 그대로 사용한다.
 
 ## 7. 테스트 기준
 
@@ -148,6 +188,11 @@ AI 재서술은 optional hook로만 설계한다.
 - audience variant 3종 생성
 - delivery mode 3종 생성
 - 패턴 순도 유지
+- `critical_facts` coverage 100%
+- `decision_driving_evidence` coverage 100%
+- `locked_fields` 무변경
+- unsupported claim 0건
+- ambiguous fact merge 0건
 
 ## 8. 금지 사항
 
@@ -155,4 +200,7 @@ AI 재서술은 optional hook로만 설계한다.
 - 판단값 변경
 - AI 재서술만 믿고 schema 검증 생략
 - 표현 polish를 이유로 근거 삭제
+- 표현 polish를 이유로 decision-driving evidence 삭제
+- 표현 polish를 이유로 distinct fact를 뭉개기
+- evidence 밖 일반화
 - 본체 판단 엔진 수정

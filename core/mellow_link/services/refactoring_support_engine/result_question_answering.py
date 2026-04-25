@@ -141,17 +141,24 @@ class ResultQuestionAnsweringService:
 
         if intent == "strategy":
             citations = self._decision_citations(top_decision, issue_map=issue_map, evidence_map=evidence_map)
+            recommended_strategy = str(decision_summary.get("recommended_strategy") or "-")
+            display_strategy = self._display_strategy(result_package=result_package, fallback=recommended_strategy)
+            analysis_first_surface = self._uses_analysis_first_surface(result_package)
             insufficient = not bool(top_decision) or not bool(citations)
             return {
                 "intent": intent,
-                "recommended_strategy": str(decision_summary.get("recommended_strategy") or "-"),
+                "recommended_strategy": recommended_strategy,
+                "display_strategy": display_strategy,
+                "analysis_first_surface": analysis_first_surface,
                 "top_decision": top_decision,
                 "top_issue": top_issue,
                 "citations": citations,
                 "referenced_sections": ["decision_summary", "diagnosis_report"],
                 "insufficient_grounding": insufficient,
                 "grounding_pack": {
-                    "recommended_strategy": str(decision_summary.get("recommended_strategy") or "-"),
+                    "recommended_strategy": recommended_strategy,
+                    "display_strategy": display_strategy,
+                    "analysis_first_surface": analysis_first_surface,
                     "top_decision": top_decision,
                     "top_issue": top_issue,
                 },
@@ -185,15 +192,22 @@ class ResultQuestionAnsweringService:
             }
         if intent == "execution":
             citations = self._stage_citations(top_stage, top_decision=top_decision, issue_map=issue_map, evidence_map=evidence_map)
+            analysis_first_surface = self._uses_analysis_first_surface(result_package)
             return {
                 "intent": intent,
                 "execution_stages": stages,
                 "top_stage": top_stage,
                 "top_decision": top_decision,
+                "analysis_first_surface": analysis_first_surface,
                 "citations": citations,
                 "referenced_sections": ["improvement_plan_bundle"],
                 "insufficient_grounding": not bool(stages),
-                "grounding_pack": {"execution_stages": stages, "top_stage": top_stage, "top_decision": top_decision},
+                "grounding_pack": {
+                    "execution_stages": stages,
+                    "top_stage": top_stage,
+                    "top_decision": top_decision,
+                    "analysis_first_surface": analysis_first_surface,
+                },
             }
         if intent == "risk":
             citations = self._risk_citations(top_risk, top_decision=top_decision, issue_map=issue_map, evidence_map=evidence_map)
@@ -302,14 +316,32 @@ class ResultQuestionAnsweringService:
             )
 
         if intent == "strategy":
-            strategy = str(grounding.get("recommended_strategy") or "-")
+            internal_strategy = str(grounding.get("recommended_strategy") or "-")
+            display_strategy = str(grounding.get("display_strategy") or internal_strategy or "-")
+            analysis_first_surface = bool(grounding.get("analysis_first_surface"))
             top_decision = grounding.get("top_decision") or {}
             decision_type = str(top_decision.get("decision_type") or "-")
-            rationale = str(top_decision.get("rationale") or "").strip()
+            rationale = self._terminal_sentence(str(top_decision.get("rationale") or "").strip())
+            if analysis_first_surface:
+                templates = {
+                    "developer": (
+                        f"내부 taxonomy 전략은 {internal_strategy}이고 사용자 노출 문구는 {display_strategy}입니다. "
+                        f"최상위 decision type은 {decision_type}이며, 근거 설명은 {rationale}"
+                    ),
+                    "manager": (
+                        f"우선 검토 기준은 {display_strategy}입니다. "
+                        f"최상위 판단 유형은 {decision_type}이고, 근거 설명은 {rationale}"
+                    ),
+                    "client": (
+                        f"이번 결과는 {display_strategy} 기준으로 정리했습니다. "
+                        f"최상위 판단 유형은 {decision_type}이며, 주된 이유는 {rationale}"
+                    ),
+                }
+                return templates.get(audience, templates["manager"])
             templates = {
-                "developer": f"추천 전략은 {strategy}입니다. 최상위 decision type은 {decision_type}이며, rationale은 {rationale}입니다.",
-                "manager": f"현재 권장 전략은 {strategy}입니다. 최상위 판단 유형은 {decision_type}이고, 근거 설명은 {rationale}입니다.",
-                "client": f"권장 방향은 {strategy}입니다. 최상위 판단 유형은 {decision_type}이며, 주된 이유는 {rationale}입니다.",
+                "developer": f"추천 전략은 {internal_strategy}입니다. 최상위 decision type은 {decision_type}이며, rationale은 {rationale}",
+                "manager": f"현재 권장 전략은 {display_strategy}입니다. 최상위 판단 유형은 {decision_type}이고, 근거 설명은 {rationale}",
+                "client": f"권장 방향은 {display_strategy}입니다. 최상위 판단 유형은 {decision_type}이며, 주된 이유는 {rationale}",
             }
             return templates.get(audience, templates["manager"])
 
@@ -360,6 +392,13 @@ class ResultQuestionAnsweringService:
             top_title = str(top_stage.get("title") or "-")
             tasks = [str(item).strip() for item in top_stage.get("tasks") or [] if str(item).strip()]
             task_text = ", ".join(tasks[:2]) if tasks else "-"
+            if bool(grounding.get("analysis_first_surface")):
+                templates = {
+                    "developer": f"검토 단계는 {len(stages)}개입니다. 시작 단계는 {top_title}이고, 주요 확인 항목은 {task_text}입니다.",
+                    "manager": f"검토 단계는 총 {len(stages)}개이며, 첫 단계는 {top_title}입니다. 시작 확인 항목은 {task_text}입니다.",
+                    "client": f"검토 단계는 {len(stages)}개로 정리되어 있고, 첫 단계는 {top_title}입니다. 시작 확인 항목은 {task_text}입니다.",
+                }
+                return templates.get(audience, templates["manager"])
             templates = {
                 "developer": f"실행 단계는 {len(stages)}개입니다. 시작 단계는 {top_title}이고, 주요 작업은 {task_text}입니다.",
                 "manager": f"실행 단계는 총 {len(stages)}개이며, 첫 단계는 {top_title}입니다. 시작 작업은 {task_text}입니다.",
@@ -394,6 +433,46 @@ class ResultQuestionAnsweringService:
             ),
         }
         return templates.get(audience, templates["manager"])
+
+    def _sentence_value(self, text: str) -> str:
+        normalized = " ".join(str(text or "").split()).strip()
+        if not normalized:
+            return "-"
+        return normalized.rstrip(". ")
+
+    def _terminal_sentence(self, text: str) -> str:
+        normalized = self._sentence_value(text)
+        if normalized == "-":
+            return normalized
+        if normalized.endswith((".", "!", "?")):
+            return normalized
+        return f"{normalized}."
+
+    def _surface_wording(self, result_package: dict[str, Any]) -> dict[str, Any]:
+        extensions = result_package.get("extensions") if isinstance(result_package, dict) else {}
+        extensions = extensions if isinstance(extensions, dict) else {}
+        governance = extensions.get("decision_governance")
+        governance = governance if isinstance(governance, dict) else {}
+        wording = governance.get("surface_wording")
+        return wording if isinstance(wording, dict) else {}
+
+    def _display_strategy(self, *, result_package: dict[str, Any], fallback: str) -> str:
+        wording = self._surface_wording(result_package)
+        display = str(wording.get("display_strategy") or "").strip()
+        if display:
+            return display
+        governance = ((result_package.get("extensions") or {}) if isinstance(result_package, dict) else {}).get("decision_governance")
+        if isinstance(governance, dict):
+            outline = governance.get("document_outline")
+            if isinstance(outline, dict):
+                outline_strategy = str(outline.get("recommended_strategy") or "").strip()
+                if outline_strategy:
+                    return outline_strategy
+        return fallback
+
+    def _uses_analysis_first_surface(self, result_package: dict[str, Any]) -> bool:
+        wording = self._surface_wording(result_package)
+        return str(wording.get("mode") or "").strip() == "analysis_first_operational_source"
 
     async def _maybe_ai_rewrite(
         self,

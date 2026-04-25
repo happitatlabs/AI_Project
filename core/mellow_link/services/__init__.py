@@ -33,6 +33,10 @@ _OPTIONAL_EXPORTS: Dict[str, Tuple[str, str]] = {
     # LLM
     "LLMService": (".llm_service", "LLMService"),
     "create_llm_service": (".llm_service", "create_llm_service"),
+    "AzureOpenAILLMService": (".azure_openai_service", "AzureOpenAILLMService"),
+    "create_azure_openai_service": (".azure_openai_service", "create_azure_openai_service"),
+    "OpenAINarrativeLLMService": (".openai_narrative_service", "OpenAINarrativeLLMService"),
+    "create_openai_narrative_service": (".openai_narrative_service", "create_openai_narrative_service"),
     # Document
     "DocumentService": (".doc_service", "DocumentService"),
     "DocumentRequest": (".doc_service", "DocumentRequest"),

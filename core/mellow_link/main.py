@@ -219,6 +219,47 @@ async def startup() -> None:
     except Exception as e:
         logger.warning(f"[Startup] LLM Service connection failed: {e}")
 
+    # 4.5. Initialize Narrative LLM Service (optional)
+    app_state.narrative_llm_service = None
+    if getattr(settings, "narrative_llm_configured", False):
+        try:
+            provider = getattr(settings, "narrative_llm_provider_normalized", "azure_openai")
+            models = {
+                "fast": settings.narrative_llm_model,
+                "thinking": settings.narrative_llm_model,
+                "research": settings.narrative_llm_model,
+            }
+            if provider == "openai":
+                from mellow_link.services import create_openai_narrative_service
+
+                app_state.narrative_llm_service = create_openai_narrative_service(
+                    api_key=settings.narrative_llm_api_key,
+                    models=models,
+                    timeout=settings.narrative_llm_timeout_seconds,
+                )
+            else:
+                from mellow_link.services import create_azure_openai_service
+
+                app_state.narrative_llm_service = create_azure_openai_service(
+                    api_key=settings.narrative_llm_api_key,
+                    azure_endpoint=settings.azure_openai_endpoint,
+                    api_version=settings.azure_openai_api_version,
+                    models=models,
+                    timeout=settings.narrative_llm_timeout_seconds,
+                )
+            if await app_state.narrative_llm_service.connect():
+                logger.info("[Startup] Narrative LLM Service connected (%s)", provider)
+            else:
+                app_state.narrative_llm_service = None
+                logger.warning("[Startup] Narrative LLM Service unavailable")
+        except Exception as e:
+            app_state.narrative_llm_service = None
+            logger.warning(f"[Startup] Narrative LLM Service init failed: {e}")
+    elif getattr(settings, "enable_narrative_llm", False):
+        logger.warning("[Startup] Narrative LLM Service enabled but provider config is incomplete")
+    else:
+        logger.info("[Startup] Narrative LLM Service disabled")
+
     # 5. Initialize Image / Video Service
     await initialize_media_services(settings)
 
@@ -491,6 +532,10 @@ async def shutdown() -> None:
     if app_state.llm_service:
         await app_state.llm_service.disconnect()
         logger.info("[Shutdown] LLM Service disconnected")
+
+    if app_state.narrative_llm_service:
+        await app_state.narrative_llm_service.disconnect()
+        logger.info("[Shutdown] Narrative LLM Service disconnected")
 
     for service_name in await shutdown_media_services():
         logger.info("[Shutdown] %s disconnected", service_name)

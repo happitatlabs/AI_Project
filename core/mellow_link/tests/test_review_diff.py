@@ -19,6 +19,26 @@ from .refactoring_support_test_utils import build_safe_bundle, load_expansion_sa
 MELLOW_LINK_ROOT = Path(__file__).resolve().parents[1]
 
 
+def _markdown_headings(markdown: str, level: int = 2) -> list[str]:
+    prefix = "#" * level + " "
+    return [line.strip() for line in str(markdown or "").splitlines() if line.startswith(prefix)]
+
+
+def _first_section_paragraph(markdown: str) -> str:
+    lines = str(markdown or "").splitlines()
+    for idx, line in enumerate(lines):
+        if not line.startswith("## "):
+            continue
+        for j in range(idx + 1, len(lines)):
+            candidate = lines[j].strip()
+            if not candidate:
+                continue
+            if candidate.startswith("#"):
+                return ""
+            return candidate[2:].strip() if candidate.startswith("- ") else candidate
+    return ""
+
+
 def _package_result(asset_specs, goal: str, constraints: list[str] | None = None):
     service = RebuildAssistantService()
     prepared = service.prepare_safe_bundle_input(
@@ -58,7 +78,7 @@ def test_review_diff_marks_blocked_migration_for_goal_only_contamination():
     assert "- result_packager_guard_applied: False" in markdown
 
 
-def test_review_diff_preserves_legitimate_migration_without_block_reason():
+def test_review_diff_keeps_block_reason_when_only_document_migration_evidence_exists():
     result = _package_result(
         [
             {
@@ -101,12 +121,12 @@ class ApprovalService:
     decision_types = [item["decision_type"] for item in review_diff["decision_diff"]["allowed_decisions"]]
     markdown = review_diff["markdown"]
 
-    assert review_diff["decision_diff"]["synthetic_signal_detected"] is False
-    assert review_diff["decision_diff"]["blocked_decisions"] == []
-    assert "migration_consideration" in decision_types
-    assert "goal wording only (contamination)" not in markdown
-    assert "✖ blocked: migration_consideration" not in markdown
-    assert "✔ allowed: migration_consideration" in markdown
+    assert review_diff["decision_diff"]["synthetic_signal_detected"] is True
+    assert review_diff["decision_diff"]["blocked_decisions"]
+    assert "migration_consideration" not in decision_types
+    assert "goal wording only (contamination)" in markdown
+    assert "✖ blocked: migration_consideration" in markdown
+    assert "✔ allowed: migration_consideration" not in markdown
 
 
 def test_review_diff_builds_structural_and_evidence_sections_for_query_filter_refactor():
@@ -256,6 +276,51 @@ class OrderService:
     assert "class OrderService:" in snippet["observed"]
     assert "validator = OrderValidator()" in snippet["observed"]
     assert "\n" in snippet["observed"]
+    assert "def submit(self, order_data, retry_flag, note_text, repo):" in snippet["expected_pattern"]
+    assert "validate_submit_input(order_data, retry_flag, note_text)" in snippet["expected_pattern"]
+    assert "return repo.save(validation.payload)" in snippet["expected_pattern"]
+
+
+def test_review_diff_code_diff_grounds_sql_expected_pattern_to_observed_query_shape():
+    packager = ResultPackager()
+    snippet = packager._build_grounded_expected_pattern(
+        detector_id="state_transition_leak",
+        asset_type="sql",
+        observed="""
+FROM legacy_orders o
+JOIN customer_profile p ON p.customer_id = o.customer_id
+WHERE o.status_code = 'READY'
+  AND p.contact_email = '[EMAIL]'
+ORDER BY o.created_at DESC;
+        """.strip(),
+    )
+
+    assert snippet.startswith("SELECT *")
+    assert "FROM legacy_orders o" in snippet
+    assert "WHERE o.status_code = :status_code" in snippet
+    assert "AND p.contact_email = :contact_email" in snippet
+    assert "TransitionPolicy01" not in snippet
+
+
+def test_duplicate_logic_grounded_pattern_reuses_existing_input_name_instead_of_normalized_temp():
+    packager = ResultPackager()
+    snippet = packager._build_grounded_expected_pattern(
+        detector_id="duplicate_logic_candidate",
+        asset_type="source",
+        observed="""
+class OrderClosureService:
+    def submit_order(self, order_data, retry_flag, note_text, repo):
+        validator = OrderValidator()
+        if not validator.is_valid(order_data):
+            return {"error": "invalid"}
+        return repo.save(order_data)
+        """.strip(),
+    )
+
+    assert "normalized =" not in snippet
+    assert "order_data = normalize_submit_order_input(order_data, retry_flag, note_text)" in snippet
+    assert "if not order_data.valid:" in snippet
+    assert "return repo.save(order_data.payload)" in snippet
 
 
 def test_review_diff_preserves_multiline_snippets_and_masks_sensitive_literals():
@@ -277,9 +342,13 @@ def test_review_diff_preserves_multiline_snippets_and_masks_sensitive_literals()
     assert "/internal/orders/submit" not in order_service["observed"]
     assert "[EMAIL]" in order_service["observed"]
     assert "[PATH]" in order_service["observed"]
+    assert "def submit_order(self, order_data, retry_flag, note_text, repo):" in order_service["expected_pattern"]
+    assert "build_submit_order_command(order_data, retry_flag, note_text)" in order_service["expected_pattern"]
     assert "\n" in order_lookup["observed"]
     assert "ops.order@example.com" not in order_lookup["observed"]
     assert "[EMAIL]" in order_lookup["observed"]
+    assert "WHERE o.status_code = :status_code" in order_lookup["expected_pattern"]
+    assert "AND p.contact_email = :contact_email" in order_lookup["expected_pattern"]
 
 
 def test_internal_markdown_export_includes_review_diff_when_available():
@@ -311,8 +380,9 @@ def test_internal_markdown_export_includes_review_diff_when_available():
         app_version="0.1.0",
     )
 
-    markdown = _result_package_markdown(pkg, surface_mode="internal")
+    markdown = _result_package_markdown(pkg, surface_mode="internal", internal_export_mode="full")
 
+    assert markdown.startswith("# 결과 패키지 - Review Export")
     assert "## 참고 구조 비교" in markdown
     assert "### Decision Result" in markdown
     assert "### Why this decision?" in markdown
@@ -363,6 +433,198 @@ def test_build_result_package_preserves_multiline_structure_comparison_snippets(
     assert "/internal/orders/submit" not in order_service["current_structure"]
     assert "[EMAIL]" in order_service["current_structure"]
     assert "[PATH]" in order_service["current_structure"]
+    assert "def submit_order(self, order_data, retry_flag, note_text, repo):" in order_service["recommended_structure"]
+    assert "execute_submit_order(command, repo)" in order_service["recommended_structure"]
+
+
+def test_build_result_package_refreshes_legacy_review_diff_expected_patterns_for_display():
+    case = load_sample_case("ui_01_normal_balanced_upload")
+    result = _package_result(
+        case["asset_specs"],
+        goal=case["goal"],
+        constraints=case["constraints"],
+    )
+    legacy_review_diff = dict(result.extensions["review_diff"])
+    legacy_code_diff = dict(legacy_review_diff["code_diff"])
+    legacy_snippets = []
+    for snippet in legacy_code_diff["snippets"]:
+        snippet_copy = dict(snippet)
+        snippet_copy["expected_pattern"] = "\n".join(
+            [
+                "normalized = RuleFragment01.normalize(input_data)",
+                "if not normalized.valid:",
+                "    return normalized.errors",
+                "return Service01.apply(normalized.payload)",
+            ]
+        )
+        legacy_snippets.append(snippet_copy)
+    legacy_code_diff["snippets"] = legacy_snippets
+    legacy_review_diff["code_diff"] = legacy_code_diff
+    legacy_review_diff["markdown"] = "legacy"
+    legacy_result = result.model_copy(
+        update={
+            "extensions": {
+                **result.extensions,
+                "review_diff": legacy_review_diff,
+            }
+        }
+    )
+    project = ModernizationProject(
+        id="proj_structure_refresh",
+        user_id=1,
+        session_id="sess_structure_refresh",
+        run_id="run_structure_refresh",
+        project_name="구조 비교 갱신",
+        client_name="OO카드",
+        template_key="default_modernization_v1",
+        template_mode="recommended",
+        constraints_json="[]",
+        upload_session_id="upload_structure_refresh",
+        asset_manifest_json="[]",
+        status="completed",
+    )
+
+    pkg = build_result_package(
+        project,
+        {"status": "completed", "run_id": project.run_id},
+        legacy_result,
+        assets=[],
+        polish_bundle=None,
+        app_version="0.1.0",
+    )
+
+    snippets = pkg["extensions"]["review_diff"]["code_diff"]["snippets"]
+    order_service = next(item for item in snippets if item["file"] == "order_service.py")
+    order_lookup = next(item for item in snippets if item["file"] == "order_lookup.sql")
+    assert "RuleFragment01" not in order_service["expected_pattern"]
+    assert "normalized =" not in order_service["expected_pattern"]
+    assert "def submit_order(self, order_data, retry_flag, note_text, repo):" in order_service["expected_pattern"]
+    assert "SELECT *" in order_lookup["expected_pattern"]
+    assert "WHERE o.status_code = :status_code" in order_lookup["expected_pattern"]
+    assert "normalized = RuleFragment01.normalize(input_data)" not in pkg["extensions"]["review_diff"]["markdown"]
+    assert "return Service01.apply(normalized.payload)" not in pkg["extensions"]["review_diff"]["markdown"]
+
+
+def test_build_result_package_display_supports_option_comparison_and_deferred_impact():
+    case = load_sample_case("ui_01_normal_balanced_upload")
+    result = _package_result(
+        case["asset_specs"],
+        goal=case["goal"],
+        constraints=case["constraints"],
+    )
+    project = ModernizationProject(
+        id="proj_display_decision_aids",
+        user_id=1,
+        session_id="sess_display_decision_aids",
+        run_id="run_display_decision_aids",
+        project_name="판단 보조 UI",
+        client_name="OO카드",
+        template_key="default_modernization_v1",
+        template_mode="recommended",
+        constraints_json="[]",
+        upload_session_id="upload_display_decision_aids",
+        asset_manifest_json="[]",
+        status="completed",
+    )
+
+    pkg = build_result_package(
+        project,
+        {"status": "completed", "run_id": project.run_id},
+        result,
+        assets=[],
+        polish_bundle=None,
+        app_version="0.1.0",
+    )
+
+    grounded_rules = pkg["display"]["sections"]["grounded_rules"]["items"]
+    priorities = {item["priority"] for item in grounded_rules}
+    assert "P0" in priorities
+    assert len(priorities) >= 2
+    assert all(item["unchanged_consequence"] for item in grounded_rules)
+    assert all(item["priority_reason"] for item in grounded_rules)
+
+    options = pkg["display"]["sections"]["design_options"]["items"]
+    assert [item["priority"] for item in options[:3]] == ["P0", "P1", "P2"]
+    first_option = options[0]
+    assert first_option["unchanged_consequence"]
+    assert first_option["priority_reason"]
+    assert [point["label"] for point in first_option["comparison_points"]] == [
+        "구조 개선 폭",
+        "적용 범위",
+        "구현 난이도",
+        "예상 효과",
+        "선행 조건",
+        "미조치 시 영향",
+    ]
+
+    first_plan = pkg["display"]["sections"]["execution_plan"]["items"][0]
+    assert first_plan["priority"] == "P0"
+    assert first_plan["priority_reason"]
+    assert first_plan["unchanged_consequence"]
+
+
+def test_build_result_package_option_comparison_surface_uses_comparison_first_intro():
+    case = load_sample_case("13_document_option_boundary")
+    service = RebuildAssistantService()
+    result = service.build_result(
+        service.prepare_safe_bundle_input(
+            goal=case["goal"],
+            safe_bundle=case["safe_bundle"],
+            constraints=case["constraints"],
+        )
+    )
+    polish_bundle = service.build_polish_bundle(result, audience="manager", delivery_mode="client_report").model_dump()
+    project = ModernizationProject(
+        id="proj_option_surface",
+        user_id=1,
+        session_id="sess_option_surface",
+        run_id="run_option_surface",
+        project_name="옵션 비교 surface",
+        client_name="OO카드",
+        template_key="default_modernization_v1",
+        template_mode="recommended",
+        constraints_json="[]",
+        upload_session_id="upload_option_surface",
+        asset_manifest_json="[]",
+        status="completed",
+    )
+
+    pkg = build_result_package(
+        project,
+        {"status": "completed", "run_id": project.run_id},
+        result,
+        assets=[],
+        polish_bundle=polish_bundle,
+        app_version="0.1.0",
+    )
+    markdown = _result_package_markdown(pkg, surface_mode="internal")
+    surface_wording = (((pkg.get("extensions") or {}).get("decision_governance") or {}).get("surface_wording") or {})
+
+    assert surface_wording.get("mode") == "comparison_first_option"
+    assert surface_wording.get("display_strategy") == "비교 기준 우선"
+    assert "## 비교 목적" in markdown
+    assert "## 선택지 요약" in markdown
+    assert "## 비교 기준" in markdown
+    assert "## 추천 근거" in markdown
+    assert "## 도입 단계" in markdown
+    assert "Role: Decision" in markdown
+    assert "복수 선택지를 비교 기준 우선 원칙으로 검토해" in markdown
+    assert "비교 관점: 비교 기준 우선 기준으로" in markdown
+    assert "## 보고 목적" not in markdown
+    assert "보조 판단: 입력 검증" not in markdown
+    assert "운영 판단:" not in markdown
+    assert _first_section_paragraph(markdown).startswith("복수 선택지를 비교 기준 우선 원칙으로 검토해")
+    assert not _first_section_paragraph(markdown).startswith("보조 판단:")
+    assert _markdown_headings(markdown, level=2) == [
+        "## 비교 목적",
+        "## 선택지 요약",
+        "## 비교 기준",
+        "## 추천 근거",
+        "## 도입 단계",
+    ]
+    assert "## 선택지 비교 개요" not in markdown
+    assert "## 실행 로드맵" not in markdown
+    assert "## 선택 시 유의점" not in markdown
 
 
 def test_surface_filtered_result_package_marks_hidden_by_policy_when_review_diff_exists():
@@ -405,9 +667,55 @@ def test_surface_filtered_result_package_marks_hidden_by_policy_when_review_diff
     assert filtered["structure_comparison"]["items"][0]["current_structure"]
     assert filtered["structure_comparison"]["items"][0]["recommended_structure"]
     assert filtered["structure_comparison"]["items"][0]["difference_summary"]
+    assert filtered["display"]["hero"]["headline"]
+    assert "state" not in filtered["diagnosis"]
+    assert "state" not in filtered["design"]
+    assert "state" not in filtered["transition_draft"]
+    assert "title" not in filtered["executive_summary"]
+    assert "state" not in filtered["executive_summary"]
     assert filtered["provenance"]["surface_access"]["access_profile"] == "external_basic"
     assert filtered["provenance"]["surface_access"]["field_visibility"]["review_diff"] == "hidden_by_policy"
     assert filtered["provenance"]["surface_access"]["field_visibility"]["decision_governance"] == "hidden_by_policy"
+
+
+def test_surface_filtered_result_package_hides_review_artifacts_for_operational_source_internal_surface():
+    case = load_sample_case("09_fx_fifo_operational_source")
+    service = RebuildAssistantService()
+    prepared = service.prepare_safe_bundle_input(
+        goal=case["goal"],
+        safe_bundle=case["safe_bundle"],
+        constraints=case["constraints"],
+    )
+    result = service.build_result(prepared)
+    project = SimpleNamespace(
+        id="proj_operational_surface",
+        user_id=1,
+        session_id="sess_operational_surface",
+        run_id="run_operational_surface",
+        project_name="FX FIFO",
+        client_name="OO카드",
+        template_key="default_modernization_v1",
+        constraints_json=[],
+        goal_text=case["goal"],
+        status="completed",
+    )
+    pkg = build_result_package(
+        project,
+        {"status": "completed", "run_id": project.run_id},
+        result,
+        assets=[],
+        polish_bundle=None,
+        app_version="0.1.0",
+    )
+
+    filtered = _surface_filtered_result_package(pkg, surface_mode="internal")
+
+    assert pkg["family_classification"]["family"] == "operational_source"
+    assert "review_diff" in (pkg.get("extensions") or {})
+    assert "review_diff" not in (filtered.get("extensions") or {})
+    assert filtered["structure_comparison"] == {"available": False, "items": []}
+    assert filtered["provenance"]["surface_access"]["field_visibility"]["review_diff"] == "hidden_by_family"
+    assert filtered["provenance"]["surface_access"]["review_diff_surface_policy"] == "hidden_by_family"
 
 
 def test_project_result_ui_contains_review_diff_rendering_hooks():
@@ -452,13 +760,16 @@ def test_project_result_ui_contains_review_diff_rendering_hooks():
     assert "function inferStructureTheme(item)" in html
     assert "function buildEffectSummary(item)" in html
     assert "function renderStructureGuideCard(label, body, accentClass)" in html
-    assert "이 카드에서 먼저 볼 점" in html
-    assert "이 구조로 바꾸면" in html
-    assert "현재 구조를 그대로 둘 때의 부담과, 권장 구조로 나눴을 때의 효과를 먼저 읽는 영역입니다." in html
+    assert "return '<div class=\"overflow-hidden rounded-2xl border ' + panelTone + '\">' + rows + '</div>';" in html
+    assert "왜 중요한가" in html
+    assert "변경 전과 변경 후를 비교해 승인 근거를 바로 읽는 영역입니다." in html
     assert "escapeHtml(executive.title" not in html
     assert "escapeHtml(executive.state" not in html
+    assert "displaySections(pkg)" in html
+    assert "const hero = (((pkg || {}).display || {}).hero || {});" in html
     assert "function renderCodeDiffLines(text, tone)" in html
     assert "function renderComparisonSummaryList(items)" in html
+    assert "function renderComparisonPoints(points)" in html
     assert 'class="rounded bg-white/10 px-1"' in html
     assert 'id="optionsDetails"' in html
     assert 'id="planDetails"' in html
@@ -482,6 +793,13 @@ def test_project_result_ui_contains_review_diff_rendering_hooks():
     assert "currentCapabilities.can_view_review_diff" in html
     assert "currentAccessPolicy.surfaceVariant === 'external_presentation'" in html
     assert "comparisonBox.innerHTML = renderExternalStructureComparisonPanel(structureComparison);" in html
+    assert "function usesComparisonFirstSurface(pkg)" in html
+    assert "function usesSpecializedFamilySurface(pkg)" in html
+    assert "function renderOperationalFollowupChecks(pkg, section)" in html
+    assert "!currentCapabilities.can_view_review_diff || !reviewDiff || usesSpecializedFamilySurface(pkg)" in html
+    assert "renderOperationalFollowupChecks(pkg, sections.design_options || {})" in html
+    assert "!specializedFamily && structureComparison.available" in html
+    assert "if (!analysisFirst && !comparisonFirst) {" in html
     assert "판단 결과" in html
     assert "왜 이렇게 판단했는가" in html
     assert "근거 상세" in html
@@ -489,14 +807,18 @@ def test_project_result_ui_contains_review_diff_rendering_hooks():
     assert "차단된 판단" in html
     assert "신뢰도" in html
     assert "구조 비교" in html
-    assert "현재 구조는 익명화된 실제 패턴이고, 권장 구조는 설명용 일반화 패턴입니다." in html
-    assert "이 섹션은 참고 부록이 아니라 판단 본문입니다." in html
-    assert "현재 시스템에서 관찰된 익명화 패턴입니다." in html
+    assert "변경 전, 변경 후, 근거 순으로 비교해 승인 범위를 좁히는 본문 영역입니다." in html
+    assert "변경 전에 어떤 결합을 풀어야 하는지 보여주는 익명화 패턴입니다." in html
     assert "(실제 구조를 안전하게 치환한 형태입니다)" in html
-    assert "권장되는 구조 패턴 예시입니다." in html
-    assert "(실제 코드가 아니라, 개선 방향을 설명하기 위한 일반화된 형태입니다)" in html
+    assert "변경 후 어떤 경계를 고정할지 보여주는 권장 예시입니다." in html
+    assert "(새 helper 이름만 예시용으로 생성될 수 있습니다)" in html
     assert "실제 코드 근거 " in html
-    assert "이렇게 달라집니다" in html
+    assert "변경 전" in html
+    assert "변경 후" in html
+    assert "근거" in html
+    assert "미조치 시 영향" in html
+    assert "비교 포인트" in html
+    assert "우선순위 판단" in html
     assert "차이 설명" in html
     assert "코드 비교 보기" not in html
     assert "Code Diff" not in html

@@ -458,7 +458,13 @@
             state.uploadSessionId = project.upload_session_id || '';
 
             const status = snapshot.status || project.status || 'running';
-            document.getElementById('statusLabel').textContent = status === 'completed' ? '분석 완료' : status === 'failed' ? '분석 실패' : '분석 진행 중';
+            document.getElementById('statusLabel').textContent = status === 'completed'
+                ? '분석 완료'
+                : status === 'failed'
+                    ? '분석 실패'
+                    : ['pending', 'waiting', 'queued'].includes(status)
+                        ? '분석 대기 중'
+                        : '분석 진행 중';
             const badge = document.getElementById('statusBadge');
             badge.textContent = status;
             badge.className = 'rounded-full border px-3 py-1 text-xs ' + (
@@ -466,16 +472,26 @@
                     ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-300'
                     : status === 'failed'
                         ? 'border-rose-400/20 bg-rose-500/10 text-rose-300'
-                        : 'border-amber-400/20 bg-amber-500/10 text-amber-300'
+                        : ['pending', 'waiting', 'queued'].includes(status)
+                            ? 'border-sky-400/20 bg-sky-500/10 text-sky-300'
+                            : 'border-amber-400/20 bg-amber-500/10 text-amber-300'
             );
             const progress = typeof snapshot.progress_percent === 'number' ? snapshot.progress_percent : (status === 'completed' ? 100 : 0);
             document.getElementById('progressBar').style.width = progress + '%';
-            document.getElementById('progressText').textContent = progress + '% · ' + (status === 'running' ? '결과 패키지 준비 중' : '요약 확인 가능');
+            document.getElementById('progressText').textContent = progress + '% · ' + (
+                status === 'running'
+                    ? '결과 패키지 준비 중'
+                    : ['pending', 'waiting', 'queued'].includes(status)
+                        ? '실행 시작 대기 중'
+                        : '요약 확인 가능'
+            );
 
             renderStageList(snapshot);
-            document.getElementById('featureMode').textContent = insights.feature_mode && insights.feature_mode !== '-' ? insights.feature_mode : (status === 'running' ? '분석 중' : '데이터 없음');
-            renderList('findingsBox', insights.findings || [], status === 'running' ? '결과 생성 중' : '데이터 없음');
-            renderList('rulesBox', insights.rules || [], status === 'running' ? '결과 생성 중' : '데이터 없음');
+            document.getElementById('featureMode').textContent = insights.feature_mode && insights.feature_mode !== '-'
+                ? insights.feature_mode
+                : (status === 'running' ? '분석 중' : ['pending', 'waiting', 'queued'].includes(status) ? '대기 중' : '데이터 없음');
+            renderList('findingsBox', insights.findings || [], status === 'running' ? '결과 생성 중' : ['pending', 'waiting', 'queued'].includes(status) ? '실행 전' : '데이터 없음');
+            renderList('rulesBox', insights.rules || [], status === 'running' ? '결과 생성 중' : ['pending', 'waiting', 'queued'].includes(status) ? '실행 전' : '데이터 없음');
             renderMissing(payload.missing_context_details || [], status);
             renderAssets(payload.assets || project.asset_manifest || []);
             renderAnonymizationSummary(snapshot.anonymization_summary);

@@ -126,6 +126,23 @@ class NarrativeAxisResolver:
         retained_contracts: list[RetainedContract],
         primary_judgment: str,
     ) -> str:
+        family = str(getattr(getattr(prepared, "family_classification", None), "family", "") or "").strip()
+        asset_presence = getattr(prepared, "asset_presence", None)
+        document_only = bool(
+            getattr(asset_presence, "has_docs", False)
+            and not any(
+                (
+                    getattr(asset_presence, "has_source_code", False),
+                    getattr(asset_presence, "has_ui_asset", False),
+                    getattr(asset_presence, "has_schema_asset", False),
+                    getattr(asset_presence, "has_sql_asset", False),
+                    bool(getattr(getattr(prepared, "assets", None), "source_code", "") or ""),
+                    bool(getattr(getattr(prepared, "assets", None), "ui_template", "") or ""),
+                    bool(getattr(getattr(prepared, "assets", None), "database_schema", "") or ""),
+                    bool(getattr(getattr(prepared, "assets", None), "sql_queries", "") or ""),
+                )
+            )
+        )
         scores: dict[str, int] = {axis: 0 for axis in NARRATIVE_PRIORITY}
         if primary_judgment in scores:
             scores[primary_judgment] += 3
@@ -168,6 +185,8 @@ class NarrativeAxisResolver:
             ),
         )
         if scores[best_axis] <= 0:
+            if family in {"document_consulting", "option_comparison"} or document_only:
+                return primary_judgment or ""
             return primary_judgment or "validation"
         return best_axis
 

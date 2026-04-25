@@ -36,6 +36,14 @@ class OrderService:
     assert set(result.diagnosis_report.keys()) >= {"issues", "coverage_summary", "detector_stats"}
     assert set(result.decision_summary.keys()) >= {"decisions", "recommended_strategy", "priority_queue"}
     assert set(result.improvement_plan_bundle.keys()) >= {"design_options", "recommended_option", "execution_stages", "risk_checkpoints"}
+    assert set(result.family_classification.model_dump().keys()) == {
+        "family",
+        "confidence",
+        "decision_basis",
+        "secondary_signals",
+        "display_strategy",
+        "internal_strategy",
+    }
     assert result.template_judgment == result.primary_judgment
     assert result.structural_judgment in {"refactor", "redesign", "migration_consideration", "observation_only"}
     assert result.narrative_axis == result.extensions["narrative"]["axis"]
@@ -65,6 +73,14 @@ class OrderService:
     governance = result.extensions["decision_governance"]
     assert governance["intent_usage_policy"]["engine_definition"] == "레거시 시스템을 해석하여 구조와 의존성을 진단하고, 신규 환경으로 이전 가능한 구조 초안과 의사결정 근거를 생성하는 엔진"
     assert governance["confidence_policy"]["evidence_only"] is True
+    assert set(governance["family_classifier"].keys()) == {
+        "family",
+        "confidence",
+        "decision_basis",
+        "secondary_signals",
+        "display_strategy",
+        "internal_strategy",
+    }
     assert governance["ordered_sections"] == ["recommended_strategy", "rationale", "evidence", "risk", "next_step"]
     assert list(governance["document_outline"].keys()) == ["recommended_strategy", "rationale", "evidence", "risk", "next_step"]
 

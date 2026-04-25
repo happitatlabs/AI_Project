@@ -51,3 +51,32 @@ def test_refactoring_support_golden_samples(expectation):
 
     if expectation.expected_accounting_can_calculate is not None:
         assert result.extensions["accounting"]["calculation_status"]["can_calculate"] is expectation.expected_accounting_can_calculate
+    if expectation.expected_narrative_axis is not None:
+        assert result.narrative_axis == expectation.expected_narrative_axis
+    if expectation.expected_analysis_summary_prefix is not None:
+        assert result.analysis_summary
+        assert result.analysis_summary[0].startswith(expectation.expected_analysis_summary_prefix)
+    if expectation.expected_executive_summary_prefix is not None:
+        assert result.executive_summary_v2
+        assert result.executive_summary_v2[0].startswith(expectation.expected_executive_summary_prefix)
+    top_narrative = " ".join(
+        [
+            result.report_purpose,
+            result.one_line_conclusion,
+            result.primary_judgment_reason,
+            *list(result.analysis_summary[:2]),
+            *list(result.executive_summary_v2[:2]),
+        ]
+    )
+    front_narrative = " ".join(
+        [
+            result.report_purpose,
+            result.one_line_conclusion,
+            *list(result.analysis_summary[:1]),
+            *list(result.executive_summary_v2[:1]),
+        ]
+    )
+    for term in expectation.expected_required_terms:
+        assert term in top_narrative
+    for term in expectation.expected_forbidden_narrative_terms:
+        assert term not in front_narrative

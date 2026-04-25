@@ -4,7 +4,6 @@ import json
 import logging
 import os
 import re
-import shutil
 import uuid
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -19,21 +18,46 @@ from sqlalchemy.orm import Session
 from mellow_link import app_state
 from mellow_link.infra import (
     AgentRun,
+    AnalysisContext,
     ModernizationProject,
     ProjectAsset,
     ProjectRunHistory,
     TempResource,
     User,
+    UserRole,
     get_current_user,
     get_current_user_optional,
     get_db,
 )
 from mellow_link.infra.run_events import get_run_events, get_run_snapshot
-from mellow_link.modules.rebuild_assistant.api import create_project_wrapped_run, start_project_wrapped_run
-from mellow_link.modules.rebuild_assistant.decision_document import build_decision_brief, render_decision_brief_markdown
+from mellow_link.modules.rebuild_assistant.api import (
+    create_project_wrapped_run,
+    resolve_project_goal,
+    start_project_wrapped_run,
+)
+from mellow_link.modules.rebuild_assistant.decision_document import build_decision_brief
 from mellow_link.modules.rebuild_assistant.manifest import MANIFEST as REBUILD_ASSISTANT_MANIFEST, MODULE_VERSION
+from mellow_link.modules.rebuild_assistant.postprocess.consulting_contract import (
+    build_consulting_min_contract,
+)
+from mellow_link.modules.rebuild_assistant.postprocess.consulting_deck import (
+    build_consulting_deck,
+)
+from mellow_link.modules.rebuild_assistant.postprocess.information_separation import (
+    package_information_role,
+    package_question_axis,
+    purify_diagnosis_lines,
+    role_header,
+)
+from mellow_link.modules.rebuild_assistant.postprocess.schemas import (
+    ConsultingDeck,
+    ConsultingMinContract,
+)
+from mellow_link.modules.rebuild_assistant.postprocess.slide_schema import build_slide_schema
 from mellow_link.modules.rebuild_assistant.schemas import (
     ProjectAssetItem,
+    ProjectAnonymizationPreviewRequest,
+    ProjectAnonymizationPreviewResponse,
     ResultExplanationResponse,
     ResultQARequest,
     ResultQAResponse,
@@ -44,16 +68,39 @@ from mellow_link.modules.rebuild_assistant.schemas import (
     StructuredRebuildResult,
 )
 from mellow_link.services import DocumentRequest, DocumentType
-from mellow_link.services.anonymization import AnonymizationAsset, AnonymizationRunRequest, AnonymizationService, MaskingLevel
+from mellow_link.services.anonymization import (
+    AnonymizationAsset,
+    AnonymizationRunRequest,
+    AnonymizationService,
+    build_display_review_report,
+    MaskingLevel,
+)
+from mellow_link.services.refactoring_support_engine.analysis_context_builder import AnalysisContextBuilder
+from mellow_link.services.refactoring_support_engine.source_question_guard import SourceQuestionGuardService
+from mellow_link.services.refactoring_support_engine.schemas import AnalysisContextBundle
 from mellow_link.services.project_assets import (
     build_temp_context,
     cleanup_project_asset_dir,
     make_project_asset_id,
     promote_staged_asset,
     read_text,
+    resolve_temp_upload_path,
     resolve_project_asset_path,
 )
-from mellow_link.services.refactoring_support_engine import ExplanationPresenter, ResultQuestionAnsweringService
+from mellow_link.services.project_results.archive import (
+    build_project_result_archive_paths as _build_project_result_archive_paths_impl,
+    persist_project_result_archive as _persist_project_result_archive_impl,
+)
+from mellow_link.services.project_results.presentation import (
+    answer_project_result_question as _answer_project_result_question_impl,
+    present_project_result as _present_project_result_impl,
+    render_result_explanation_markdown as _render_result_explanation_markdown_impl,
+)
+from mellow_link.services.refactoring_support_engine.narrative_augmentation import (
+    NarrativeAugmentationService,
+)
+from mellow_link.services.refactoring_support_engine.result_packager import ResultPackager
+from mellow_link.modules.rebuild_assistant.service import RebuildAssistantService
 from mellow_link.services.refactoring_support_engine.surface_access import (
     can_export_review_artifacts,
     capabilities_dict,
@@ -62,11 +109,99 @@ from mellow_link.services.refactoring_support_engine.surface_access import (
     normalize_surface_mode,
     policy_for_surface_mode,
 )
+from mellow_link.services.refactoring_support_engine.template_support import TemplateSupport
 from mellow_link.services.scope_notice import PROJECT_SCOPE_NOTICE
 
 router = APIRouter(tags=["Projects"])
 logger = logging.getLogger(__name__)
+_TEMPLATE_SUPPORT = TemplateSupport()
 _PROJECT_RESULT_ARCHIVE_ROOT = Path(__file__).resolve().parents[3] / "data" / "outputs" / "final" / "project_results"
+_SOURCE_QUESTION_GUARD = SourceQuestionGuardService()
+_MARKDOWN_SECTION_REGISTRY: dict[str, tuple[dict[str, Any], ...]] = {
+    "operational_source": (
+        {"semantic": "analysis_purpose", "section_key": "report_purpose", "render": "paragraph"},
+        {"semantic": "current_analysis_summary", "section_key": "executive_summary_v2", "render": "list"},
+        {"semantic": "asset_identity", "section_key": "one_line_conclusion", "render": "paragraph"},
+        {"semantic": "core_objects", "section_key": "analysis_summary", "render": "list"},
+        {"semantic": "review_focus", "section_key": "primary_judgment_reason", "render": "paragraph"},
+        {"semantic": "review_steps", "section_key": "execution_plan", "render": "list"},
+        {"semantic": "operational_risks", "section_key": "risks", "render": "list"},
+        {
+            "semantic": "follow_up_checks",
+            "section_key": "recommended_option",
+            "render": "list",
+            "source_keys": ("recommended_option", "recommended_directions"),
+        },
+    ),
+    "option_comparison": (
+        {"semantic": "comparison_purpose", "section_key": "report_purpose", "render": "paragraph"},
+        {"semantic": "option_summary", "section_key": "executive_summary_v2", "render": "list"},
+        {"semantic": "recommended_option", "section_key": "one_line_conclusion", "render": "paragraph"},
+        {"semantic": "comparison_criteria", "section_key": "primary_judgment_reason", "render": "paragraph"},
+        {"semantic": "recommendation_reason", "section_key": "recommended_option", "render": "list"},
+        {"semantic": "execution_plan", "section_key": "execution_plan", "render": "list"},
+        {"semantic": "option_risks", "section_key": "risks", "render": "list"},
+    ),
+    "default": (
+        {"semantic": "report_purpose", "section_key": "report_purpose", "render": "paragraph"},
+        {"semantic": "executive_summary", "section_key": "executive_summary_v2", "render": "list"},
+        {"semantic": "one_line_conclusion", "section_key": "one_line_conclusion", "render": "paragraph"},
+        {"semantic": "primary_judgment_reason", "section_key": "primary_judgment_reason", "render": "paragraph"},
+        {"semantic": "recommended_option", "section_key": "recommended_option", "render": "list"},
+        {"semantic": "execution_plan", "section_key": "execution_plan", "render": "list"},
+        {"semantic": "risks", "section_key": "risks", "render": "list"},
+    ),
+}
+_OPERATIONAL_ROLE_MARKDOWN_SECTION_REGISTRY: dict[str, tuple[dict[str, Any], ...]] = {
+    "structure": (
+        {"semantic": "analysis_purpose", "section_key": "report_purpose", "render": "paragraph"},
+        {"semantic": "current_analysis_summary", "section_key": "executive_summary_v2", "render": "list"},
+        {"semantic": "asset_identity", "section_key": "one_line_conclusion", "render": "paragraph"},
+        {"semantic": "core_objects", "section_key": "analysis_summary", "render": "list"},
+        {"semantic": "review_steps", "section_key": "execution_plan", "render": "list"},
+    ),
+    "diagnosis": (
+        {"semantic": "diagnosis_purpose", "section_key": "report_purpose", "render": "paragraph"},
+        {"semantic": "diagnosis_summary", "section_key": "executive_summary_v2", "render": "list"},
+        {"semantic": "diagnosis_reason", "section_key": "primary_judgment_reason", "render": "paragraph"},
+        {"semantic": "operational_risks", "section_key": "risks", "render": "list"},
+    ),
+    "decision": (
+        {"semantic": "decision_purpose", "section_key": "report_purpose", "render": "paragraph"},
+        {"semantic": "decision_summary", "section_key": "executive_summary_v2", "render": "list"},
+        {"semantic": "decision_basis", "section_key": "primary_judgment_reason", "render": "paragraph"},
+        {
+            "semantic": "recommended_option",
+            "section_key": "recommended_option",
+            "render": "list",
+            "source_keys": ("recommended_option", "recommended_directions"),
+        },
+        {"semantic": "execution_plan", "section_key": "execution_plan", "render": "list"},
+    ),
+}
+_DIAGNOSIS_MARKDOWN_SECTION_TITLES: dict[str, str] = {
+    "report_purpose": "현행 요약",
+    "executive_summary_v2": "문제 정의",
+    "primary_judgment_reason": "영향 분석",
+    "risks": "리스크",
+}
+_CONSULTING_DECK_SLOT_FALLBACKS: dict[str, dict[str, tuple[tuple[str, str], ...]]] = {
+    "operational_source": {
+        "analysis_summary": (("overview", "as_is"),),
+        "primary_judgment_reason": (("approach", "gap"), ("design", "rules")),
+        "execution_plan": (("implementation", "process_flow"), ("design", "process_flow")),
+        "risks": (("approach", "risks"),),
+        "recommended_option": (("implementation", "actions"), ("vision", "actions")),
+    }
+}
+_GENERIC_CONSULTING_DECK_SECTION_OVERLAYS: dict[tuple[str, str], tuple[str, ...]] = {
+    ("overview", "as_is"): ("report_purpose", "executive_summary_v2", "one_line_conclusion"),
+    ("approach", "gap"): ("primary_judgment_reason",),
+    ("approach", "risks"): ("risks",),
+    ("implementation", "process_flow"): ("execution_plan",),
+    ("implementation", "actions"): ("recommended_directions",),
+    ("design", "rules"): ("recommended_option",),
+}
 
 
 def _static_file(name: str) -> str:
@@ -91,6 +226,44 @@ def _parse_json_list(raw: str | None) -> list[Any]:
     except Exception:
         return []
     return value if isinstance(value, list) else []
+
+
+def _project_attr(project: Any, attr: str, default: Any = None) -> Any:
+    value = getattr(project, attr, default)
+    return default if value is None else value
+
+
+def _project_text(project: Any, attr: str, default: str = "") -> str:
+    return str(_project_attr(project, attr, default) or default).strip()
+
+
+def _project_json_list(project: Any, attr: str) -> list[Any]:
+    raw = _project_attr(project, attr, None)
+    if isinstance(raw, list):
+        return list(raw)
+    if isinstance(raw, tuple):
+        return list(raw)
+    return _parse_json_list(raw if isinstance(raw, str) else None)
+
+
+def _project_isoformat(project: Any, attr: str) -> str | None:
+    value = _project_attr(project, attr, None)
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return _normalize_utc_iso(value)
+
+
+def _empty_family_classification_payload() -> dict[str, Any]:
+    return {
+        "family": "",
+        "confidence": 0.0,
+        "decision_basis": [],
+        "secondary_signals": [],
+        "display_strategy": "",
+        "internal_strategy": "",
+    }
 
 
 def _serialize_asset_manifest(asset_manifest: list[Any]) -> str:
@@ -142,6 +315,11 @@ def _surface_filtered_result_package(result_package: dict[str, Any], *, surface_
             extensions.pop("review_diff", None)
         else:
             extensions["review_diff"] = review_diff_artifact.filtered
+    review_diff_field_visibility, review_diff_surface_policy = _apply_specialized_family_surface_overrides(
+        filtered,
+        review_diff_field_visibility=review_diff_field_visibility,
+        review_diff_surface_policy=review_diff_surface_policy,
+    )
     provenance = filtered.get("provenance")
     if not isinstance(provenance, dict):
         provenance = {}
@@ -158,7 +336,64 @@ def _surface_filtered_result_package(result_package: dict[str, Any], *, surface_
         "review_diff_surface_policy": review_diff_surface_policy,
         "decision_governance_surface_policy": decision_governance_state,
     }
+    executive_summary = filtered.get("executive_summary")
+    if isinstance(executive_summary, dict):
+        executive_summary.pop("title", None)
+        executive_summary.pop("state", None)
+    diagnosis = filtered.get("diagnosis")
+    if isinstance(diagnosis, dict):
+        diagnosis.pop("state", None)
+    design = filtered.get("design")
+    if isinstance(design, dict):
+        design.pop("state", None)
+    transition_draft = filtered.get("transition_draft")
+    if isinstance(transition_draft, dict):
+        transition_draft.pop("state", None)
+    contract_payload = filtered.get("consulting_min_contract")
+    if isinstance(contract_payload, dict):
+        try:
+            contract = ConsultingMinContract.model_validate(contract_payload)
+        except Exception:
+            contract = None
+        if contract is not None:
+            project_payload = filtered.get("project") if isinstance(filtered.get("project"), dict) else {}
+            filtered["consulting_deck"] = build_consulting_deck(
+                contract,
+                project_name=str(project_payload.get("project_name") or ""),
+                client_name=str(project_payload.get("client_name") or ""),
+                surface_mode=normalized_surface_mode,
+                family=_effective_family_for_consulting_surface(filtered),
+                question_axis=package_question_axis(filtered),
+            )
+            filtered["slide_schema"] = build_slide_schema(
+                ConsultingDeck.model_validate(filtered["consulting_deck"])
+            ).model_dump()
     return filtered
+
+
+def _apply_specialized_family_surface_overrides(
+    filtered: dict[str, Any],
+    *,
+    review_diff_field_visibility: dict[str, str],
+    review_diff_surface_policy: str,
+) -> tuple[dict[str, str], str]:
+    extensions = filtered.get("extensions")
+    if not isinstance(extensions, dict):
+        return review_diff_field_visibility, review_diff_surface_policy
+    analysis_first_surface = _uses_analysis_first_surface_extensions(extensions)
+    surface_wording = _surface_wording_from_extensions(extensions)
+    document_tone = str(surface_wording.get("document_tone") or "").strip()
+    comparison_first_surface = _uses_comparison_first_surface_extensions(extensions)
+    if not analysis_first_surface and not comparison_first_surface:
+        return review_diff_field_visibility, review_diff_surface_policy
+    filtered_extensions = dict(extensions)
+    filtered_extensions.pop("review_diff", None)
+    filtered["extensions"] = filtered_extensions
+    filtered["structure_comparison"] = {"available": False, "items": []}
+    updated_visibility = dict(review_diff_field_visibility)
+    for key, value in list(updated_visibility.items()):
+        updated_visibility[key] = "hidden_by_family" if value != "absent" or key == "review_diff" else value
+    return updated_visibility, "hidden_by_family"
 
 
 def _project_status_from_run(snapshot: dict[str, Any] | None) -> str:
@@ -167,6 +402,8 @@ def _project_status_from_run(snapshot: dict[str, Any] | None) -> str:
         return "completed"
     if run_status == "failed":
         return "failed"
+    if run_status in {"pending", "waiting", "queued"}:
+        return "pending"
     return "running"
 
 
@@ -258,6 +495,8 @@ def _extract_project_insights(events: list[dict[str, Any]], structured: Structur
     if structured:
         if not findings:
             findings = list(structured.analysis_summary[:3])
+        if not findings and (structured.one_line_conclusion or "").strip():
+            findings = [structured.one_line_conclusion.strip()]
         if not rules:
             if structured.extracted_rules.status_permissions.entities:
                 rules = [f"권한/상태 규칙 엔티티: {', '.join(structured.extracted_rules.status_permissions.entities)}"]
@@ -265,6 +504,10 @@ def _extract_project_insights(events: list[dict[str, Any]], structured: Structur
                 rules = [f"조회 규칙 엔티티: {', '.join(structured.extracted_rules.search_filters.entities)}"]
             elif structured.extracted_rules.save_validation.entities:
                 rules = [f"저장 검증 엔티티: {', '.join(structured.extracted_rules.save_validation.entities)}"]
+        if not rules:
+            rules = list(_trim_items(list(structured.rebuild_strategy), limit=3))
+        if not rules:
+            rules = list(_trim_items(list(structured.recommended_directions), limit=3))
     return {
         "feature_mode": feature_mode,
         "findings": findings,
@@ -325,17 +568,24 @@ def _project_history_rows(project_id: str, db: Session) -> list[ProjectRunHistor
     )
 
 
-def _ordered_project_assets(project: ModernizationProject, db: Session) -> list[ProjectAsset]:
+def _ordered_project_assets(
+    project: ModernizationProject,
+    db: Session,
+    *,
+    asset_manifest: list[Any] | None = None,
+) -> list[ProjectAsset]:
     asset_rows = _project_assets_rows(project.id, db)
     if not asset_rows:
         return []
 
-    manifest = _parse_json_list(project.asset_manifest_json)
+    manifest = asset_manifest if asset_manifest is not None else _parse_json_list(project.asset_manifest_json)
     manifest_order = {
         str(item.get("temp_file_id") or ""): index
         for index, item in enumerate(manifest)
         if str(item.get("temp_file_id") or "").strip()
     }
+    if manifest_order:
+        asset_rows = [asset for asset in asset_rows if (asset.source_temp_file_id or "").strip() in manifest_order]
     fallback_index_start = len(manifest_order)
     return sorted(
         asset_rows,
@@ -355,8 +605,14 @@ def _temp_resource_map_for_assets(asset_rows: list[ProjectAsset], db: Session) -
     return {str(row.temp_file_id or ""): row for row in rows if (row.temp_file_id or "").strip()}
 
 
-def _build_assets_payload(project: ModernizationProject, db: Session) -> list[dict[str, Any]]:
-    asset_rows = _ordered_project_assets(project, db)
+def _build_assets_payload(
+    project: ModernizationProject,
+    db: Session,
+    *,
+    asset_manifest: list[Any] | None = None,
+) -> list[dict[str, Any]]:
+    effective_manifest = asset_manifest if asset_manifest is not None else _parse_json_list(project.asset_manifest_json)
+    asset_rows = _ordered_project_assets(project, db, asset_manifest=effective_manifest if asset_manifest is not None else None)
     if asset_rows:
         temp_map = _temp_resource_map_for_assets(asset_rows, db)
         enriched_assets = []
@@ -381,10 +637,35 @@ def _build_assets_payload(project: ModernizationProject, db: Session) -> list[di
                     "is_downloadable": bool(asset.id and download_url),
                 }
             )
+        if effective_manifest:
+            included_temp_ids = {
+                str(asset.get("temp_file_id") or "").strip()
+                for asset in enriched_assets
+                if str(asset.get("temp_file_id") or "").strip()
+            }
+            for item in effective_manifest:
+                temp_file_id = str(item.get("temp_file_id") or "").strip()
+                if temp_file_id and temp_file_id in included_temp_ids:
+                    continue
+                enriched_assets.append(
+                    {
+                        "project_asset_id": None,
+                        "name": item.get("name") or "-",
+                        "temp_file_id": temp_file_id,
+                        "size": item.get("size") or 0,
+                        "category_hint": item.get("category_hint") or "",
+                        "extracted_chars": None,
+                        "download_url": None,
+                        "content_type": None,
+                        "uploaded_at": None,
+                        "stage_status": None,
+                        "is_downloadable": False,
+                    }
+                )
         return enriched_assets
 
     fallback = []
-    for item in _parse_json_list(project.asset_manifest_json):
+    for item in effective_manifest:
         fallback.append(
             {
                 "project_asset_id": None,
@@ -434,11 +715,12 @@ def _asset_domain_warning_message(expected_domain: str, asset_domain: str) -> st
 def _detect_domain_mismatch_warning(
     *,
     project_name: str,
+    goal: str = "",
     constraints: list[str],
     asset_names: list[str],
     asset_texts: list[str],
 ) -> list[str]:
-    input_text = " ".join([project_name, *constraints])
+    input_text = " ".join(part for part in [goal, project_name, *constraints] if str(part or "").strip())
     asset_text = " ".join([*asset_names, *asset_texts])
     input_scores = _domain_axis_signal_scores(input_text)
     asset_scores = _domain_axis_signal_scores(asset_text)
@@ -467,10 +749,34 @@ def _project_domain_warnings(project: ModernizationProject, db: Session) -> list
             continue
     return _detect_domain_mismatch_warning(
         project_name=project.project_name,
+        goal=_project_text(project, "goal_text"),
         constraints=_parse_json_list(project.constraints_json),
         asset_names=asset_names,
         asset_texts=asset_texts,
     )
+
+
+def _resolved_project_goal(
+    project: ModernizationProject,
+    *,
+    safe_bundle,
+    db: Session,
+) -> str:
+    stored_goal = _project_text(project, "goal_text")
+    if stored_goal:
+        return stored_goal
+    resolved_goal = resolve_project_goal(
+        inline_goal="",
+        safe_bundle=safe_bundle,
+        project_name=_project_text(project, "project_name"),
+        client_name=_project_text(project, "client_name"),
+    )
+    if resolved_goal and resolved_goal != stored_goal:
+        project.goal_text = resolved_goal
+        db.add(project)
+        db.commit()
+        db.refresh(project)
+    return resolved_goal
 
 
 def _history_sequence_next(project_id: str, db: Session) -> int:
@@ -478,6 +784,40 @@ def _history_sequence_next(project_id: str, db: Session) -> int:
     if not rows:
         return 1
     return max(int(row.sequence_no or 0) for row in rows) + 1
+
+
+def _project_workspace_url(project_id: str) -> str:
+    return f"/projects/{quote(str(project_id))}"
+
+
+def _project_result_url(project_id: str, run_id: str | None = None) -> str:
+    base = f"{_project_workspace_url(project_id)}/result"
+    normalized_run_id = str(run_id or "").strip()
+    if not normalized_run_id:
+        return base
+    return f"{base}?run_id={quote(normalized_run_id)}"
+
+
+_HIDDEN_TEST_UPLOAD_SESSION_PREFIXES = (
+    "phase1-",
+    "upload_large_structured_",
+    "upload_customer_intent_",
+)
+
+_HIDDEN_TEST_UPLOAD_SESSION_EXACT = {
+    "fallback-session",
+    "history-session",
+    "anonymization-session",
+}
+
+
+def _is_hidden_test_project(project: ModernizationProject) -> bool:
+    upload_session_id = str(getattr(project, "upload_session_id", "") or "").strip()
+    if not upload_session_id:
+        return False
+    if upload_session_id in _HIDDEN_TEST_UPLOAD_SESSION_EXACT:
+        return True
+    return any(upload_session_id.startswith(prefix) for prefix in _HIDDEN_TEST_UPLOAD_SESSION_PREFIXES)
 
 
 def _run_status_map(run_ids: list[str], db: Session) -> dict[str, str]:
@@ -506,9 +846,101 @@ def _build_run_history_payload(project: ModernizationProject, db: Session) -> li
                 "created_at": row.created_at.isoformat() if row.created_at else None,
                 "asset_count": len(manifest),
                 "is_latest": str(row.run_id or "") == latest_run_id,
+                "workspace_url": _project_workspace_url(project.id),
+                "result_url": _project_result_url(project.id, row.run_id) if status_map.get(row.run_id, "").lower() == "completed" else None,
             }
         )
     return payload
+
+
+def _status_bucket(status: str) -> str:
+    normalized = str(status or "").strip().lower()
+    if normalized == "running":
+        return "running"
+    if normalized in {"pending", "waiting", "queued"}:
+        return "pending"
+    if normalized == "completed":
+        return "completed"
+    if normalized == "failed":
+        return "failed"
+    return "other"
+
+
+def _build_recent_project_entries(projects: list[ModernizationProject], db: Session) -> list[dict[str, Any]]:
+    if not projects:
+        return []
+
+    project_ids = [str(project.id) for project in projects if str(project.id or "").strip()]
+    history_rows = (
+        db.query(ProjectRunHistory)
+        .filter(ProjectRunHistory.project_id.in_(project_ids))
+        .order_by(ProjectRunHistory.created_at.desc(), ProjectRunHistory.sequence_no.desc(), ProjectRunHistory.id.desc())
+        .all()
+    )
+    history_by_project: dict[str, list[ProjectRunHistory]] = {}
+    for row in history_rows:
+        history_by_project.setdefault(str(row.project_id), []).append(row)
+
+    all_run_ids = [str(project.run_id) for project in projects if str(project.run_id or "").strip()]
+    all_run_ids.extend(str(row.run_id) for row in history_rows if str(row.run_id or "").strip())
+    status_map = _run_status_map(all_run_ids, db)
+
+    entries: list[dict[str, Any]] = []
+    for project in projects:
+        project_id = str(project.id)
+        rows = history_by_project.get(project_id) or []
+        if not rows:
+            manifest = _parse_json_list(project.asset_manifest_json)
+            status = status_map.get(str(project.run_id), project.status or "")
+            entries.append(
+                {
+                    "project_id": project_id,
+                    "run_id": project.run_id,
+                    "project_name": project.project_name,
+                    "client_name": project.client_name,
+                    "status": status,
+                    "status_bucket": _status_bucket(status),
+                    "sequence_no": 1,
+                    "trigger_kind": "initial",
+                    "created_at": project.updated_at.isoformat() if project.updated_at else (project.created_at.isoformat() if project.created_at else None),
+                    "asset_count": len(manifest),
+                    "is_latest": True,
+                    "workspace_url": _project_workspace_url(project_id),
+                    "result_url": _project_result_url(project_id, project.run_id) if str(status).strip().lower() == "completed" else None,
+                }
+            )
+            continue
+
+        for row in rows:
+            manifest = _parse_json_list(row.asset_manifest_json)
+            status = status_map.get(str(row.run_id), "")
+            entries.append(
+                {
+                    "project_id": project_id,
+                    "run_id": row.run_id,
+                    "project_name": project.project_name,
+                    "client_name": project.client_name,
+                    "status": status,
+                    "status_bucket": _status_bucket(status),
+                    "sequence_no": row.sequence_no,
+                    "trigger_kind": row.trigger_kind,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                    "asset_count": len(manifest),
+                    "is_latest": str(row.run_id or "") == str(project.run_id or ""),
+                    "workspace_url": _project_workspace_url(project_id),
+                    "result_url": _project_result_url(project_id, row.run_id) if str(status).strip().lower() == "completed" else None,
+                }
+            )
+
+    bucket_order = {"running": 0, "pending": 1, "completed": 2, "failed": 3, "other": 4}
+    return sorted(
+        entries,
+        key=lambda item: (
+            bucket_order.get(str(item.get("status_bucket") or "other"), 3),
+            -(datetime.fromisoformat(str(item.get("created_at") or "1970-01-01T00:00:00+00:00").replace("Z", "+00:00")).timestamp()),
+            -int(item.get("sequence_no") or 0),
+        ),
+    )
 
 
 def _create_history_row(
@@ -599,7 +1031,77 @@ def _build_safe_bundle_for_project(project: ModernizationProject, db: Session):
         masking_level=MaskingLevel.FULL,
         assets=assets,
     )
-    return AnonymizationService().run_anonymization_pipeline(request).safe_bundle
+    # High-risk review remains advisory at project creation time. The project can
+    # still start, but the safe bundle handed to downstream analysis must mask
+    # label-less candidates so raw document entities do not reach the LLM path.
+    anonymization_result = AnonymizationService().run_anonymization_pipeline(request)
+    return anonymization_result.safe_bundle
+
+
+def _constraint_strings(values: list[Any]) -> list[str]:
+    return [str(item).strip() for item in values if str(item or "").strip()]
+
+
+def _persist_analysis_context(context: AnalysisContextBundle, db: Session) -> AnalysisContext:
+    payload_json = json.dumps(context.model_dump(mode="json"), ensure_ascii=False, sort_keys=True)
+    row = db.query(AnalysisContext).filter(AnalysisContext.run_id == context.run.run_id).first()
+    if row is None:
+        row = AnalysisContext(
+            context_id=context.context_id,
+            project_id=context.project.project_id,
+            run_id=context.run.run_id,
+            safe_bundle_id=context.trust.safe_bundle_id,
+            input_fingerprint=context.run.input_fingerprint,
+            schema_version=context.schema_version,
+            payload_json=payload_json,
+        )
+        db.add(row)
+    else:
+        row.context_id = context.context_id
+        row.project_id = context.project.project_id
+        row.safe_bundle_id = context.trust.safe_bundle_id
+        row.input_fingerprint = context.run.input_fingerprint
+        row.schema_version = context.schema_version
+        row.payload_json = payload_json
+        db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def _build_and_store_analysis_context(
+    project: ModernizationProject,
+    *,
+    run_id: str,
+    safe_bundle,
+    goal: str,
+    constraints: list[Any],
+    db: Session,
+) -> AnalysisContextBundle:
+    context = AnalysisContextBuilder().build(
+        project_id=project.id,
+        run_id=run_id,
+        safe_bundle=safe_bundle,
+        goal=goal,
+        constraints=_constraint_strings(constraints),
+        project_name=project.project_name,
+        client_name=project.client_name,
+        template_key=project.template_key,
+        warnings=_project_domain_warnings(project, db),
+    )
+    prepared = RebuildAssistantService().prepare_analysis_context_input(analysis_context=context)
+    context.trust.missing_context = list(prepared.missing_context or [])
+    question_guard_summary = getattr(prepared, "question_guard_summary", None)
+    if question_guard_summary is not None:
+        if getattr(question_guard_summary, "blocked_question_count", 0):
+            context.trust.warnings.append("질문 중 일부가 소스 근거 부족으로 분석 입력에서 제외되었습니다.")
+        if getattr(question_guard_summary, "needs_review", False):
+            context.trust.warnings.append("소스 기반 질문 후보가 부족하거나 사용자 질문 일부가 재검토 상태입니다.")
+    context.analysis_frame.concept_signals = list(prepared.signals.concepts or [])
+    context.analysis_frame.primary_feature_mode = prepared.signals.primary_feature_mode
+    context.analysis_frame.scope_limited = bool(prepared.scope_limited)
+    _persist_analysis_context(context, db)
+    return context
 
 
 def _validate_reanalysis_assets(
@@ -675,17 +1177,17 @@ def _build_result_provenance(
     generated_at = (
         _normalize_utc_iso(snapshot.get("updated_at"))
         or _normalize_utc_iso(snapshot.get("created_at"))
-        or _normalize_utc_iso(project.created_at)
+        or _normalize_utc_iso(_project_attr(project, "created_at", None))
     )
     return {
-        "run_id": snapshot.get("run_id") or project.run_id,
+        "run_id": snapshot.get("run_id") or _project_text(project, "run_id"),
         "module_id": snapshot.get("module_id") or REBUILD_ASSISTANT_MANIFEST.module_id,
         "run_kind": snapshot.get("run_kind") or REBUILD_ASSISTANT_MANIFEST.run_kind,
         "generated_at": generated_at,
         "app_version": (app_version or "").strip() or "unknown",
         "module_version": MODULE_VERSION,
-        "template_key": project.template_key,
-        "run_status": snapshot.get("status") or project.status,
+        "template_key": _project_text(project, "template_key"),
+        "run_status": snapshot.get("status") or _project_text(project, "status"),
         "input_assets": [dict(item) for item in assets],
     }
 
@@ -830,7 +1332,11 @@ def _accounting_reason_label(value: str) -> str:
         return "회계 정책 경고"
     if "voucher" in lowered or "전표" in lowered:
         return "전표 검토 입력 부족"
-    return _humanize_accounting_reason(text).rstrip(".")
+    humanized = _humanize_accounting_reason(text).rstrip(".")
+    missing_match = re.search(r"(.+?)(?:이|가) 누락되었습니다$", humanized)
+    if missing_match:
+        return f"{missing_match.group(1).strip()} 누락"
+    return humanized
 
 
 def _humanize_accounting_message(value: str) -> str:
@@ -1034,6 +1540,577 @@ def _build_executive_summary(
     }
 
 
+def _clean_display_text(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = re.sub(r"^\s*(문제|영향|조치|다음 단계)\s*:\s*", "", text, flags=re.IGNORECASE)
+    return " ".join(text.split())
+
+
+def _ensure_display_sentence(value: Any) -> str:
+    cleaned = _clean_display_text(value)
+    if not cleaned:
+        return ""
+    if cleaned.endswith((".", "!", "?")):
+        return cleaned
+    return f"{cleaned}."
+
+
+def _decisionize_display_text(value: Any) -> str:
+    text = _ensure_display_sentence(value)
+    if not text:
+        return ""
+    replacements = (
+        ("확인되었습니다.", "걸려 있어 유지하지 않으면 실제 동작이 달라집니다."),
+        ("확인되었습니다", "걸려 있어 유지하지 않으면 실제 동작이 달라집니다"),
+        ("확인됩니다.", "드러나 그대로 두면 변경 영향 범위가 커집니다."),
+        ("확인됩니다", "드러나 그대로 두면 변경 영향 범위가 커집니다"),
+        ("존재합니다.", "남아 있어 그대로 두면 유지보수 비용이 커집니다."),
+        ("존재합니다", "남아 있어 그대로 두면 유지보수 비용이 커집니다"),
+    )
+    for old, new in replacements:
+        text = text.replace(old, new)
+    return text
+
+
+def _display_action_phrase(value: Any) -> str:
+    text = _clean_display_text(value).rstrip(".")
+    if not text:
+        return ""
+    for pattern in (
+        r"\s*하는 것이 필요합니다$",
+        r"\s*해야 합니다$",
+        r"\s*할 필요가 있습니다$",
+        r"\s*가 필요합니다$",
+        r"\s*이 필요합니다$",
+        r"\s*입니다$",
+    ):
+        text = re.sub(pattern, "", text)
+    return text.strip()
+
+
+def _first_display_line(items: list[str]) -> str:
+    for item in items:
+        normalized = _clean_display_text(item)
+        if normalized:
+            return normalized
+    return ""
+
+
+def _display_empty_message(
+    section_key: str,
+    *,
+    run_state: str,
+    missing_context_details: list[dict[str, Any]] | None = None,
+) -> str:
+    first_required = ""
+    if missing_context_details:
+        first_required = str((missing_context_details[0] or {}).get("required_material") or "").strip()
+    if run_state == "running":
+        running_messages = {
+            "grounded_rules": "핵심 규칙 근거가 아직 모이지 않아 이 판단을 확정하면 안 됩니다.",
+            "design_options": "개선 전략 비교 근거가 아직 부족해 옵션 우선순위를 확정하면 안 됩니다.",
+            "execution_plan": "실행 단계 근거가 아직 부족해 착수 순서를 고정하면 안 됩니다.",
+            "risks": "리스크 근거가 아직 정리되지 않아 승인 범위를 먼저 줄여야 합니다.",
+            "missing_context": "추가 확인 항목이 아직 정리되지 않아 누락 자료 범위를 다시 확인해야 합니다.",
+            "retained_contracts": "유지 계약이 아직 정리되지 않아 보호 범위를 먼저 확정해야 합니다.",
+            "priority_split": "분리 우선순위 근거가 아직 부족해 선행 작업을 고정하면 안 됩니다.",
+            "verification": "확인 필요 항목이 아직 정리되지 않아 후속 검증 범위를 다시 잡아야 합니다.",
+            "rebuild_strategy": "구조 전략이 아직 정리되지 않아 레이어 경계를 고정하면 안 됩니다.",
+            "transition_draft": "전환 초안이 아직 정리되지 않아 구현 순서를 확정하면 안 됩니다.",
+            "report_scope": "분석 범위가 비어 있어 이 결과만으로 적용 범위를 넓히면 안 됩니다.",
+            "report_questions": "검증 질문이 비어 있어 승인 전에 확인 범위를 다시 정해야 합니다.",
+        }
+        return running_messages.get(section_key, "판단 근거가 아직 부족해 지금 결정을 고정하면 안 됩니다.")
+    if first_required and section_key in {"grounded_rules", "risks", "missing_context", "verification"}:
+        return f"{first_required} 자료가 비어 있어 이 판단을 바로 확정하면 안 됩니다."
+    messages = {
+        "grounded_rules": "핵심 규칙 근거가 부족해 구조를 고정하면 회귀 위험이 커집니다.",
+        "design_options": "비교 가능한 전략 근거가 부족해 우선안을 고르기 전에 추가 근거를 확보해야 합니다.",
+        "execution_plan": "착수 순서를 정할 근거가 부족해 파일럿 범위를 먼저 줄여야 합니다.",
+        "risks": "노출된 리스크가 없더라도 영향 범위를 다시 점검해야 합니다.",
+        "missing_context": "추가로 확보할 자료가 드러나지 않았더라도 승인 전에 누락 여부를 다시 확인해야 합니다.",
+        "retained_contracts": "보호할 계약이 아직 정리되지 않아 변경 범위를 먼저 줄여야 합니다.",
+        "priority_split": "우선순위 근거가 비어 있어 작업 순서를 바로 확정하면 안 됩니다.",
+        "verification": "검증 체크포인트가 비어 있어 승인 전에 확인 범위를 다시 정해야 합니다.",
+        "rebuild_strategy": "구조 전략 근거가 부족해 레이어 경계를 먼저 재정의해야 합니다.",
+        "transition_draft": "전환 초안이 비어 있어 구현보다 경계 확정이 먼저입니다.",
+        "report_scope": "분석 범위가 비어 있어 이 결과를 전체 시스템 결정으로 확대하면 안 됩니다.",
+        "report_questions": "검증 질문이 비어 있어 승인 전에 확인할 질문부터 다시 정해야 합니다.",
+    }
+    return messages.get(section_key, "판단 근거가 부족해 지금 결정을 고정하면 안 됩니다.")
+
+
+def _compose_one_line_conclusion(*, summary: str, impact: str, priority_action: str) -> str:
+    parts: list[str] = []
+    summary_sentence = _decisionize_display_text(summary).rstrip(".")
+    impact_sentence = _decisionize_display_text(impact).rstrip(".")
+    action_phrase = _display_action_phrase(priority_action)
+    if summary_sentence:
+        parts.append(summary_sentence)
+    if impact_sentence and impact_sentence.lower() != summary_sentence.lower():
+        parts.append(impact_sentence)
+    if action_phrase:
+        parts.append(f"우선 조치는 {action_phrase}입니다")
+    if not parts:
+        return "핵심 구조 문제를 다시 확인한 뒤 우선 조치를 확정해야 합니다."
+    return ". ".join(parts).strip() + "."
+
+
+def _priority_badge(index: int) -> str:
+    if index <= 0:
+        return "P0"
+    if index == 1:
+        return "P1"
+    return "P2"
+
+
+def _build_rule_action(rule: dict[str, Any]) -> str:
+    targets = _trim_items(list(rule.get("design_targets") or []), limit=2)
+    if targets:
+        return f"{', '.join(targets)} 경계에서 이 규칙을 먼저 분리해 보는 편이 안전합니다."
+    return "이 규칙을 한 경계에서 먼저 분리해 보는 편이 안전합니다."
+
+
+def _build_rule_impact(rule: dict[str, Any]) -> str:
+    title = str(rule.get("title") or "이 규칙").strip() or "이 규칙"
+    if bool(rule.get("needs_verification")):
+        return f"{title} 규칙을 근거 없이 확정하면 실제 동작과 다른 보호 조건을 만들 수 있습니다."
+    return f"{title} 규칙이 빠지면 처리 결과와 권한 범위가 달라질 수 있습니다."
+
+
+def _build_rule_anti_pattern(rule: dict[str, Any]) -> str:
+    return "같은 규칙을 화면, 서비스, SQL에 흩어 두지 말아야 합니다."
+
+
+def _build_rule_unchanged_consequence(rule: dict[str, Any]) -> str:
+    title = str(rule.get("title") or "").strip()
+    targets = " ".join(str(item or "") for item in (rule.get("design_targets") or []))
+    haystack = f"{title} {targets}".lower()
+    if "검증" in haystack or "validator" in haystack:
+        return "이 규칙 정리를 미루면 동일 검증 기준 수정이 여러 경로에 남습니다."
+    if "정책" in haystack or "상태" in haystack:
+        return "이 규칙 정리를 미루면 권한과 상태 변경이 화면과 서비스 양쪽에 계속 남습니다."
+    if "sql" in haystack or "조회" in haystack:
+        return "이 규칙 정리를 미루면 조회 조건 변경이 화면과 SQL 양쪽으로 번집니다."
+    return "이 규칙 정리를 미루면 변경 시 파급 범위가 계속 넓게 남습니다."
+
+
+def _build_rule_priority(index: int, rule: dict[str, Any]) -> str:
+    confidence = str(rule.get("confidence") or "").strip()
+    if confidence == "확정" and not bool(rule.get("needs_verification")):
+        return "P0"
+    return _priority_badge(index + 1)
+
+
+def _build_rule_priority_reason(priority: str, rule: dict[str, Any]) -> str:
+    if priority == "P0":
+        return "직접 근거가 잡혀 있어 먼저 보호하지 않으면 실제 동작이 달라질 수 있습니다."
+    if priority == "P1":
+        return "핵심 흐름과 연결돼 있어 초기 설계 범위 안에서 함께 검토하는 편이 안전합니다."
+    return "보조 규칙이지만 뒤로 미루면 후속 수정 지점이 늘어날 수 있습니다."
+
+
+def _build_evidence_importance(rule: dict[str, Any]) -> str:
+    title = str(rule.get("title") or "핵심 규칙").strip() or "핵심 규칙"
+    return f"{title} 규칙이 이 자산에도 걸려 있어 누락하면 실제 동작이 달라집니다."
+
+
+def _build_display_grounded_rules(
+    items: list[dict[str, Any]],
+    *,
+    run_state: str,
+    missing_context_details: list[dict[str, Any]],
+) -> dict[str, Any]:
+    rendered_items: list[dict[str, Any]] = []
+    for index, item in enumerate(items):
+        priority = _build_rule_priority(index, item)
+        evidence_cards = []
+        for row in list(item.get("evidence_cards") or []):
+            evidence_cards.append(
+                {
+                    "asset_name": row.get("asset_name") or "-",
+                    "condition_summary": _decisionize_display_text(row.get("condition_summary") or ""),
+                    "why_important": _build_evidence_importance(item),
+                    "design_targets": list(row.get("design_targets") or []),
+                    "confidence": row.get("confidence") or "-",
+                }
+            )
+        rendered_items.append(
+            {
+                "title": item.get("title") or "",
+                "decision": _decisionize_display_text(item.get("description") or ""),
+                "impact": _build_rule_impact(item),
+                "action": _build_rule_action(item),
+                "priority": priority,
+                "priority_reason": _build_rule_priority_reason(priority, item),
+                "anti_pattern": _build_rule_anti_pattern(item),
+                "unchanged_consequence": _build_rule_unchanged_consequence(item),
+                "confidence": item.get("confidence") or "가정",
+                "confidence_reason": _decisionize_display_text(item.get("confidence_reason") or ""),
+                "needs_verification": bool(item.get("needs_verification")),
+                "design_targets": list(item.get("design_targets") or []),
+                "evidence_cards": evidence_cards,
+            }
+        )
+    return {
+        "empty_message": _display_empty_message(
+            "grounded_rules",
+            run_state=run_state,
+            missing_context_details=missing_context_details,
+        ),
+        "items": rendered_items,
+    }
+
+
+def _option_haystack(item: dict[str, Any]) -> str:
+    return " ".join(
+        [
+            str(item.get("name") or ""),
+            str(item.get("structure_summary") or ""),
+            " ".join(str(entry or "") for entry in (item.get("advantages") or [])),
+            " ".join(str(entry or "") for entry in (item.get("risks") or [])),
+            str(item.get("selection_reason") or ""),
+        ]
+    ).lower()
+
+
+def _build_option_improvement_breadth(item: dict[str, Any]) -> str:
+    haystack = _option_haystack(item)
+    if "화면" in haystack and "후속" in haystack:
+        return "표현 계층 중심으로 구조 개선 폭이 작습니다."
+    if any(token in haystack for token in ("모듈형", "검증 규칙 중심", "service", "api", "서비스")):
+        return "서비스와 검증 경계까지 손대므로 구조 개선 폭이 큽니다."
+    return "기능 단위 경계를 다시 나누는 수준의 중간 폭 개선입니다."
+
+
+def _build_option_apply_scope(item: dict[str, Any]) -> str:
+    haystack = _option_haystack(item)
+    if "화면" in haystack and "api" not in haystack and "서비스" not in haystack:
+        return "주로 화면과 입력 흐름에 적용됩니다."
+    if any(token in haystack for token in ("api", "서비스", "backend", "검증")):
+        return "API, 서비스, 검증 경계까지 함께 다룹니다."
+    return "단일 기능 범위 전체에 적용됩니다."
+
+
+def _build_option_expected_effect(item: dict[str, Any]) -> str:
+    advantages = _trim_items(list(item.get("advantages") or []), limit=2)
+    if advantages:
+        return _decisionize_display_text(advantages[0])
+    return _decisionize_display_text(item.get("selection_reason") or "구조 변경 범위를 더 선명하게 정리할 수 있습니다.")
+
+
+def _build_option_prerequisite(item: dict[str, Any], missing_context_details: list[dict[str, Any]]) -> str:
+    if missing_context_details:
+        required = str((missing_context_details[0] or {}).get("required_material") or "").strip() or "추가 근거"
+        return f"{required} 기준을 먼저 확인해야 적용 범위를 안정적으로 줄일 수 있습니다."
+    haystack = _option_haystack(item)
+    if any(token in haystack for token in ("검증", "정책", "규칙")):
+        return "핵심 규칙과 유지 계약을 먼저 묶어 두는 편이 안전합니다."
+    return "파일럿 범위와 회귀 확인 기준을 먼저 고정하는 편이 안전합니다."
+
+
+def _build_option_unchanged_consequence(item: dict[str, Any]) -> str:
+    haystack = _option_haystack(item)
+    if "화면" in haystack and "후속" in haystack:
+        return "이 수준의 구조 조정을 미루면 화면과 처리 경계가 계속 함께 움직입니다."
+    if any(token in haystack for token in ("검증", "정규", "validator")):
+        return "이 수준의 구조 조정을 미루면 검증 기준 수정이 여러 위치에 계속 남습니다."
+    if any(token in haystack for token in ("service", "서비스", "api")):
+        return "이 수준의 구조 조정을 미루면 UI와 서비스 결합이 계속 남습니다."
+    return "이 수준의 구조 조정을 미루면 변경 시 파급 범위가 계속 넓게 남습니다."
+
+
+def _build_option_priority(index: int, item: dict[str, Any]) -> str:
+    if bool(item.get("recommended")):
+        return "P0"
+    return _priority_badge(index)
+
+
+def _build_option_priority_reason(priority: str, item: dict[str, Any]) -> str:
+    if priority == "P0":
+        return "현재 결합을 가장 많이 줄이는 선택지라 먼저 비교해 볼 가치가 큽니다."
+    if priority == "P1":
+        return "대안으로 유지할 가치가 있지만 적용 범위와 비용을 함께 봐야 합니다."
+    return "후순위 선택지라면 화면 효과보다 구조 효과를 먼저 비교하는 편이 안전합니다."
+
+
+def _build_option_comparison_points(item: dict[str, Any], *, missing_context_details: list[dict[str, Any]]) -> list[dict[str, str]]:
+    return [
+        {"label": "구조 개선 폭", "value": _build_option_improvement_breadth(item)},
+        {"label": "적용 범위", "value": _build_option_apply_scope(item)},
+        {"label": "구현 난이도", "value": str(item.get("difficulty") or "-")},
+        {"label": "예상 효과", "value": _build_option_expected_effect(item)},
+        {"label": "선행 조건", "value": _build_option_prerequisite(item, missing_context_details)},
+        {"label": "미조치 시 영향", "value": _build_option_unchanged_consequence(item)},
+    ]
+
+
+def _build_display_design_options(
+    items: list[dict[str, Any]],
+    *,
+    run_state: str,
+    missing_context_details: list[dict[str, Any]],
+) -> dict[str, Any]:
+    rendered_items: list[dict[str, Any]] = []
+    for index, item in enumerate(items):
+        advantages = _trim_items(list(item.get("advantages") or []), limit=3)
+        risks = _trim_items(list(item.get("risks") or []), limit=3)
+        priority = _build_option_priority(index, item)
+        rendered_items.append(
+            {
+                "name": item.get("name") or "",
+                "decision": _decisionize_display_text(item.get("structure_summary") or ""),
+                "action": _decisionize_display_text(_first_display_line(advantages) or item.get("selection_reason") or ""),
+                "anti_pattern": _decisionize_display_text(_first_display_line(risks) or "핵심 규칙 분리를 뒤로 미루지 말아야 합니다."),
+                "priority": priority,
+                "priority_reason": _build_option_priority_reason(priority, item),
+                "difficulty": item.get("difficulty") or "-",
+                "duration_weeks": item.get("duration_weeks") or 0,
+                "advantages": advantages,
+                "risks": risks,
+                "selection_reason": _decisionize_display_text(item.get("selection_reason") or ""),
+                "unchanged_consequence": _build_option_unchanged_consequence(item),
+                "comparison_points": _build_option_comparison_points(item, missing_context_details=missing_context_details),
+                "recommended": bool(item.get("recommended")),
+            }
+        )
+    return {
+        "empty_message": _display_empty_message("design_options", run_state=run_state, missing_context_details=[]),
+        "items": rendered_items,
+    }
+
+
+def _build_display_execution_plan(
+    items: list[dict[str, Any]],
+    *,
+    run_state: str,
+    analysis_first_surface: bool = False,
+) -> dict[str, Any]:
+    rendered_items: list[dict[str, Any]] = []
+    for index, item in enumerate(items):
+        tasks = _trim_items(list(item.get("tasks") or []), limit=4)
+        priority = _priority_badge(index)
+        decision_text = (
+            _ensure_display_sentence(item.get("goal") or "")
+            if analysis_first_surface
+            else _decisionize_display_text(item.get("goal") or "")
+        )
+        action_text = (
+            _ensure_display_sentence(_first_display_line(tasks) or item.get("goal") or "")
+            if analysis_first_surface
+            else _decisionize_display_text(_first_display_line(tasks) or item.get("goal") or "")
+        )
+        rendered_items.append(
+            {
+                "week_label": item.get("week_label") or "",
+                "decision": decision_text,
+                "action": action_text,
+                "priority": priority,
+                "priority_reason": (
+                    "현행 처리 순서를 먼저 맞춰야 다음 검토가 같은 흐름을 기준으로 이어집니다."
+                    if analysis_first_surface and priority == "P0"
+                    else (
+                        "계산 기준과 연계 조건을 같은 흐름 기준으로 확인하는 중간 단계입니다."
+                        if analysis_first_surface and priority == "P1"
+                        else (
+                            "운영 리스크와 후속 확인 항목을 정리하는 마무리 단계입니다."
+                            if analysis_first_surface
+                            else (
+                                "후속 설계 기준을 먼저 고정해야 해 앞 단계 우선순위가 높습니다."
+                                if priority == "P0"
+                                else ("선행 기준 위에서 진행되는 중간 단계입니다." if priority == "P1" else "마무리 검증에 가까운 후속 단계입니다.")
+                            )
+                        )
+                    )
+                ),
+                "unchanged_consequence": (
+                    "이 단계를 미루면 후속 검토가 같은 처리 순서를 기준으로 이어지지 못합니다."
+                    if analysis_first_surface and priority == "P0"
+                    else (
+                        "이 단계를 미루면 계산 기준과 연계 조건 점검이 다시 흩어질 수 있습니다."
+                        if analysis_first_surface and priority == "P1"
+                        else (
+                            "이 단계를 미루면 운영 리스크와 후속 확인 항목이 불완전하게 남습니다."
+                            if analysis_first_surface
+                            else ("이 단계를 미루면 다음 단계가 같은 근거를 공유하지 못합니다."
+                                if priority == "P0"
+                                else ("이 단계를 미루면 구현과 검증 시점이 다시 벌어질 수 있습니다." if priority == "P1" else "이 단계를 미루면 최종 확인과 승인 일정이 뒤로 밀립니다."))
+                        )
+                    )
+                ),
+                "duration_weeks": item.get("duration_weeks") or 0,
+                "tasks": tasks,
+                "roles": list(item.get("roles") or []),
+                "deliverables": list(item.get("deliverables") or []),
+                "related_rules": list(item.get("related_rules") or []),
+                "related_contracts": list(item.get("related_contracts") or []),
+            }
+        )
+    return {
+        "empty_message": _display_empty_message("execution_plan", run_state=run_state, missing_context_details=[]),
+        "items": rendered_items,
+    }
+
+
+def _build_display_risks(
+    *,
+    risks: list[str],
+    missing_context_details: list[dict[str, Any]],
+    run_state: str,
+) -> dict[str, Any]:
+    return {
+        "empty_message": _display_empty_message("risks", run_state=run_state, missing_context_details=missing_context_details),
+        "missing_context_empty_message": _display_empty_message(
+            "missing_context",
+            run_state=run_state,
+            missing_context_details=missing_context_details,
+        ),
+        "items": [_decisionize_display_text(item) for item in _trim_items(risks, limit=6)],
+        "missing_context_details": [
+            {
+                "required_material": item.get("required_material") or "-",
+                "reason": _decisionize_display_text(item.get("reason") or ""),
+                "priority": "승인 전 확보",
+            }
+            for item in missing_context_details
+        ],
+    }
+
+
+def _preferred_display_option(design_options: list[dict[str, Any]]) -> dict[str, Any]:
+    for item in design_options:
+        if isinstance(item, dict) and bool(item.get("recommended")):
+            return item
+    for item in design_options:
+        if isinstance(item, dict):
+            return item
+    return {}
+
+
+def _build_display_package(
+    *,
+    run_state: str,
+    core_conclusion: str,
+    executive_summary: dict[str, Any],
+    grounded_business_rules: list[dict[str, Any]],
+    design_options: list[dict[str, Any]],
+    execution_plan: list[dict[str, Any]],
+    diagnosis: dict[str, Any],
+    extensions: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    missing_context_details = list(diagnosis.get("missing_context_details") or [])
+    key_risks = _trim_items(list(diagnosis.get("risks") or []), limit=6)
+    executive_actions = _trim_items(list(executive_summary.get("next_steps") or []), limit=3)
+    executive_rationales = _trim_items(list(executive_summary.get("summary_lines") or []), limit=3)
+    summary_text = str(executive_summary.get("core_message") or core_conclusion or "").strip()
+    impact_text = _first_display_line(key_risks) or _first_display_line(executive_rationales) or summary_text
+    analysis_first_surface = _uses_analysis_first_surface_extensions(extensions)
+    surface_wording = _surface_wording_from_extensions(extensions)
+    document_tone = str(surface_wording.get("document_tone") or "").strip()
+    operational_execution_actions = _trim_items(
+        [str(item.get("goal") or "").strip() for item in execution_plan if isinstance(item, dict) and str(item.get("goal") or "").strip()],
+        limit=3,
+    )
+    priority_action = _first_display_line(operational_execution_actions if analysis_first_surface else executive_actions)
+    comparison_first_surface = _uses_comparison_first_surface_extensions(extensions)
+    if comparison_first_surface:
+        preferred_option = _preferred_display_option(design_options)
+        option_name = str(preferred_option.get("name") or "").strip()
+        option_reason = str(preferred_option.get("selection_reason") or preferred_option.get("structure_summary") or "").strip()
+        option_action = next(
+            (str(item.get("goal") or "").strip() for item in execution_plan if isinstance(item, dict) and str(item.get("goal") or "").strip()),
+            "",
+        )
+        if option_name:
+            summary_text = f"우선 검토안은 {option_name}입니다."
+        if option_reason:
+            impact_text = option_reason
+        if option_action:
+            priority_action = option_action
+    if analysis_first_surface:
+        hero_headline = _ensure_display_sentence(core_conclusion or summary_text)
+    else:
+        hero_headline = _compose_one_line_conclusion(
+            summary=summary_text,
+            impact=impact_text,
+            priority_action=priority_action,
+        )
+    section_states = {
+        "retained_contracts": _display_empty_message("retained_contracts", run_state=run_state, missing_context_details=missing_context_details),
+        "priority_split": _display_empty_message("priority_split", run_state=run_state, missing_context_details=missing_context_details),
+        "verification": _display_empty_message("verification", run_state=run_state, missing_context_details=missing_context_details),
+        "rebuild_strategy": _display_empty_message("rebuild_strategy", run_state=run_state, missing_context_details=missing_context_details),
+        "transition_draft": _display_empty_message("transition_draft", run_state=run_state, missing_context_details=missing_context_details),
+        "report_scope": _display_empty_message("report_scope", run_state=run_state, missing_context_details=missing_context_details),
+        "report_questions": _display_empty_message("report_questions", run_state=run_state, missing_context_details=missing_context_details),
+    }
+    return {
+        "hero": {
+            "label": _surface_section_title_from_extensions(extensions, "one_line_conclusion", "한 줄 결론"),
+            "headline": hero_headline,
+            "impact": _ensure_display_sentence(impact_text) if analysis_first_surface else _decisionize_display_text(impact_text),
+            "priority_action": priority_action,
+        },
+        "sections": {
+            "executive": {
+                "headline": hero_headline,
+                "reason_label": (
+                    "전표/GL 진단 요약"
+                    if document_tone == "diagnosis_first"
+                    else "선택지 요약"
+                    if document_tone == "decision_first"
+                    else
+                    "현행 분석 요약"
+                    if analysis_first_surface
+                    else "비교 근거"
+                    if comparison_first_surface
+                    else "판단 근거"
+                ),
+                "action_label": (
+                    "진단 순서"
+                    if document_tone == "diagnosis_first"
+                    else "적용 검증 기준"
+                    if document_tone == "decision_first"
+                    else
+                    "검토 순서"
+                    if analysis_first_surface
+                    else "도입 단계"
+                    if comparison_first_surface
+                    else "실행 조치"
+                ),
+                "impact_lines": [(_ensure_display_sentence(item) if analysis_first_surface else _decisionize_display_text(item)) for item in executive_rationales],
+                "action_lines": [
+                    (_ensure_display_sentence(item) if analysis_first_surface else _decisionize_display_text(item))
+                    for item in (operational_execution_actions if analysis_first_surface else executive_actions)
+                ],
+            },
+            "grounded_rules": _build_display_grounded_rules(
+                grounded_business_rules,
+                run_state=run_state,
+                missing_context_details=missing_context_details,
+            ),
+            "design_options": _build_display_design_options(
+                design_options,
+                run_state=run_state,
+                missing_context_details=missing_context_details,
+            ),
+            "execution_plan": _build_display_execution_plan(
+                execution_plan,
+                run_state=run_state,
+                analysis_first_surface=analysis_first_surface,
+            ),
+            "risks": _build_display_risks(
+                risks=key_risks,
+                missing_context_details=missing_context_details,
+                run_state=run_state,
+            ),
+        },
+        "section_states": section_states,
+    }
+
+
 def _sanitize_user_value(value: Any, *, key_path: tuple[str, ...] = ()) -> Any:
     if isinstance(value, str):
         if key_path and key_path[-1] in {"observed", "expected_pattern", "current_structure", "recommended_structure", "markdown"}:
@@ -1134,7 +2211,7 @@ _CUSTOMER_INTENT_PREFIXES = (
 def _build_customer_intent(project: ModernizationProject) -> dict[str, Any]:
     seen: set[str] = set()
     items: list[str] = []
-    for raw_item in _parse_json_list(project.constraints_json):
+    for raw_item in _project_json_list(project, "constraints_json"):
         text = str(raw_item or "").strip()
         if not text:
             continue
@@ -1155,6 +2232,53 @@ def _build_customer_intent(project: ModernizationProject) -> dict[str, Any]:
     }
 
 
+def _build_consulting_source(
+    *,
+    family: str,
+    question_axis: str = "",
+    report_purpose: str = "",
+    report_scope: list[str],
+    report_questions: list[str],
+    customer_intent: dict[str, Any] | None = None,
+    assumptions: list[dict[str, Any]],
+    analysis_summary: list[str],
+    core_conclusion: str,
+    primary_judgment_reason: str,
+    grounded_business_rules: list[dict[str, Any]],
+    retained_contracts: list[dict[str, Any]],
+    decision_items: list[dict[str, Any]],
+    priority_split_items: list[dict[str, Any]],
+    design_options: list[dict[str, Any]],
+    recommended_option: dict[str, Any] | None = None,
+    execution_plan: list[dict[str, Any]],
+    recommended_directions: list[str],
+    risks: list[str],
+    missing_context_details: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "family": str(family or "").strip(),
+        "question_axis": str(question_axis or "").strip(),
+        "report_purpose": str(report_purpose or "").strip(),
+        "report_scope": list(report_scope or []),
+        "report_questions": list(report_questions or []),
+        "customer_intent": dict(customer_intent or {}) if isinstance(customer_intent, dict) else {},
+        "assumptions": [dict(item) for item in assumptions or [] if isinstance(item, dict)],
+        "analysis_summary": list(analysis_summary or []),
+        "core_conclusion": str(core_conclusion or "").strip(),
+        "primary_judgment_reason": str(primary_judgment_reason or "").strip(),
+        "grounded_business_rules": [dict(item) for item in grounded_business_rules or [] if isinstance(item, dict)],
+        "retained_contracts": [dict(item) for item in retained_contracts or [] if isinstance(item, dict)],
+        "decision_items": [dict(item) for item in decision_items or [] if isinstance(item, dict)],
+        "priority_split_items": [dict(item) for item in priority_split_items or [] if isinstance(item, dict)],
+        "design_options": [dict(item) for item in design_options or [] if isinstance(item, dict)],
+        "recommended_option": dict(recommended_option or {}) if isinstance(recommended_option, dict) else {},
+        "execution_plan": [dict(item) for item in execution_plan or [] if isinstance(item, dict)],
+        "recommended_directions": list(recommended_directions or []),
+        "risks": list(risks or []),
+        "missing_context_details": [dict(item) for item in missing_context_details or [] if isinstance(item, dict)],
+    }
+
+
 def build_result_package(
     project: ModernizationProject,
     snapshot: dict[str, Any] | None,
@@ -1164,7 +2288,16 @@ def build_result_package(
     polish_bundle: dict[str, Any] | None = None,
     app_version: str | None = None,
 ) -> dict[str, Any]:
+    result = _refresh_result_review_diff(result)
+    narrative_service = NarrativeAugmentationService()
     run_state = _project_status_from_run(snapshot)
+    project_id = _project_text(project, "id")
+    project_name = _project_text(project, "project_name")
+    client_name = _project_text(project, "client_name")
+    project_goal = _project_text(project, "goal_text")
+    template_key = _project_text(project, "template_key")
+    project_status = _project_text(project, "status")
+    created_at_iso = _project_isoformat(project, "created_at")
     core_conclusion = (result.one_line_conclusion if result else "").strip()
     recommended_directions = _trim_items(list(result.recommended_directions) if result else [], limit=3)
     layer_dump = result.layer_reconstruction.model_dump() if result else {}
@@ -1192,11 +2325,12 @@ def build_result_package(
     }
     appendix = {
         "asset_manifest": assets,
-        "project_name": project.project_name,
-        "client_name": project.client_name,
-        "template_key": project.template_key,
-        "created_at": project.created_at.isoformat() if project.created_at else None,
-        "run_status": (snapshot or {}).get("status") or project.status,
+        "project_name": project_name,
+        "client_name": client_name,
+        "goal": project_goal,
+        "template_key": template_key,
+        "created_at": created_at_iso,
+        "run_status": (snapshot or {}).get("status") or project_status,
     }
     provenance = _build_result_provenance(project, snapshot, assets=assets, app_version=app_version)
     scope_notice = deepcopy(PROJECT_SCOPE_NOTICE)
@@ -1215,6 +2349,7 @@ def build_result_package(
     design_options = [item.model_dump() for item in (result.design_options if result else [])]
     recommended_option = result.recommended_option.model_dump() if result and result.recommended_option else None
     execution_plan = [item.model_dump() for item in (result.execution_plan if result else [])]
+    assumptions = [item.model_dump() for item in (result.assumptions if result else [])]
     accounting = None
     if result and isinstance(result.extensions, dict):
         accounting_block = result.extensions.get("accounting")
@@ -1223,11 +2358,102 @@ def build_result_package(
     customer_intent = _build_customer_intent(project)
     structure_comparison = _build_structure_comparison_preview(result)
     surface_extensions = _surface_extensions(result)
+    result_question_axis = (
+        str(getattr(result, "question_axis", "") or "").strip()
+        if result
+        else ""
+    )
+    consulting_source = _build_consulting_source(
+        family=(result.family_classification.family if result and result.family_classification else ""),
+        question_axis=result_question_axis,
+        report_purpose=(result.report_purpose if result else ""),
+        report_scope=list(result.report_scope) if result else [],
+        report_questions=list(result.report_questions) if result else [],
+        customer_intent=customer_intent,
+        assumptions=assumptions,
+        analysis_summary=diagnosis["analysis_summary"],
+        core_conclusion=core_conclusion,
+        primary_judgment_reason=(result.primary_judgment_reason if result else ""),
+        grounded_business_rules=grounded_business_rules,
+        retained_contracts=retained_contracts,
+        decision_items=decision_items,
+        priority_split_items=priority_split_items,
+        design_options=design_options,
+        recommended_option=recommended_option,
+        execution_plan=execution_plan,
+        recommended_directions=recommended_directions,
+        risks=diagnosis["risks"],
+        missing_context_details=diagnosis["missing_context_details"],
+    )
+    consulting_min_contract = build_consulting_min_contract(consulting_source)
+    consulting_deck = build_consulting_deck(
+        consulting_min_contract,
+        project_name=project_name,
+        client_name=client_name,
+        surface_mode="internal",
+        family=(result.family_classification.family if result and result.family_classification else ""),
+        question_axis=result_question_axis,
+    )
+    slide_schema = build_slide_schema(ConsultingDeck.model_validate(consulting_deck))
+    canonical_payload = (
+        result.canonical_payload.model_dump()
+        if result and result.canonical_payload is not None
+        else (
+            narrative_service.freeze_canonical_payload_from_result(result).model_dump()
+            if result
+            else None
+        )
+    )
+    validated_narrative_layer = (
+        result.narrative_layer.model_dump()
+        if result and result.narrative_layer is not None
+        else None
+    )
+    validated_explanation_blocks = (
+        [item.model_dump() for item in (result.validated_explanation_blocks or [])]
+        if result
+        else []
+    )
+    fallback_narrative_metadata = (
+        result.narrative_metadata.model_dump()
+        if result and result.narrative_metadata is not None
+        else (
+            {
+                "source": "deterministic_fallback",
+                "match_mode": "failed",
+                "fields_rewritten": [],
+                "model": "",
+                "prompt_version": ResultPackager.NARRATIVE_PROMPT_VERSION,
+                "validation_passed": False,
+                "failure_reason": "llm_not_invoked" if result else "result_unavailable",
+                "axis": (result.narrative_axis if result else ""),
+                "llm_invoked": False,
+                "llm_call_count": 0,
+                "fallback_used": True,
+                "slim_payload_hash": "",
+                "block_match_modes": {},
+            }
+        )
+    )
+    narrative_guard_metadata = (
+        result.narrative_guard_metadata.model_dump()
+        if result and result.narrative_guard_metadata is not None
+        else deepcopy(fallback_narrative_metadata)
+    )
+    family_payload = (
+        result.family_classification.model_dump()
+        if result and result.family_classification is not None
+        else _empty_family_classification_payload()
+    )
     authoritative_payload = {
+        "family_classification": family_payload,
         "structure_snapshot": deepcopy(result.structure_snapshot) if result else {},
         "diagnosis_report": deepcopy(result.diagnosis_report) if result else {},
         "decision_summary": deepcopy(result.decision_summary) if result else {},
         "improvement_plan_bundle": deepcopy(result.improvement_plan_bundle) if result else {},
+        "judgment_canvas": deepcopy(result.judgment_canvas) if result else {},
+        "stage_control": deepcopy(result.stage_control) if result else {},
+        "validation_result": deepcopy(result.validation_result) if result else {},
         "appendix": deepcopy(result.appendix) if result else {},
     }
     primary_judgment = _resolved_primary_judgment(result)
@@ -1251,13 +2477,24 @@ def build_result_package(
         recommended_option=recommended_option,
         accounting=accounting,
     )
+    display = _build_display_package(
+        run_state=run_state,
+        core_conclusion=core_conclusion,
+        executive_summary=executive_summary,
+        grounded_business_rules=grounded_business_rules,
+        design_options=design_options,
+        execution_plan=execution_plan,
+        diagnosis=diagnosis,
+        extensions=surface_extensions,
+    )
     return _sanitize_user_value({
         "project": {
-            "id": project.id,
-            "project_name": project.project_name,
-            "client_name": project.client_name,
-            "template_key": project.template_key,
-            "status": project.status,
+            "id": project_id,
+            "project_name": project_name,
+            "client_name": client_name,
+            "goal": project_goal,
+            "template_key": template_key,
+            "status": project_status,
         },
         "assets": assets,
         "provenance": provenance,
@@ -1266,14 +2503,23 @@ def build_result_package(
         "template_judgment": template_judgment,
         "structural_judgment": structural_judgment,
         "narrative_axis": narrative_axis,
+        "question_axis": (
+            result_question_axis
+            if result
+            else str((((canonical_payload or {}).get("request_context") or {}).get("question_axis") or "")).strip()
+        ),
+        "family_classification": family_payload,
         "feature_signal_mode": (result.feature_signal_mode if result else "").strip(),
         "confidence": float(result.confidence) if result else 0.0,
         "report_purpose": (result.report_purpose if result else "").strip(),
+        "primary_judgment_reason": (result.primary_judgment_reason if result else "").strip(),
         "report_scope": list(result.report_scope) if result else [],
         "report_questions": list(result.report_questions) if result else [],
+        "assumptions": assumptions,
         "executive_summary_v2": executive_summary_v2,
         "scope_notice": scope_notice,
         "core_conclusion": core_conclusion,
+        "analysis_summary": diagnosis["analysis_summary"],
         "core_business_rules": list(result.core_business_rules) if result else [],
         "grounded_business_rules": grounded_business_rules,
         "decision_items": decision_items,
@@ -1283,12 +2529,34 @@ def build_result_package(
         "design_options": design_options,
         "recommended_option": recommended_option,
         "execution_plan": execution_plan,
+        "judgment_canvas": deepcopy(result.judgment_canvas) if result else {},
+        "stage_control": deepcopy(result.stage_control) if result else {},
+        "validation_result": deepcopy(result.validation_result) if result else {},
         "recommended_directions": recommended_directions,
         "accounting": accounting,
         "customer_intent": customer_intent,
+        "canonical_payload": deepcopy(canonical_payload) if isinstance(canonical_payload, dict) else canonical_payload,
+        "validated_narrative_layer": deepcopy(validated_narrative_layer) if isinstance(validated_narrative_layer, dict) else validated_narrative_layer,
+        "validated_explanation_blocks": deepcopy(validated_explanation_blocks),
+        "fallback_narrative_metadata": deepcopy(fallback_narrative_metadata) if isinstance(fallback_narrative_metadata, dict) else fallback_narrative_metadata,
+        "narrative_guard_metadata": deepcopy(narrative_guard_metadata) if isinstance(narrative_guard_metadata, dict) else narrative_guard_metadata,
+        "guard_match_mode": (
+            str(narrative_guard_metadata.get("match_mode") or "failed")
+            if isinstance(narrative_guard_metadata, dict)
+            else "failed"
+        ),
+        "guard_block_match_modes": (
+            deepcopy(narrative_guard_metadata.get("block_match_modes") or {})
+            if isinstance(narrative_guard_metadata, dict)
+            else {}
+        ),
+        "consulting_min_contract": consulting_min_contract.model_dump(),
+        "consulting_deck": consulting_deck,
+        "slide_schema": slide_schema.model_dump(),
         "structure_comparison": structure_comparison,
         "extensions": surface_extensions,
         "authoritative_payload": authoritative_payload,
+        "display": display,
         "polish_bundle": deepcopy(polish_bundle) if isinstance(polish_bundle, dict) else None,
         "diagnosis": diagnosis,
         "design": design,
@@ -1306,6 +2574,120 @@ def _surface_extensions(result: StructuredRebuildResult | None) -> dict[str, Any
         if isinstance(value, dict):
             output[key] = deepcopy(value)
     return output
+
+
+def _surface_wording_from_extensions(extensions: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(extensions, dict):
+        return {}
+    governance = extensions.get("decision_governance")
+    governance = governance if isinstance(governance, dict) else {}
+    wording = governance.get("surface_wording")
+    return wording if isinstance(wording, dict) else {}
+
+
+def _surface_mode_from_extensions(extensions: dict[str, Any] | None) -> str:
+    wording = _surface_wording_from_extensions(extensions)
+    return str(wording.get("mode") or "").strip()
+
+
+def _uses_analysis_first_surface_extensions(extensions: dict[str, Any] | None) -> bool:
+    return _surface_mode_from_extensions(extensions) == "analysis_first_operational_source"
+
+
+def _uses_comparison_first_surface_extensions(extensions: dict[str, Any] | None) -> bool:
+    return _surface_mode_from_extensions(extensions) == "comparison_first_option"
+
+
+def _surface_section_title_from_extensions(extensions: dict[str, Any] | None, section_key: str, fallback: str) -> str:
+    wording = _surface_wording_from_extensions(extensions)
+    titles = wording.get("section_titles") if isinstance(wording, dict) else {}
+    if isinstance(titles, dict):
+        title = str(titles.get(section_key) or "").strip()
+        if title:
+            return title
+    return fallback
+
+
+def _surface_section_title_from_pkg(pkg: dict[str, Any], section_key: str, fallback: str) -> str:
+    if _effective_package_information_role(pkg) == "diagnosis":
+        title = _DIAGNOSIS_MARKDOWN_SECTION_TITLES.get(section_key)
+        if title:
+            return title
+    extensions = pkg.get("extensions") if isinstance(pkg, dict) else {}
+    return _surface_section_title_from_extensions(extensions if isinstance(extensions, dict) else None, section_key, fallback)
+
+
+def _refresh_result_review_diff(result: StructuredRebuildResult | None) -> StructuredRebuildResult | None:
+    if not result or not isinstance(result.extensions, dict):
+        return result
+    review_diff = result.extensions.get("review_diff")
+    if not isinstance(review_diff, dict):
+        return result
+    refreshed_review_diff = _refresh_review_diff_payload(review_diff)
+    if refreshed_review_diff == review_diff:
+        return result
+    refreshed_extensions = dict(result.extensions)
+    refreshed_extensions["review_diff"] = refreshed_review_diff
+    return result.model_copy(update={"extensions": refreshed_extensions})
+
+
+def _refresh_review_diff_payload(review_diff: dict[str, Any]) -> dict[str, Any]:
+    refreshed = deepcopy(review_diff)
+    code_diff = refreshed.get("code_diff")
+    if not isinstance(code_diff, dict):
+        return refreshed
+    snippets = code_diff.get("snippets")
+    if not isinstance(snippets, list) or not snippets:
+        return refreshed
+
+    packager = ResultPackager()
+    changed = False
+    refreshed_snippets: list[dict[str, Any]] = []
+    for raw_snippet in snippets:
+        if not isinstance(raw_snippet, dict):
+            refreshed_snippets.append(raw_snippet)
+            continue
+        snippet = deepcopy(raw_snippet)
+        detector_id = str(snippet.get("detector_id") or "").strip()
+        observed = str(snippet.get("observed") or "").strip()
+        inferred_asset_type = _infer_review_diff_asset_type(
+            str(snippet.get("file") or "").strip(),
+            observed,
+        )
+        if detector_id and observed:
+            refreshed_expected_pattern = packager._build_grounded_expected_pattern(
+                detector_id=detector_id,
+                asset_type=inferred_asset_type,
+                observed=observed,
+            ).strip()
+            if refreshed_expected_pattern and refreshed_expected_pattern != str(snippet.get("expected_pattern") or "").strip():
+                snippet["expected_pattern"] = refreshed_expected_pattern
+                changed = True
+        refreshed_snippets.append(snippet)
+
+    if not changed:
+        return refreshed
+
+    code_diff["snippets"] = refreshed_snippets
+    code_diff["available"] = bool(refreshed_snippets)
+    refreshed["code_diff"] = code_diff
+    refreshed["markdown"] = packager._render_review_diff_markdown(
+        structural_diff=refreshed.get("structural_diff") if isinstance(refreshed.get("structural_diff"), dict) else {},
+        evidence_diff=refreshed.get("evidence_diff") if isinstance(refreshed.get("evidence_diff"), dict) else {},
+        decision_diff=refreshed.get("decision_diff") if isinstance(refreshed.get("decision_diff"), dict) else {},
+        code_diff=code_diff,
+    )
+    return refreshed
+
+
+def _infer_review_diff_asset_type(file_name: str, observed: str) -> str:
+    normalized_name = str(file_name or "").strip().lower()
+    if normalized_name.endswith(".sql"):
+        return "sql"
+    observed_head = "\n".join(str(observed or "").splitlines()[:3]).lower()
+    if re.search(r"^\s*(select|with|from|where|join)\b", observed_head, flags=re.IGNORECASE | re.MULTILINE):
+        return "sql"
+    return "source"
 
 
 def _build_structure_comparison_preview(result: StructuredRebuildResult | None) -> dict[str, Any]:
@@ -1358,18 +2740,45 @@ def _demote_markdown_headings(markdown: str, *, levels: int = 1) -> str:
     return re.sub(r"(^|\n)(#{1,6})\s+", _replace, normalized)
 
 
+def _resolve_project_result_run(
+    project: ModernizationProject,
+    *,
+    requested_run_id: str | None,
+    db: Session,
+) -> tuple[str, ProjectRunHistory | None]:
+    normalized_run_id = str(requested_run_id or "").strip()
+    if not normalized_run_id or normalized_run_id == str(project.run_id or ""):
+        return str(project.run_id), None
+    history_row = (
+        db.query(ProjectRunHistory)
+        .filter(
+            ProjectRunHistory.project_id == project.id,
+            ProjectRunHistory.run_id == normalized_run_id,
+        )
+        .order_by(ProjectRunHistory.created_at.desc(), ProjectRunHistory.id.desc())
+        .first()
+    )
+    if history_row is None:
+        raise HTTPException(status_code=404, detail="Project run not found")
+    return normalized_run_id, history_row
+
+
 def _load_project_result_context(
     project: ModernizationProject,
     *,
     db: Session,
     app_version: str | None = None,
+    run_id: str | None = None,
 ) -> dict[str, Any]:
-    snapshot = get_run_snapshot(project.run_id, db=db)
-    _sync_project_status(project, snapshot, db)
-    events = get_run_events(project.run_id, db=db)
+    target_run_id, history_row = _resolve_project_result_run(project, requested_run_id=run_id, db=db)
+    snapshot = get_run_snapshot(target_run_id, db=db)
+    if target_run_id == str(project.run_id or ""):
+        _sync_project_status(project, snapshot, db)
+    events = get_run_events(target_run_id, db=db)
     structured = _extract_structured_result(events)
     polish_bundle = _extract_polish_bundle(events, structured)
-    assets = _build_assets_payload(project, db)
+    target_manifest = _parse_json_list(history_row.asset_manifest_json) if history_row else _parse_json_list(project.asset_manifest_json)
+    assets = _build_assets_payload(project, db, asset_manifest=target_manifest)
     result_package = build_result_package(
         project,
         snapshot,
@@ -1385,6 +2794,8 @@ def _load_project_result_context(
         "polish_bundle": polish_bundle,
         "assets": assets,
         "result_package": result_package,
+        "run_id": target_run_id,
+        "history_row": history_row,
     }
 
 
@@ -1438,7 +2849,9 @@ def _condition_summary_for_evidence(rule_title: str, evidence: dict[str, Any]) -
         "constraint": f"제약조건 문서에서 '{rule_title}' 유지 조건이 확인되었습니다.",
         "goal": f"목표 정의에서 '{rule_title}' 범위가 확인되었습니다.",
     }
-    return mapping.get(evidence_kind, f"제공 자산에서 '{rule_title}' 관련 근거가 확인되었습니다.")
+    return _decisionize_display_text(
+        mapping.get(evidence_kind, f"제공 자산에서 '{rule_title}' 관련 근거가 확인되었습니다.")
+    )
 
 
 def _translate_condition_excerpt(rule_title: str, excerpt: str) -> str:
@@ -1446,92 +2859,1004 @@ def _translate_condition_excerpt(rule_title: str, excerpt: str) -> str:
     lowered = text.lower()
     if not text:
         return ""
+    impact = _decisionize_display_text
 
     if "지점장 300만원 한도" in rule_title and ("3000000" in lowered or "branch_manager" in lowered or "지점장" in lowered):
-        return "청구 금액이 300만원 이상이면 지점장 권한으로는 처리할 수 없도록 제한하는 조건이 확인되었습니다."
+        return impact("청구 금액이 300만원 이상이면 지점장 권한으로는 처리할 수 없도록 제한하는 조건이 확인되었습니다.")
     if "대리점 고액 주문 본사 전용" in rule_title and any(token in lowered for token in ("agency", "hq", "5000000", "대리점", "본사")):
-        return "대리점 채널의 고액 주문은 본사 승인 조건을 충족해야 처리되도록 제한하는 조건이 확인되었습니다."
+        return impact("대리점 채널의 고액 주문은 본사 승인 조건을 충족해야 처리되도록 제한하는 조건이 확인되었습니다.")
     if "수출 주문 고액건 REVIEW_REQUIRED" in rule_title and any(token in lowered for token in ("export", "7000000", "수출")):
-        return "수출 주문은 고액 조건에 해당하면 REVIEW_REQUIRED 상태로 전이되도록 설정한 조건이 확인되었습니다."
+        return impact("수출 주문은 고액 조건에 해당하면 REVIEW_REQUIRED 상태로 전이되도록 설정한 조건이 확인되었습니다.")
     if "fraud" in lowered and "hq_reviewer" in lowered:
-        return "사고 유형이 FRAUD이면 HQ_REVIEWER 권한에서만 처리되도록 제한하는 조건이 확인되었습니다."
+        return impact("사고 유형이 FRAUD이면 HQ_REVIEWER 권한에서만 처리되도록 제한하는 조건이 확인되었습니다.")
     if "dept_code" in lowered and "claim_audit" in lowered and "!=" in lowered:
-        return "CLAIM_AUDIT 부서가 아니면 고액 청구를 처리할 수 없도록 제한하는 조건이 확인되었습니다."
+        return impact("CLAIM_AUDIT 부서가 아니면 고액 청구를 처리할 수 없도록 제한하는 조건이 확인되었습니다.")
     if ("3000000" in lowered or "300만원" in lowered) and ("branch_manager" in lowered or "지점장" in lowered):
-        return "청구 금액이 300만원 이상이면 지점장 권한으로는 처리할 수 없도록 제한하는 조건이 확인되었습니다."
+        return impact("청구 금액이 300만원 이상이면 지점장 권한으로는 처리할 수 없도록 제한하는 조건이 확인되었습니다.")
     if ("10000000" in lowered or "1천만원" in lowered) and "claim_audit" in lowered:
-        return "청구 금액이 1천만원 이상이면 CLAIM_AUDIT 부서만 처리하도록 제한하는 조건이 확인되었습니다."
+        return impact("청구 금액이 1천만원 이상이면 CLAIM_AUDIT 부서만 처리하도록 제한하는 조건이 확인되었습니다.")
     if "b99" in lowered and ("urgent" in lowered or "긴급" in lowered):
-        return "B99 지점의 긴급 건은 본사 선승인 조건이 충족되어야 처리되도록 제한하는 조건이 확인되었습니다."
+        return impact("B99 지점의 긴급 건은 본사 선승인 조건이 충족되어야 처리되도록 제한하는 조건이 확인되었습니다.")
     if ("closed" in lowered or "cancelled" in lowered) and ("조정" in lowered or "adjust" in lowered):
-        return "상태가 CLOSED 또는 CANCELLED이면 조정을 차단하는 조건이 확인되었습니다."
+        return impact("상태가 CLOSED 또는 CANCELLED이면 조정을 차단하는 조건이 확인되었습니다.")
     if "vip" in lowered and any(token in lowered for token in ("22", "23", "00", "night", "야간")):
-        return "VIP 고객은 야간 시간대에 주문 마감을 할 수 없도록 제한하는 조건이 확인되었습니다."
+        return impact("VIP 고객은 야간 시간대에 주문 마감을 할 수 없도록 제한하는 조건이 확인되었습니다.")
     if ("deliveryholdflag" in lowered or "delivery_hold" in lowered or "배송보류" in lowered) and any(token in lowered for token in ('"y"', "=y", "해제", "release")):
-        return "delivery_hold_flag 가 Y인 경우 주문 마감을 차단하는 선행 검증 조건이 확인되었습니다."
+        return impact("delivery_hold_flag 가 Y인 경우 주문 마감을 차단하는 선행 검증 조건이 확인되었습니다.")
     if ("agency" in lowered or "대리점" in lowered) and ("hq" in lowered or "본사" in lowered):
-        return "대리점 채널의 고액 주문은 본사 승인 조건을 충족해야 처리되도록 제한하는 조건이 확인되었습니다."
+        return impact("대리점 채널의 고액 주문은 본사 승인 조건을 충족해야 처리되도록 제한하는 조건이 확인되었습니다.")
     if ("export" in lowered or "수출" in lowered) and "review_required" in lowered:
-        return "수출 주문은 고액 조건에 해당하면 REVIEW_REQUIRED 상태로 전이되도록 설정한 조건이 확인되었습니다."
+        return impact("수출 주문은 고액 조건에 해당하면 REVIEW_REQUIRED 상태로 전이되도록 설정한 조건이 확인되었습니다.")
     status_in_match = re.search(r"status\s+in\s*\(([^)]+)\)", text, flags=re.IGNORECASE)
     if status_in_match:
         raw_values = status_in_match.group(1)
         values = [item.strip(" '\"") for item in raw_values.split(",") if item.strip()]
         if values:
-            return f"상태값이 {', '.join(values)}인 경우에만 처리 대상으로 포함하는 조건이 확인되었습니다."
+            return impact(f"상태값이 {', '.join(values)}인 경우에만 처리 대상으로 포함하는 조건이 확인되었습니다.")
     if "user_role" in lowered and "hq_reviewer" in lowered and "!=" in lowered:
-        return "HQ_REVIEWER 권한이 아니면 특수 사고 청구를 처리할 수 없도록 제한하는 조건이 확인되었습니다."
+        return impact("HQ_REVIEWER 권한이 아니면 특수 사고 청구를 처리할 수 없도록 제한하는 조건이 확인되었습니다.")
     if "status eq" in lowered or "status ==" in lowered:
         status_context = re.search(r"status\s*(?:eq|==)\s*(?:\"|')([A-Z_]+)(?:\"|')", text, flags=re.IGNORECASE)
         if status_context:
-            return f"상태값이 {status_context.group(1)}일 때만 화면 액션 또는 처리 흐름이 열리도록 제한하는 조건이 확인되었습니다."
+            return impact(f"상태값이 {status_context.group(1)}일 때만 화면 액션 또는 처리 흐름이 열리도록 제한하는 조건이 확인되었습니다.")
     if "status in" in lowered:
         quoted = re.findall(r"(?:\"|')([A-Z_]+)(?:\"|')", text)
         filtered = [item for item in quoted if item in {"PAID", "READY", "REVIEW_REQUIRED", "REVIEW", "CLOSED", "CANCELLED", "APPROVED", "PENDING", "REJECTED"}]
         if filtered:
-            return f"상태값이 {', '.join(filtered)}일 때만 화면 액션 또는 처리 흐름이 열리도록 제한하는 조건이 확인되었습니다."
+            return impact(f"상태값이 {', '.join(filtered)}일 때만 화면 액션 또는 처리 흐름이 열리도록 제한하는 조건이 확인되었습니다.")
     quoted_value = re.findall(r"(?:\"|')([A-Z0-9_]+)(?:\"|')", text)
     if ("branch_code" in lowered or "channel_code" in lowered) and quoted_value:
         if "hq" in lowered:
-            return f"{quoted_value[0]} 조건에서는 본사 승인 또는 본사 조직 조건이 필요하도록 제한하는 규칙이 확인되었습니다."
+            return impact(f"{quoted_value[0]} 조건에서는 본사 승인 또는 본사 조직 조건이 필요하도록 제한하는 규칙이 확인되었습니다.")
 
     state_list_match = re.search(r"\[(?:\"|')([A-Z_]+)(?:\"|')(?:\s*,\s*(?:\"|')([A-Z_]+)(?:\"|'))+\]", text)
     if state_list_match and any(token in lowered for token in ("closed", "cancelled", "ready", "paid", "review_required")):
         values = re.findall(r"(?:\"|')([A-Z_]+)(?:\"|')", text)
         if values:
-            return f"상태값이 {', '.join(values)}로 제한되는 조건이 확인되었습니다."
+            return impact(f"상태값이 {', '.join(values)}로 제한되는 조건이 확인되었습니다.")
 
     amount_match = re.search(r">=\s*([0-9]{6,})", text)
     if amount_match:
         amount = amount_match.group(1)
-        return f"처리 금액이 {amount} 이상일 때 별도 제한을 적용하는 조건이 확인되었습니다."
+        return impact(f"처리 금액이 {amount} 이상일 때 별도 제한을 적용하는 조건이 확인되었습니다.")
     if ".equals(" in text or "==" in text:
         quoted = re.findall(r"(?:\"|')([^\"']+)(?:\"|')", text)
         if quoted:
-            return f"{', '.join(quoted[:2])} 값 비교를 기준으로 처리 가능 여부를 분기하는 조건이 확인되었습니다."
+            return impact(f"{', '.join(quoted[:2])} 값 비교를 기준으로 처리 가능 여부를 분기하는 조건이 확인되었습니다.")
 
     if "지점장 300만원 한도" in rule_title:
-        return "청구 금액이 300만원 이상이면 지점장 권한으로는 처리할 수 없도록 제한하는 조건이 확인되었습니다."
+        return impact("청구 금액이 300만원 이상이면 지점장 권한으로는 처리할 수 없도록 제한하는 조건이 확인되었습니다.")
     if "대리점 고액 주문 본사 전용" in rule_title:
-        return "대리점 채널의 고액 주문은 본사 승인 조건을 충족해야 처리되도록 제한하는 조건이 확인되었습니다."
+        return impact("대리점 채널의 고액 주문은 본사 승인 조건을 충족해야 처리되도록 제한하는 조건이 확인되었습니다.")
     if "수출 주문 고액건 REVIEW_REQUIRED" in rule_title:
-        return "수출 주문은 고액 조건에 해당하면 REVIEW_REQUIRED 상태로 전이되도록 설정한 조건이 확인되었습니다."
+        return impact("수출 주문은 고액 조건에 해당하면 REVIEW_REQUIRED 상태로 전이되도록 설정한 조건이 확인되었습니다.")
     if "FRAUD 본사 심사 전용" in rule_title:
-        return "사고 유형이 FRAUD이면 HQ_REVIEWER 권한에서만 처리되도록 제한하는 조건이 확인되었습니다."
+        return impact("사고 유형이 FRAUD이면 HQ_REVIEWER 권한에서만 처리되도록 제한하는 조건이 확인되었습니다.")
     if "B99 긴급건 본사 선승인" in rule_title:
-        return "B99 지점의 긴급 건은 본사 선승인 조건이 충족되어야 처리되도록 제한하는 조건이 확인되었습니다."
+        return impact("B99 지점의 긴급 건은 본사 선승인 조건이 충족되어야 처리되도록 제한하는 조건이 확인되었습니다.")
     if "마감 상태 조정 금지" in rule_title or "마감/취소 상태 조정 금지" in rule_title or "상태 조정 금지" in rule_title:
-        return "상태가 CLOSED 또는 CANCELLED이면 조정을 차단하는 조건이 확인되었습니다."
+        return impact("상태가 CLOSED 또는 CANCELLED이면 조정을 차단하는 조건이 확인되었습니다.")
     if rule_title:
-        return f"제공 자산에서 '{rule_title}'와 직접 연결되는 조건이 확인되었습니다."
+        return impact(f"제공 자산에서 '{rule_title}'와 직접 연결되는 조건이 확인되었습니다.")
     return ""
 
 
-def _result_package_markdown(pkg: dict[str, Any], *, surface_mode: str = "internal") -> str:
+def _surface_mode_from_pkg(pkg: dict[str, Any]) -> str:
+    extensions = pkg.get("extensions") if isinstance(pkg, dict) else {}
+    return _surface_mode_from_extensions(extensions if isinstance(extensions, dict) else None)
+
+
+def _family_classification_from_pkg(pkg: dict[str, Any]) -> dict[str, Any]:
+    family = pkg.get("family_classification") if isinstance(pkg, dict) else {}
+    if isinstance(family, dict) and family:
+        return family
+    authoritative = pkg.get("authoritative_payload") if isinstance(pkg, dict) else {}
+    authoritative = authoritative if isinstance(authoritative, dict) else {}
+    fallback = authoritative.get("family_classification")
+    return fallback if isinstance(fallback, dict) else {}
+
+
+def _secondary_family_signals_from_pkg(pkg: dict[str, Any]) -> set[str]:
+    family_payload = _family_classification_from_pkg(pkg)
+    signals = family_payload.get("secondary_signals") if isinstance(family_payload, dict) else []
+    if not isinstance(signals, list):
+        return set()
+    return {str(item or "").strip() for item in signals if str(item or "").strip()}
+
+
+def _effective_package_information_role(pkg: dict[str, Any]) -> str:
+    role = package_information_role(pkg)
+    if role:
+        return role
+    # Older/current runs may persist a document_consulting primary family while
+    # the request axis and secondary signal clearly identify a GL diagnosis
+    # document. Keep this correction in the surface layer so Structure and
+    # Decision primary-family paths are not changed.
+    if package_question_axis(pkg) == "journal_linkage" and "operational_source" in _secondary_family_signals_from_pkg(pkg):
+        return "diagnosis"
+    return ""
+
+
+def _effective_family_for_consulting_surface(pkg: dict[str, Any]) -> str:
+    family = str(_family_classification_from_pkg(pkg).get("family") or "").strip()
+    if _effective_package_information_role(pkg) == "diagnosis" and family != "operational_source":
+        return "operational_source"
+    return family
+
+
+def _render_operational_export_lines(
+    pkg: dict[str, Any],
+    *,
+    section_key: str,
+    lines: list[str],
+    fallback_lines: list[str] | None = None,
+) -> list[str]:
+    family = str(_family_classification_from_pkg(pkg).get("family") or "").strip()
+    information_role = _effective_package_information_role(pkg)
+    if family != "operational_source" and information_role != "diagnosis":
+        return lines
+    rendered = _TEMPLATE_SUPPORT.render_operational_section_lines(
+        section_key=section_key,
+        lines=lines,
+        domain_override=str(pkg.get("narrative_axis") or "").strip(),
+        fallback_lines=fallback_lines or lines,
+    )
+    if information_role == "diagnosis":
+        return purify_diagnosis_lines(section_key, rendered)
+    return rendered
+
+
+def _operational_consulting_section_key(
+    pkg: dict[str, Any],
+    *,
+    chapter_key: str,
+    section_key: str,
+) -> str:
+    family = str(_family_classification_from_pkg(pkg).get("family") or "").strip()
+    if family != "operational_source":
+        return ""
+    mapping = {
+        ("overview", "as_is"): "analysis_summary",
+        ("approach", "gap"): "primary_judgment_reason",
+        ("approach", "risks"): "risks",
+        ("implementation", "process_flow"): "execution_plan",
+        ("implementation", "actions"): "recommended_directions",
+        ("design", "process_flow"): "execution_plan",
+        ("vision", "actions"): "recommended_directions",
+    }
+    return mapping.get((str(chapter_key or "").strip(), str(section_key or "").strip()), "")
+
+
+def _display_option_name(name: str) -> str:
+    return re.sub(r"^옵션\s+[A-Z]\.\s*", "", str(name or "").strip()).strip() or str(name or "").strip()
+
+
+def _attach_object_particle(text: str) -> str:
+    stripped = str(text or "").strip()
+    if not stripped:
+        return stripped
+    code = ord(stripped[-1])
+    if 0xAC00 <= code <= 0xD7A3:
+        has_batchim = (code - 0xAC00) % 28 != 0
+        return stripped + ("을" if has_batchim else "를")
+    return stripped + "을"
+
+
+def _preferred_option_from_pkg(pkg: dict[str, Any]) -> dict[str, Any]:
+    option = pkg.get("recommended_option") if isinstance(pkg, dict) else {}
+    if isinstance(option, dict) and any(str(option.get(key) or "").strip() for key in ("name", "structure_summary", "selection_reason")):
+        return option
+    design = pkg.get("design") if isinstance(pkg, dict) else {}
+    design = design if isinstance(design, dict) else {}
+    options = design.get("design_options")
+    if not isinstance(options, list):
+        return {}
+    for item in options:
+        if isinstance(item, dict) and bool(item.get("recommended")):
+            return item
+    for item in options:
+        if isinstance(item, dict):
+            return item
+    return {}
+
+
+def _comparison_first_lines(pkg: dict[str, Any], *, section_key: str) -> list[str]:
+    if _surface_mode_from_pkg(pkg) != "comparison_first_option":
+        return []
+    information_role = package_information_role(pkg)
+    decision_lines = _calculation_rule_decision_lines(pkg, section_key=section_key, information_role=information_role)
+    if decision_lines:
+        return decision_lines
+    option = _preferred_option_from_pkg(pkg)
+    option_name = str(option.get("name") or "").strip()
+    option_label = _display_option_name(option_name)
+    structure_summary = str(option.get("structure_summary") or "").strip()
+    selection_reason = str(option.get("selection_reason") or "").strip()
+    option_risks = [str(item).strip() for item in option.get("risks") or [] if str(item).strip()]
+    option_advantages = [str(item).strip() for item in option.get("expected_outcomes") or option.get("advantages") or [] if str(item).strip()]
+    design = pkg.get("design") if isinstance(pkg, dict) else {}
+    design = design if isinstance(design, dict) else {}
+    design_options = [item for item in (design.get("design_options") or []) if isinstance(item, dict)]
+    display_strategy = str(_family_classification_from_pkg(pkg).get("display_strategy") or "").strip() or "비교 기준 우선"
+    if section_key == "report_purpose":
+        if option_label:
+            return [f"복수 선택지를 {display_strategy} 원칙으로 검토해 {_attach_object_particle(option_label)} 우선 검토안으로 정리하기 위한 보고서입니다."]
+        return [f"복수 선택지를 {display_strategy} 원칙으로 검토해 추천안을 정리하기 위한 보고서입니다."]
+    if section_key == "executive_summary_v2":
+        lines = [f"비교 관점: {display_strategy} 기준으로 {max(len(design_options), 1)}개 선택지를 나란히 검토했습니다."]
+        if information_role == "decision":
+            if option_label:
+                lines.append(f"우선 검토안: {option_label}")
+            if selection_reason:
+                lines.append(f"선택 이유: {selection_reason}")
+            return lines
+        if option_label and structure_summary:
+            lines.append(f"우선 검토안: {option_label} - {structure_summary}")
+        elif option_label:
+            lines.append(f"우선 검토안: {option_label}")
+        if selection_reason:
+            lines.append(f"선택 이유: {selection_reason}")
+        if option_risks and information_role != "decision":
+            lines.append(f"유의점: {option_risks[0]}")
+        return lines
+    if section_key == "one_line_conclusion":
+        if information_role == "decision":
+            return [f"우선 검토안은 {option_label}입니다."] if option_label else []
+        if option_label and structure_summary and selection_reason:
+            return [f"우선 검토안은 {option_label}입니다. {structure_summary}를 기준으로 {selection_reason}"]
+        if option_label and structure_summary:
+            return [f"우선 검토안은 {option_label}입니다. {structure_summary}"]
+        if option_label:
+            return [f"우선 검토안은 {option_label}입니다."]
+        return []
+    if section_key == "primary_judgment_reason":
+        if information_role == "decision":
+            if selection_reason:
+                return [f"비교 기준은 {selection_reason}입니다."]
+            if structure_summary:
+                return [f"비교 기준은 {structure_summary}입니다."]
+            return []
+        if selection_reason and structure_summary:
+            return [f"비교 기준은 {selection_reason}이며, 핵심 판단 축은 {structure_summary}입니다."]
+        if selection_reason:
+            return [f"비교 기준은 {selection_reason}입니다."]
+        if structure_summary:
+            return [f"비교 기준은 {structure_summary}입니다."]
+        return []
+    if section_key == "recommended_option":
+        lines: list[str] = []
+        if information_role == "decision":
+            if option_label:
+                lines.append(f"추천안은 {option_label}입니다.")
+            if selection_reason:
+                lines.append(f"추천 근거는 {selection_reason}입니다.")
+            for item in option_advantages[:2]:
+                lines.append(f"기대 효과: {item}")
+            return lines
+        if option_label and structure_summary:
+            lines.append(f"추천안은 {option_label}이며, {structure_summary}를 중심으로 비교 우위를 확보합니다.")
+        elif option_label:
+            lines.append(f"추천안은 {option_label}입니다.")
+        if selection_reason:
+            lines.append(f"추천 근거는 {selection_reason}입니다.")
+        for item in option_advantages[:2]:
+            lines.append(f"기대 효과: {item}")
+        return lines
+    if section_key == "execution_plan" and information_role == "decision":
+        return [
+            "선택지 확인: 후보안을 동일 기준으로 비교합니다.",
+            "근거 보강: 직접 확인된 기준과 제약을 보강합니다.",
+            "적용 판단: 추천안의 선행 조건이 충족될 때 실행 후보로 둡니다.",
+        ]
+    if section_key == "risks":
+        if information_role == "decision":
+            return []
+        if option_risks:
+            return option_risks[:2]
+    return []
+
+
+def _calculation_rule_decision_lines(
+    pkg: dict[str, Any],
+    *,
+    section_key: str,
+    information_role: str,
+) -> list[str]:
+    if information_role != "decision" or package_question_axis(pkg) != "calculation_rule":
+        return []
+    if not _is_fx_fifo_package(pkg):
+        return []
+    if section_key == "report_purpose":
+        return ["계산 규칙 선택지를 비교해 우선 적용할 기준과 검증 조건을 정리하기 위한 문서입니다."]
+    if section_key == "executive_summary_v2":
+        return [
+            "선택지: 현행 FIFO 기준 유지, 평균 기준 단순화, 거래별 지정 기준을 비교합니다.",
+            "비교 기준: 계산 재현성, 환율 기준 일관성, 회계 연결 검증 가능성을 우선합니다.",
+            "추천안: 현행 FIFO 기준을 유지하고 예외 검증을 보강합니다.",
+            "참조: 처리 흐름 상세는 Structure 문서, 전표/GL 영향은 Diagnosis 문서에서만 다룹니다.",
+        ]
+    if section_key == "one_line_conclusion":
+        return ["우선 선택은 현행 FIFO 계산 기준 유지와 예외 검증 보강입니다."]
+    if section_key == "primary_judgment_reason":
+        return ["비교 기준은 계산 재현성, 환율 기준 일관성, 회계 연결 검증 가능성입니다."]
+    if section_key == "recommended_option":
+        return [
+            "추천안: 현행 FIFO 기준을 유지하고 환율 비교와 회계 연결 검증을 함께 둡니다.",
+            "선택 이유: 기존 lot 추적성을 유지하면서 계산 결과를 재현할 수 있습니다.",
+            "대안 한계: 평균 기준은 단순하지만 lot 추적성이 약해지고, 거래별 지정 기준은 운영 입력 부담이 큽니다.",
+        ]
+    if section_key == "execution_plan":
+        return [
+            "선택지 확정: 세 계산 기준을 같은 비교 기준으로 다시 대조합니다.",
+            "검증 조건 정의: 예외와 취소 처리에서도 같은 계산 기준이 유지되는지 확인합니다.",
+            "적용 판단: 계산 결과와 회계 연결 검증이 동시에 통과한 기준만 적용 후보로 둡니다.",
+        ]
+    return []
+
+
+def _is_fx_fifo_package(pkg: dict[str, Any]) -> bool:
+    if not isinstance(pkg, dict):
+        return False
+    text_parts: list[str] = []
+    for key in (
+        "report_purpose",
+        "core_conclusion",
+        "primary_judgment_reason",
+        "analysis_summary",
+        "executive_summary_v2",
+        "core_business_rules",
+        "recommended_directions",
+        "risks",
+    ):
+        value = pkg.get(key)
+        if isinstance(value, str):
+            text_parts.append(value)
+        elif isinstance(value, list):
+            text_parts.extend(str(item) for item in value if str(item).strip())
+    text = " ".join(text_parts).lower()
+    return sum(1 for keyword in ("fifo", "lot", "환차", "전표", "gl", "외화") if keyword in text) >= 2
+
+
+def _export_validated_block_lines(pkg: dict[str, Any], *, section_key: str) -> list[str]:
+    for item in pkg.get("validated_explanation_blocks") or []:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("block_id") or "").strip() != section_key:
+            continue
+        lines = item.get("resolved_lines")
+        if not isinstance(lines, list) or not lines:
+            lines = item.get("deterministic_lines")
+        if not isinstance(lines, list):
+            return []
+        return [str(line or "").strip() for line in lines if str(line or "").strip()]
+    return []
+
+
+def _export_validated_narrative_lines(pkg: dict[str, Any], *, section_key: str) -> list[str]:
+    narrative_layer = pkg.get("validated_narrative_layer")
+    if not isinstance(narrative_layer, dict):
+        return []
+    value = narrative_layer.get(section_key)
+    if isinstance(value, list):
+        return [str(line or "").strip() for line in value if str(line or "").strip()]
+    text = str(value or "").strip()
+    return [text] if text else []
+
+
+def _export_polish_lines(pkg: dict[str, Any], *, section_key: str, audience: str) -> list[str]:
+    polish_bundle = pkg.get("polish_bundle")
+    if not isinstance(polish_bundle, dict):
+        return []
+    for section in polish_bundle.get("polished_sections") or []:
+        if not isinstance(section, dict):
+            continue
+        if str(section.get("section_key") or "").strip() != section_key:
+            continue
+        audience_variants = section.get("audience_variants") or {}
+        if not isinstance(audience_variants, dict):
+            return []
+        text = str(audience_variants.get(audience) or "").strip()
+        if not text:
+            return []
+        return [line.strip() for line in text.splitlines() if line.strip()]
+    return []
+
+
+def _export_deterministic_lines(pkg: dict[str, Any], *, section_key: str) -> list[str]:
+    comparison_lines = _comparison_first_lines(pkg, section_key=section_key)
+    if comparison_lines:
+        return comparison_lines
+    family = str(_family_classification_from_pkg(pkg).get("family") or "").strip()
+    question_axis = package_question_axis(pkg)
+    if family == "operational_source" and question_axis == "calculation_rule" and section_key == "recommended_option":
+        return [
+            "추천안: 현행 FIFO 기준을 유지하고 환율 비교와 회계 연결 검증을 함께 둡니다.",
+            "비교 기준: 계산 재현성, 환율 기준 일관성, 회계 연결 가능성을 우선합니다.",
+            "참조: 흐름 상세와 리스크 상세는 Structure, Diagnosis 문서에서만 다룹니다.",
+        ]
+    if section_key == "report_purpose":
+        text = str(pkg.get("report_purpose") or "").strip()
+        return [text] if text else []
+    if section_key == "executive_summary_v2":
+        return [str(line or "").strip() for line in (pkg.get("executive_summary_v2") or []) if str(line or "").strip()]
+    if section_key == "one_line_conclusion":
+        text = str(pkg.get("core_conclusion") or "").strip()
+        return [text] if text else []
+    if section_key == "analysis_summary":
+        return [str(line or "").strip() for line in (pkg.get("analysis_summary") or []) if str(line or "").strip()]
+    if section_key == "primary_judgment_reason":
+        text = str(pkg.get("primary_judgment_reason") or "").strip()
+        if text:
+            return [text]
+        authoritative = pkg.get("authoritative_payload") if isinstance(pkg, dict) else {}
+        authoritative = authoritative if isinstance(authoritative, dict) else {}
+        decision_summary = authoritative.get("decision_summary") if isinstance(authoritative.get("decision_summary"), dict) else {}
+        decisions = decision_summary.get("decisions") or []
+        if isinstance(decisions, list) and decisions and isinstance(decisions[0], dict):
+            rationale = str(decisions[0].get("rationale") or "").strip()
+            return [rationale] if rationale else []
+        return []
+    if section_key == "recommended_option":
+        option = pkg.get("recommended_option") if isinstance(pkg, dict) else {}
+        if not isinstance(option, dict):
+            return []
+        name = str(option.get("name") or "").strip()
+        structure_summary = str(option.get("structure_summary") or "").strip()
+        selection_reason = str(option.get("selection_reason") or "").strip()
+        if name and structure_summary and selection_reason:
+            return [f"추천안은 {name}이며, {structure_summary}를 기준으로 {selection_reason}"]
+        if name and selection_reason:
+            return [f"추천안은 {name}이며, {selection_reason}"]
+        if structure_summary and selection_reason:
+            return [f"{structure_summary}를 기준으로 {selection_reason}"]
+        text = name or structure_summary or selection_reason
+        return [text] if text else []
+    if section_key == "recommended_directions":
+        return [str(line or "").strip() for line in (pkg.get("recommended_directions") or []) if str(line or "").strip()]
+    if section_key == "execution_plan":
+        plan = pkg.get("execution_plan") if isinstance(pkg, dict) else []
+        if not isinstance(plan, list):
+            return []
+        lines: list[str] = []
+        for item in plan:
+            if not isinstance(item, dict):
+                continue
+            week_label = str(item.get("week_label") or "").strip()
+            goal = str(item.get("goal") or "").strip()
+            tasks = item.get("tasks") if isinstance(item.get("tasks"), list) else []
+            first_task = next((str(task or "").strip() for task in tasks if str(task or "").strip()), "")
+            base = f"{week_label}: {goal}" if week_label and goal else (goal or week_label)
+            if not base:
+                continue
+            if first_task:
+                lines.append(f"{base}. 주요 작업은 {first_task}입니다.")
+            else:
+                lines.append(base)
+        return lines
+    if section_key == "risks":
+        diagnosis = pkg.get("diagnosis") if isinstance(pkg, dict) else {}
+        diagnosis = diagnosis if isinstance(diagnosis, dict) else {}
+        return [str(item or "").strip() for item in (diagnosis.get("risks") or []) if str(item or "").strip()]
+    return []
+
+
+def _externalize_export_line(text: str) -> str:
+    normalized = " ".join(str(text or "").split()).strip()
+    if not normalized:
+        return ""
+    replacements = (
+        ("해야 합니다", ""),
+        ("해야합니다", ""),
+        ("해야 한다", ""),
+        ("검토하는 것이 필요합니다", ""),
+        ("확정하는 것이 필요합니다", ""),
+        ("정리하는 것이 필요합니다", ""),
+        ("확인하는 것이 필요합니다", ""),
+        ("필요합니다", ""),
+    )
+    for old, new in replacements:
+        normalized = normalized.replace(old, new)
+    return normalized.strip(" ,.")
+
+
+def _export_preferred_lines(
+    pkg: dict[str, Any],
+    *,
+    section_key: str,
+    audience: str = "manager",
+    surface_mode: str = "internal",
+) -> list[str]:
+    comparison_first_surface = _surface_mode_from_pkg(pkg) == "comparison_first_option"
+    lines: list[str] = []
+    deterministic_lines = _export_deterministic_lines(pkg, section_key=section_key)
+    if comparison_first_surface:
+        lines = list(deterministic_lines)
+    if not lines:
+        lines = _export_validated_block_lines(pkg, section_key=section_key)
+    if not lines:
+        lines = _export_validated_narrative_lines(pkg, section_key=section_key)
+    if not lines:
+        lines = _export_polish_lines(pkg, section_key=section_key, audience=audience)
+    if not lines:
+        lines = list(deterministic_lines)
+    lines = _render_operational_export_lines(
+        pkg,
+        section_key=section_key,
+        lines=lines,
+        fallback_lines=deterministic_lines,
+    )
+    if normalize_surface_mode(surface_mode) == "external":
+        return [item for item in (_externalize_export_line(line) for line in lines) if item]
+    return lines
+
+
+def _truncate_export_text(text: str, limit: int) -> str:
+    normalized = " ".join(str(text or "").split()).strip()
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: max(limit - 3, 1)].rstrip() + "..."
+
+
+def _apply_slide_schema_explanation_overlay(
+    pkg: dict[str, Any],
+    slide_schema: dict[str, Any],
+    *,
+    surface_mode: str,
+) -> dict[str, Any]:
+    slides = slide_schema.get("slides")
+    if not isinstance(slides, list) or not slides:
+        return slide_schema
+    updated = deepcopy(slide_schema)
+    updated_slides = updated.get("slides") or []
+    if not isinstance(updated_slides, list) or not updated_slides:
+        return updated
+
+    report_purpose_lines = _export_preferred_lines(pkg, section_key="report_purpose", surface_mode=surface_mode)
+    executive_summary_lines = _export_preferred_lines(pkg, section_key="executive_summary_v2", surface_mode=surface_mode)
+    one_line_conclusion_lines = _export_preferred_lines(pkg, section_key="one_line_conclusion", surface_mode=surface_mode)
+    primary_judgment_reason_lines = _export_preferred_lines(pkg, section_key="primary_judgment_reason", surface_mode=surface_mode)
+    recommended_option_lines = _export_preferred_lines(pkg, section_key="recommended_option", surface_mode=surface_mode)
+    execution_plan_lines = _export_preferred_lines(pkg, section_key="execution_plan", surface_mode=surface_mode)
+    risks_lines = _export_preferred_lines(pkg, section_key="risks", surface_mode=surface_mode)
+
+    first_slide = updated_slides[0] if isinstance(updated_slides[0], dict) else None
+    if first_slide is not None:
+        if one_line_conclusion_lines:
+            first_slide["headline"] = _truncate_export_text(one_line_conclusion_lines[0], 72)
+        if report_purpose_lines:
+            first_slide["tagline"] = _truncate_export_text(report_purpose_lines[0], 96)
+        if executive_summary_lines:
+            first_slide["absorbed_summary_text"] = _truncate_export_text(" / ".join(executive_summary_lines[:2]), 120)
+
+    if primary_judgment_reason_lines:
+        target_slide = None
+        for slide in updated_slides:
+            if isinstance(slide, dict) and str(slide.get("slide_type") or "").strip() in {"as_is_gap", "flow", "design"}:
+                target_slide = slide
+                break
+        if target_slide is None and first_slide is not None:
+            target_slide = first_slide
+        if target_slide is not None:
+            target_slide["decision_message"] = _truncate_export_text(primary_judgment_reason_lines[0], 110)
+    if recommended_option_lines:
+        design_slide = None
+        for slide in updated_slides:
+            if isinstance(slide, dict) and str(slide.get("slide_type") or "").strip() == "design":
+                design_slide = slide
+                break
+        if design_slide is not None:
+            existing_note = str(design_slide.get("absorbed_summary_text") or "").strip()
+            guard_note = _truncate_export_text(recommended_option_lines[0], 120)
+            if existing_note and guard_note and existing_note != guard_note:
+                design_slide["absorbed_summary_text"] = _truncate_export_text(f"{guard_note} / {existing_note}", 120)
+            elif guard_note:
+                design_slide["absorbed_summary_text"] = guard_note
+    if execution_plan_lines:
+        flow_slide = None
+        for slide in updated_slides:
+            if isinstance(slide, dict) and str(slide.get("slide_type") or "").strip() == "flow":
+                flow_slide = slide
+                break
+        if flow_slide is not None:
+            existing_note = str(flow_slide.get("footer_note") or "").strip()
+            guard_note = _truncate_export_text(" / ".join(execution_plan_lines[:2]), 120)
+            if existing_note and guard_note and existing_note != guard_note:
+                flow_slide["footer_note"] = _truncate_export_text(f"{guard_note} / {existing_note}", 120)
+            elif guard_note:
+                flow_slide["footer_note"] = guard_note
+    if risks_lines:
+        as_is_gap_slide = None
+        for slide in updated_slides:
+            if isinstance(slide, dict) and str(slide.get("slide_type") or "").strip() == "as_is_gap":
+                as_is_gap_slide = slide
+                break
+        if as_is_gap_slide is not None:
+            existing_note = str(as_is_gap_slide.get("absorbed_summary_text") or "").strip()
+            guard_note = _truncate_export_text(" / ".join(risks_lines[:2]), 120)
+            if existing_note and guard_note and existing_note != guard_note:
+                as_is_gap_slide["absorbed_summary_text"] = _truncate_export_text(f"{guard_note} / {existing_note}", 120)
+            elif guard_note:
+                as_is_gap_slide["absorbed_summary_text"] = guard_note
+    return updated
+
+
+def _resolve_consulting_deck(pkg: dict[str, Any], *, surface_mode: str) -> dict[str, Any] | None:
+    existing = pkg.get("consulting_deck")
+    if isinstance(existing, dict) and isinstance(existing.get("chapters"), list):
+        if str(existing.get("surface_mode") or "").strip() == surface_mode:
+            return existing
+    contract_payload = pkg.get("consulting_min_contract")
+    if not isinstance(contract_payload, dict):
+        return existing if isinstance(existing, dict) else None
+    try:
+        contract = ConsultingMinContract.model_validate(contract_payload)
+    except Exception:
+        return existing if isinstance(existing, dict) else None
+    project_payload = pkg.get("project") if isinstance(pkg.get("project"), dict) else {}
+    return build_consulting_deck(
+        contract,
+        project_name=str(project_payload.get("project_name") or ""),
+        client_name=str(project_payload.get("client_name") or ""),
+        surface_mode=surface_mode,
+        family=_effective_family_for_consulting_surface(pkg),
+        question_axis=package_question_axis(pkg),
+    )
+
+
+def _resolve_slide_schema(pkg: dict[str, Any], *, surface_mode: str) -> dict[str, Any] | None:
+    existing = pkg.get("slide_schema")
+    if isinstance(existing, dict) and isinstance(existing.get("slides"), list):
+        if str(existing.get("surface_mode") or "").strip() == surface_mode:
+            return _apply_slide_schema_explanation_overlay(pkg, existing, surface_mode=surface_mode)
+    consulting_deck = _resolve_consulting_deck(pkg, surface_mode=surface_mode)
+    if not isinstance(consulting_deck, dict):
+        return existing if isinstance(existing, dict) else None
+    try:
+        deck_model = ConsultingDeck.model_validate(consulting_deck)
+    except Exception:
+        return existing if isinstance(existing, dict) else None
+    return _apply_slide_schema_explanation_overlay(
+        pkg,
+        build_slide_schema(deck_model).model_dump(),
+        surface_mode=surface_mode,
+    )
+
+
+def _markdown_section_registry(pkg: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    family = str(_family_classification_from_pkg(pkg).get("family") or "").strip()
+    role = _effective_package_information_role(pkg)
+    if family in {"operational_source", "option_comparison"} or role == "diagnosis":
+        role_registry = _OPERATIONAL_ROLE_MARKDOWN_SECTION_REGISTRY.get(role)
+        if role_registry:
+            return role_registry
+    return _MARKDOWN_SECTION_REGISTRY.get(family, _MARKDOWN_SECTION_REGISTRY["default"])
+
+
+def _uses_family_markdown_registry(pkg: dict[str, Any]) -> bool:
+    family = str(_family_classification_from_pkg(pkg).get("family") or "").strip()
+    return family in {"operational_source", "option_comparison"} or _effective_package_information_role(pkg) == "diagnosis"
+
+
+def _split_markdown_line_fragments(text: str) -> list[str]:
+    prepared: list[str] = []
+    for raw_line in str(text or "").splitlines():
+        normalized = str(raw_line or "").strip()
+        if not normalized:
+            continue
+        if re.search(r":\s+-\s+", normalized):
+            prefix, remainder = normalized.split(":", 1)
+            prefix = prefix.strip()
+            fragments = [part.strip(" -") for part in re.split(r"\s+-\s+", remainder.strip()) if part.strip(" -")]
+            if fragments and prefix in {"보조 판단", "운영 판단"}:
+                prepared.extend(fragments)
+                continue
+        prepared.append(normalized)
+    return prepared
+
+
+def _normalize_markdown_sentence(text: str) -> str:
+    normalized = " ".join(str(text or "").split()).strip()
+    if not normalized:
+        return ""
+    normalized = re.sub(r"^\s*(?:[-*•]\s*)+", "", normalized)
+    normalized = re.sub(r"\.{2,}", ".", normalized)
+    normalized = re.sub(r"(합니다|입니다)\.\s*입니다\.", r"\1.", normalized)
+    normalized = re.sub(r"(합니다|입니다)\.\s*합니다\.", r"\1.", normalized)
+    normalized = re.sub(r"([.?!])\s*([.?!])+", r"\1", normalized)
+    normalized = re.sub(r"\s+([,.;:])", r"\1", normalized)
+    return normalized.strip()
+
+
+def _markdown_sentence_key(text: str) -> str:
+    return re.sub(r"[\s\W_]+", "", str(text or "").strip()).lower()
+
+
+def _normalize_markdown_section_lines(lines: list[str]) -> list[str]:
+    normalized_lines: list[str] = []
+    seen: set[str] = set()
+    for raw_line in lines:
+        for fragment in _split_markdown_line_fragments(raw_line):
+            sentence = _normalize_markdown_sentence(fragment)
+            if not sentence:
+                continue
+            key = _markdown_sentence_key(sentence)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            normalized_lines.append(sentence)
+    return normalized_lines
+
+
+def _strip_specialized_intro_prefix(pkg: dict[str, Any], *, section_key: str, lines: list[str]) -> list[str]:
+    family = str(_family_classification_from_pkg(pkg).get("family") or "").strip()
+    if section_key != "report_purpose" or family not in {"operational_source", "option_comparison"}:
+        return lines
+    if not lines:
+        return lines
+    updated = list(lines)
+    updated[0] = re.sub(r"^\s*보조\s*판단\s*:\s*", "", str(updated[0] or "").strip())
+    return [line for line in updated if str(line or "").strip()]
+
+
+def _normalize_markdown_output_lines(pkg: dict[str, Any], *, section_key: str, lines: list[str]) -> list[str]:
+    normalized = _normalize_markdown_section_lines(lines)
+    return _strip_specialized_intro_prefix(pkg, section_key=section_key, lines=normalized)
+
+
+def _normalize_markdown_document(markdown: str) -> str:
+    normalized_lines: list[str] = []
+    previous_semantic_key = ""
+    previous_was_bullet = False
+    for raw_line in str(markdown or "").splitlines():
+        line = str(raw_line or "").rstrip()
+        if not line.strip():
+            if not normalized_lines or normalized_lines[-1] == "":
+                continue
+            if re.match(r"^#{1,6}\s+\S", normalized_lines[-1]):
+                continue
+            normalized_lines.append("")
+            previous_semantic_key = ""
+            previous_was_bullet = False
+            continue
+        if re.match(r"^\s*```", line) or re.match(r"^\s*[>|]", line):
+            normalized_lines.append(line)
+            previous_semantic_key = ""
+            previous_was_bullet = False
+            continue
+        line = re.sub(r"^\s*([#]{1,6})\s+", r"\1 ", line)
+        line = re.sub(r"^\s*([-*•])\s*(?:[-*•]\s*)+", r"\1 ", line)
+        line = re.sub(r"[ \t]{2,}", " ", line)
+        is_bullet = bool(re.match(r"^\s*[-*•]\s+", line))
+        semantic_key = _markdown_sentence_key(re.sub(r"^\s*[-*•]\s+", "", line))
+        if normalized_lines and normalized_lines[-1] == "" and re.match(r"^#{1,6}\s+\S", line):
+            pass
+        if is_bullet and previous_was_bullet and semantic_key and semantic_key == previous_semantic_key:
+            continue
+        normalized_lines.append(line.rstrip())
+        previous_semantic_key = semantic_key
+        previous_was_bullet = is_bullet
+    return "\n".join(normalized_lines).strip() + "\n"
+
+
+def _consulting_deck_fallback_lines(
+    pkg: dict[str, Any],
+    consulting_deck: dict[str, Any],
+    *,
+    section_key: str,
+) -> list[str]:
+    family = str(_family_classification_from_pkg(pkg).get("family") or "").strip()
+    section_sources = (_CONSULTING_DECK_SLOT_FALLBACKS.get(family) or {}).get(section_key) or ()
+    if not section_sources:
+        return []
+    collected: list[str] = []
+    source_keys = {(str(chapter_key).strip(), str(deck_section_key).strip()) for chapter_key, deck_section_key in section_sources}
+    for chapter in consulting_deck.get("chapters") or []:
+        if not isinstance(chapter, dict):
+            continue
+        chapter_key = str(chapter.get("chapter_key") or "").strip()
+        for section in chapter.get("sections") or []:
+            if not isinstance(section, dict):
+                continue
+            deck_section_key = str(section.get("section_key") or "").strip()
+            if (chapter_key, deck_section_key) not in source_keys:
+                continue
+            items = [str(item).strip() for item in section.get("items") or [] if str(item).strip()]
+            if not items:
+                continue
+            collected.extend(
+                _render_operational_export_lines(
+                    pkg,
+                    section_key=section_key,
+                    lines=items,
+                    fallback_lines=items,
+                )
+            )
+    return _normalize_markdown_output_lines(pkg, section_key=section_key, lines=collected)
+
+
+def _markdown_section_lines(
+    pkg: dict[str, Any],
+    consulting_deck: dict[str, Any],
+    *,
+    section_key: str,
+    source_keys: tuple[str, ...] | None = None,
+    surface_mode: str,
+) -> list[str]:
+    for candidate_key in source_keys or (section_key,):
+        preferred_lines = _export_preferred_lines(
+            pkg,
+            section_key=candidate_key,
+            surface_mode=surface_mode,
+        )
+        normalized = _normalize_markdown_output_lines(pkg, section_key=section_key, lines=preferred_lines)
+        if normalized:
+            return normalized
+    return _consulting_deck_fallback_lines(pkg, consulting_deck, section_key=section_key)
+
+
+def _generic_consulting_deck_overlay_lines(
+    pkg: dict[str, Any],
+    *,
+    chapter_key: str,
+    section_key: str,
+    surface_mode: str,
+) -> list[str]:
+    source_keys = _GENERIC_CONSULTING_DECK_SECTION_OVERLAYS.get((str(chapter_key).strip(), str(section_key).strip())) or ()
+    collected: list[str] = []
+    for candidate_key in source_keys:
+        collected.extend(
+            _export_preferred_lines(
+                pkg,
+                section_key=candidate_key,
+                surface_mode=surface_mode,
+            )
+        )
+    return _normalize_markdown_section_lines(collected)
+
+
+def _render_consulting_deck_markdown(
+    pkg: dict[str, Any],
+    consulting_deck: dict[str, Any],
+    *,
+    include_internal_appendix: bool,
+    appendix_markdown: str = "",
+) -> str:
+    project_payload = pkg.get("project") if isinstance(pkg.get("project"), dict) else {}
+    title = (
+        f"# 결과 패키지 - {project_payload.get('project_name') or '-'}"
+        if include_internal_appendix
+        else f"# 컨설팅 결과 - {project_payload.get('project_name') or project_payload.get('id') or '-'}"
+    )
+    lines = [title]
+    surface_mode = consulting_deck.get("surface_mode") or "internal"
+    header = str(consulting_deck.get("role_header") or "").strip() or role_header(
+        family=_effective_family_for_consulting_surface(pkg),
+        question_axis=package_question_axis(pkg),
+    )
+    if header:
+        lines.extend(["", header])
+    if _uses_family_markdown_registry(pkg):
+        for entry in _markdown_section_registry(pkg):
+            section_key = str(entry.get("section_key") or "").strip()
+            if not section_key:
+                continue
+            section_lines = _markdown_section_lines(
+                pkg,
+                consulting_deck,
+                section_key=section_key,
+                source_keys=tuple(str(item).strip() for item in entry.get("source_keys") or () if str(item).strip()) or None,
+                surface_mode=surface_mode,
+            )
+            if not section_lines:
+                continue
+            heading = _surface_section_title_from_pkg(pkg, section_key, section_key)
+            lines.extend(["", f"## {heading}"])
+            if str(entry.get("render") or "paragraph").strip() == "list":
+                lines.extend(f"- {item}" for item in section_lines)
+            else:
+                lines.extend(section_lines)
+    else:
+        narrative_layer = pkg.get("validated_narrative_layer") if isinstance(pkg.get("validated_narrative_layer"), dict) else {}
+        chapter_outline = {
+            str(item.get("chapter_key") or "").strip(): str(item.get("headline") or "").strip()
+            for item in narrative_layer.get("consulting_deck_outline", [])
+            if isinstance(item, dict)
+            and str(item.get("chapter_key") or "").strip()
+            and str(item.get("headline") or "").strip()
+        }
+        for chapter in consulting_deck.get("chapters") or []:
+            if not isinstance(chapter, dict):
+                continue
+            chapter_key = str(chapter.get("chapter_key") or "").strip()
+            chapter_title = str(chapter.get("title") or "").strip()
+            if chapter_title:
+                lines.extend(["", f"## {chapter_title}"])
+            chapter_headline = _normalize_markdown_sentence(chapter_outline.get(chapter_key) or "")
+            if chapter_headline:
+                lines.append(chapter_headline)
+            for section in chapter.get("sections") or []:
+                if not isinstance(section, dict):
+                    continue
+                deck_section_key = str(section.get("section_key") or "").strip()
+                section_title = str(section.get("title") or "").strip()
+                if section_title:
+                    lines.append(f"### {section_title}")
+                items = [str(item).strip() for item in section.get("items") or [] if str(item).strip()]
+                uses_placeholder = bool(section.get("uses_placeholder"))
+                overlay_lines = (
+                    _generic_consulting_deck_overlay_lines(
+                        pkg,
+                        chapter_key=chapter_key,
+                        section_key=deck_section_key,
+                        surface_mode=surface_mode,
+                    )
+                    if uses_placeholder
+                    else []
+                )
+                if not items and not overlay_lines:
+                    lines.append("- 해당 없음")
+                    continue
+                normalized_items = _normalize_markdown_section_lines(overlay_lines or items)
+                if not normalized_items:
+                    lines.append("- 해당 없음")
+                    continue
+                lines.extend(f"- {item}" for item in normalized_items)
+    markdown = "\n".join(lines).strip() + "\n"
+    if appendix_markdown.strip():
+        markdown = markdown.rstrip() + "\n\n" + appendix_markdown.strip() + "\n"
+    return markdown
+
+
+def _extract_markdown_tail(markdown: str, heading: str) -> str:
+    normalized_markdown = str(markdown or "")
+    marker = normalized_markdown.find(heading)
+    if marker < 0:
+        return ""
+    return normalized_markdown[marker:].strip()
+
+
+def _normalize_internal_export_mode(mode: str | None) -> str:
+    normalized = str(mode or "").strip().lower()
+    if normalized == "full":
+        return "full"
+    return "deck-only"
+
+
+def _result_package_markdown(
+    pkg: dict[str, Any],
+    *,
+    surface_mode: str = "internal",
+    internal_export_mode: str = "deck-only",
+) -> str:
+    normalized_surface_mode = normalize_surface_mode(surface_mode)
+    export_review_artifacts = can_export_review_artifacts(policy_for_surface_mode(normalized_surface_mode).access_profile)
+    consulting_deck = _resolve_consulting_deck(pkg, surface_mode=normalized_surface_mode)
+    if consulting_deck:
+        appendix_markdown = ""
+        include_internal_appendix = export_review_artifacts and _normalize_internal_export_mode(internal_export_mode) == "full"
+        legacy_internal_markdown = ""
+        if include_internal_appendix:
+            legacy_internal_markdown = _legacy_result_package_markdown(pkg, surface_mode="internal")
+            appendix_markdown = _extract_markdown_tail(legacy_internal_markdown, "## 참고 구조 비교")
+        elif normalized_surface_mode == "internal" and isinstance(pkg.get("accounting"), dict):
+            legacy_internal_markdown = _legacy_result_package_markdown(pkg, surface_mode="internal")
+            appendix_markdown = _extract_markdown_tail(legacy_internal_markdown, "### 문서 맥락")
+        return _normalize_markdown_document(
+            _render_consulting_deck_markdown(
+                pkg,
+                consulting_deck,
+                include_internal_appendix=include_internal_appendix,
+                appendix_markdown=appendix_markdown,
+            )
+        )
+    return _normalize_markdown_document(_legacy_result_package_markdown(pkg, surface_mode=normalized_surface_mode))
+
+
+def _legacy_result_package_markdown(pkg: dict[str, Any], *, surface_mode: str = "internal") -> str:
     normalized_surface_mode = normalize_surface_mode(surface_mode)
     export_review_artifacts = can_export_review_artifacts(policy_for_surface_mode(normalized_surface_mode).access_profile)
     if not export_review_artifacts:
-        explanation = ExplanationPresenter().present(
+        explanation = _present_project_result_impl(
             project_id=str((pkg.get("project") or {}).get("id") or ""),
             result_package=pkg,
             audience="manager",
@@ -1539,44 +3864,118 @@ def _result_package_markdown(pkg: dict[str, Any], *, surface_mode: str = "intern
         )
         return _result_explanation_markdown(explanation)
     executive_summary = pkg.get("executive_summary") or {}
+    display = pkg.get("display") or {}
+    display_sections = display.get("sections") or {}
+    display_states = display.get("section_states") or {}
+    hero = display.get("hero") or {}
     provenance = pkg.get("provenance") or {}
     scope_notice = pkg.get("scope_notice") or {}
-    diagnosis_state = _humanize_summary_state(str((pkg.get("diagnosis") or {}).get("state") or ""))
-    draft_state = _humanize_summary_state(str((pkg.get("transition_draft") or {}).get("state") or ""))
     report_purpose = str(pkg.get("report_purpose") or "").strip()
     report_scope = _trim_items(pkg.get("report_scope") or [], limit=6)
     report_questions = _trim_items(pkg.get("report_questions") or [], limit=6)
-    grounded_rules = pkg.get("grounded_business_rules") or []
+    report_purpose_lines = _export_preferred_lines(pkg, section_key="report_purpose", surface_mode=normalized_surface_mode)
+    executive_summary_lines = _export_preferred_lines(pkg, section_key="executive_summary_v2", surface_mode=normalized_surface_mode)
+    core_conclusion_lines = _export_preferred_lines(pkg, section_key="one_line_conclusion", surface_mode=normalized_surface_mode)
+    analysis_summary_lines = _export_preferred_lines(pkg, section_key="analysis_summary", surface_mode=normalized_surface_mode)
+    judgment_reason_lines = _export_preferred_lines(pkg, section_key="primary_judgment_reason", surface_mode=normalized_surface_mode)
+    recommended_option_lines = _export_preferred_lines(pkg, section_key="recommended_option", surface_mode=normalized_surface_mode)
+    execution_plan_lines = _export_preferred_lines(pkg, section_key="execution_plan", surface_mode=normalized_surface_mode)
+    risk_explanation_lines = _export_preferred_lines(pkg, section_key="risks", surface_mode=normalized_surface_mode)
+    grounded_rules = ((display_sections.get("grounded_rules") or {}).get("items") or [])
     retained = pkg.get("retained_contracts") or []
     priority_items = pkg.get("priority_split_items") or []
     verification = pkg.get("verification_checkpoints") or []
-    design_options = pkg.get("design_options") or []
-    execution_plan = pkg.get("execution_plan") or []
-    risks = (pkg.get("diagnosis") or {}).get("risks") or []
-    missing_context_details = (pkg.get("diagnosis") or {}).get("missing_context_details") or []
+    design_options = ((display_sections.get("design_options") or {}).get("items") or [])
+    execution_plan = ((display_sections.get("execution_plan") or {}).get("items") or [])
+    risks = ((display_sections.get("risks") or {}).get("items") or [])
+    missing_context_details = ((display_sections.get("risks") or {}).get("missing_context_details") or [])
     design = pkg.get("design") or {}
     layer = design.get("layer_reconstruction") or {}
     draft = ((pkg.get("transition_draft") or {}).get("recomposition_draft") or {})
     review_diff = (((pkg.get("extensions") or {}) if isinstance(pkg, dict) else {}) or {}).get("review_diff") or {}
     review_diff_markdown = str(review_diff.get("markdown") or "").strip()
-    decision_brief = {
-        "decision_summary": executive_summary.get("core_message") or "-",
-        "rationale_lines": executive_summary.get("summary_lines") or [],
-        "action_lines": executive_summary.get("next_steps") or [],
-    }
     lines = [
         f"# 결과 패키지 - {pkg['project']['project_name']}",
         "",
-        *render_decision_brief_markdown(decision_brief),
+        f"## {_surface_section_title_from_pkg(pkg, 'report_purpose', '보고 목적')}",
+        report_purpose_lines[0] if report_purpose_lines else (report_purpose or "이 실행의 목적을 다시 정해야 합니다."),
         "",
-        "## 근거 자산",
+        f"## {_surface_section_title_from_pkg(pkg, 'executive_summary_v2', '핵심 요약')}",
     ]
+    if executive_summary_lines:
+        lines.extend(f"- {item}" for item in executive_summary_lines)
+    else:
+        lines.append(f"- {hero.get('impact') or executive_summary.get('core_message') or '-'}")
+    lines.extend(
+        [
+            "",
+            f"## {_surface_section_title_from_pkg(pkg, 'one_line_conclusion', '핵심 결론')}",
+            core_conclusion_lines[0] if core_conclusion_lines else str(hero.get("headline") or executive_summary.get("core_message") or "-"),
+        ]
+    )
+    if analysis_summary_lines:
+        lines.extend(
+            [
+                "",
+                f"## {_surface_section_title_from_pkg(pkg, 'analysis_summary', '핵심 객체')}",
+            ]
+        )
+        lines.extend(f"- {item}" for item in analysis_summary_lines)
+    lines.extend(
+        [
+            "",
+            f"## {_surface_section_title_from_pkg(pkg, 'primary_judgment_reason', '판단 이유')}",
+        ]
+    )
+    if judgment_reason_lines:
+        lines.extend(judgment_reason_lines)
+    else:
+        lines.append(str(hero.get("priority_action") or "-"))
+    if recommended_option_lines:
+        lines.extend(
+            [
+                "",
+                f"## {_surface_section_title_from_pkg(pkg, 'recommended_option', '추천안 설명')}",
+                recommended_option_lines[0],
+            ]
+        )
+    if execution_plan_lines:
+        lines.extend(
+            [
+                "",
+                f"## {_surface_section_title_from_pkg(pkg, 'execution_plan', '실행 단계 설명')}",
+            ]
+        )
+        lines.extend(f"- {item}" for item in execution_plan_lines)
+    if risk_explanation_lines:
+        lines.extend(
+            [
+                "",
+                f"## {_surface_section_title_from_pkg(pkg, 'risks', '리스크 설명')}",
+            ]
+        )
+        lines.extend(f"- {item}" for item in risk_explanation_lines)
+    lines.extend(
+        [
+            "",
+            "## 결정 요약",
+        f"- 영향: {hero.get('impact') or '-'}",
+        f"- 우선 조치: {hero.get('priority_action') or '-'}",
+        "",
+        "## 판단 근거",
+        ]
+    )
     if grounded_rules:
         for rule in grounded_rules:
             lines.extend(
                 [
                     f"### {rule.get('title') or '-'}",
-                    f"- 관찰: {rule.get('description') or '-'}",
+                    f"- 판단: {rule.get('decision') or '-'}",
+                    f"- 미조치 시 영향: {rule.get('unchanged_consequence') or rule.get('impact') or '-'}",
+                    f"- 우선 검토 포인트: {rule.get('action') or '-'}",
+                    f"- 피해야 할 방식: {rule.get('anti_pattern') or '-'}",
+                    f"- 우선순위: {rule.get('priority') or '-'}",
+                    f"- 우선순위 판단: {rule.get('priority_reason') or '-'}",
                     f"- 신뢰도: {rule.get('confidence') or '-'}",
                     f"- 신뢰도 근거: {rule.get('confidence_reason') or '-'}",
                     f"- 설계 반영 위치: {', '.join(rule.get('design_targets') or []) or '-'}",
@@ -1588,7 +3987,8 @@ def _result_package_markdown(pkg: dict[str, Any], *, surface_mode: str = "intern
                 lines.append("- 근거 자산")
                 for evidence in evidence_rows:
                     lines.append(f"  - {evidence.get('asset_name') or '-'}")
-                    lines.append(f"    - 관찰 요약: {evidence.get('condition_summary') or '-'}")
+                    lines.append(f"    - 근거 요약: {evidence.get('condition_summary') or '-'}")
+                    lines.append(f"    - 왜 중요한가: {evidence.get('why_important') or '-'}")
                     lines.append(f"    - 설계 반영 위치: {', '.join(evidence.get('design_targets') or []) or '-'}")
                     lines.append(f"    - 신뢰도: {evidence.get('confidence') or '-'}")
     else:
@@ -1596,72 +3996,84 @@ def _result_package_markdown(pkg: dict[str, Any], *, surface_mode: str = "intern
         if fallback_core_rules:
             lines.extend(f"- {item}" for item in fallback_core_rules)
         else:
-            lines.append("- 근거 자산이 아직 정리되지 않았습니다.")
-    lines.extend(["", "## 설계 선택지"])
-    for option in design_options:
-        lines.extend(
-            [
-                f"### {option.get('name') or '-'}",
-                f"- 구조 설명: {option.get('structure_summary') or '-'}",
-                f"- 장점: {' / '.join(option.get('advantages') or []) or '-'}",
-                f"- 리스크: {' / '.join(option.get('risks') or []) or '-'}",
-                f"- 예상 난이도: {option.get('difficulty') or '-'}",
-                f"- 예상 기간: {option.get('duration_weeks') or 0}주",
-                f"- 추천 여부: {'예' if option.get('recommended') else '아니오'}",
-                f"- 선택 근거: {option.get('selection_reason') or '-'}",
-                "",
-            ]
-        )
-    if design_options and lines[-1] == "":
-        lines.pop()
-    if not design_options:
-        lines.append("- 해당 없음")
-    lines.extend(["", "## 실행 계획"])
-    for week in execution_plan:
-        lines.extend(
-            [
-                f"### {week.get('week_label') or '-'}",
-                f"- 목표: {week.get('goal') or '-'}",
-                f"- 작업: {' / '.join(week.get('tasks') or []) or '해당 없음'}",
-                f"- 관련 규칙: {', '.join(week.get('related_rules') or []) or '해당 없음'}",
-                f"- 관련 계약: {', '.join(week.get('related_contracts') or []) or '해당 없음'}",
-                f"- 인력: {' / '.join(week.get('roles') or []) or '해당 없음'}",
-                f"- 기간: {week.get('duration_weeks') or 0}주",
-                f"- 산출물: {' / '.join(week.get('deliverables') or []) or '해당 없음'}",
-            ]
-        )
-    if not execution_plan:
-        lines.append("- 해당 없음")
+            lines.append(f"- {(display_sections.get('grounded_rules') or {}).get('empty_message') or '핵심 규칙 근거를 먼저 확보해야 합니다.'}")
+    lines.extend(["", "## 개선 전략"])
+    if design_options:
+        for option in design_options:
+            lines.extend(
+                [
+                    f"### {option.get('name') or '-'}",
+                    f"- 판단: {option.get('decision') or '-'}",
+                    f"- 미조치 시 영향: {option.get('unchanged_consequence') or '-'}",
+                    f"- 우선 검토 포인트: {option.get('action') or '-'}",
+                    f"- 우선순위: {option.get('priority') or '-'}",
+                    f"- 우선순위 판단: {option.get('priority_reason') or '-'}",
+                    f"- 장점: {' / '.join(option.get('advantages') or []) or '-'}",
+                    f"- 리스크: {' / '.join(option.get('risks') or []) or '-'}",
+                    f"- 추천 여부: {'예' if option.get('recommended') else '아니오'}",
+                    f"- 선택 근거: {option.get('selection_reason') or '-'}",
+                    "",
+                ]
+            )
+            for point in option.get("comparison_points") or []:
+                lines.append(f"- 비교 포인트 / {point.get('label') or '-'}: {point.get('value') or '-'}")
+            lines.append("")
+        if lines[-1] == "":
+            lines.pop()
+    else:
+        lines.append(f"- {(display_sections.get('design_options') or {}).get('empty_message') or '전략 우선순위를 다시 정해야 합니다.'}")
+    lines.extend(["", "## 실행 단계"])
+    if execution_plan:
+        for week in execution_plan:
+            lines.extend(
+                [
+                    f"### {week.get('week_label') or '-'}",
+                    f"- 판단: {week.get('decision') or '-'}",
+                    f"- 미조치 시 영향: {week.get('unchanged_consequence') or '-'}",
+                    f"- 우선 검토 포인트: {week.get('action') or '-'}",
+                    f"- 우선순위: {week.get('priority') or '-'}",
+                    f"- 우선순위 판단: {week.get('priority_reason') or '-'}",
+                    f"- 작업: {' / '.join(week.get('tasks') or []) or '해당 없음'}",
+                    f"- 관련 규칙: {', '.join(week.get('related_rules') or []) or '해당 없음'}",
+                    f"- 관련 계약: {', '.join(week.get('related_contracts') or []) or '해당 없음'}",
+                    f"- 인력: {' / '.join(week.get('roles') or []) or '해당 없음'}",
+                    f"- 기간: {week.get('duration_weeks') or 0}주",
+                    f"- 산출물: {' / '.join(week.get('deliverables') or []) or '해당 없음'}",
+                ]
+            )
+    else:
+        lines.append(f"- {(display_sections.get('execution_plan') or {}).get('empty_message') or '실행 순서를 다시 정해야 합니다.'}")
     lines.extend(["", "## 리스크"])
     if risks:
         lines.extend(f"- {item}" for item in risks)
     else:
-        lines.append(f"- {diagnosis_state}")
+        lines.append(f"- {(display_sections.get('risks') or {}).get('empty_message') or '리스크 범위를 다시 확인해야 합니다.'}")
     if missing_context_details:
         lines.extend(["", "### 확인 필요 자료"])
         for item in missing_context_details:
             lines.append(f"- {item.get('required_material') or '-'}: {item.get('reason') or '-'}")
+            lines.append(f"  - 우선순위: {item.get('priority') or '-'}")
     lines.extend(["", "## 참고 구조 비교"])
     if review_diff_markdown:
         lines.extend(
             [
-                "- 이 섹션은 실제 코드 패치가 아니라 현재 구조와 권장 구조의 차이를 설명하는 참고 자료입니다.",
-                "- diff와 expected_pattern은 판단 근거를 보조하는 용도로만 사용합니다.",
+                "- 이 섹션은 실제 코드 패치가 아니라 변경 전, 변경 후, 근거를 비교해 의사결정을 보강하는 자료입니다.",
+                "- diff와 expected_pattern은 승인 판단을 돕는 비교 근거로만 사용합니다.",
                 "",
                 _demote_markdown_headings(review_diff_markdown, levels=1),
             ]
         )
     else:
-        lines.append("- 참고 구조 비교 데이터가 없습니다.")
+        lines.append("- 참고 구조 비교 데이터가 부족해 변경 근거를 다시 모아야 합니다.")
     lines.extend(["", "## 부록"])
     lines.extend(
         [
             "### 문서 맥락",
-            f"- 목적: {report_purpose or '이 실행의 목적이 아직 정리되지 않았습니다.'}",
+            f"- 목적: {(report_purpose_lines[0] if report_purpose_lines else report_purpose) or '이 실행의 목적을 다시 정해야 합니다.'}",
             "- 분석 범위",
-            *([f"  - {item}" for item in report_scope] if report_scope else ["  - 해당 없음"]),
+            *([f"  - {item}" for item in report_scope] if report_scope else [f"  - {display_states.get('report_scope') or '분석 범위를 다시 확인해야 합니다.'}"]),
             "- 검증 질문",
-            *([f"  - {item}" for item in report_questions] if report_questions else ["  - 해당 없음"]),
+            *([f"  - {item}" for item in report_questions] if report_questions else [f"  - {display_states.get('report_questions') or '검증 질문을 다시 정해야 합니다.'}"]),
             "",
             "### 유지 계약",
         ]
@@ -1671,7 +4083,7 @@ def _result_package_markdown(pkg: dict[str, Any], *, surface_mode: str = "intern
             lines.append(f"- {item.get('item') or '-'}")
             lines.append(f"  - 근거: {item.get('basis') or '-'}")
     else:
-        lines.append("- 직접 확인된 유지 계약이 없습니다.")
+        lines.append(f"- {display_states.get('retained_contracts') or '유지 계약을 다시 정해야 합니다.'}")
     lines.extend(["", "### 분리 우선순위"])
     if priority_items:
         for item in priority_items:
@@ -1688,25 +4100,25 @@ def _result_package_markdown(pkg: dict[str, Any], *, surface_mode: str = "intern
             if item.get("linked_contracts"):
                 lines.append(f"  - 관련 계약: {', '.join(item.get('linked_contracts') or [])}")
     else:
-        lines.append("- 해당 없음")
+        lines.append(f"- {display_states.get('priority_split') or '우선순위를 다시 정해야 합니다.'}")
     lines.extend(["", "### 확인 필요 항목"])
     if verification:
         for item in verification:
             lines.append(f"- {item.get('item') or '-'}")
             lines.append(f"  - 사유: {item.get('reason') or '-'}")
     else:
-        lines.append("- 해당 없음")
+        lines.append(f"- {display_states.get('verification') or '확인 항목을 다시 정해야 합니다.'}")
     lines.extend(["", "### 설계 메모"])
     if design.get("rebuild_strategy"):
         lines.extend(f"- {item}" for item in (design.get("rebuild_strategy") or []))
     else:
-        lines.append(f"- {draft_state}")
+        lines.append(f"- {display_states.get('rebuild_strategy') or '구조 전략을 다시 정해야 합니다.'}")
     for key, label in (("database", "데이터 계약"), ("backend", "API 및 정책"), ("frontend", "화면 구조")):
         values = layer.get(key) or []
         lines.append(f"#### {label}")
         lines.extend(f"- {item}" for item in values)
         if not values:
-            lines.append("- 해당 없음")
+            lines.append("- 이 레이어 경계를 바로 고정하면 안 되므로 추가 근거가 먼저입니다.")
     lines.extend(["", "### 전환 초안"])
     draft_has_content = False
     for key in ("database", "backend", "frontend"):
@@ -1716,7 +4128,7 @@ def _result_package_markdown(pkg: dict[str, Any], *, surface_mode: str = "intern
             lines.append(f"#### {key}")
             lines.extend(f"- {item}" for item in values)
     if not draft_has_content:
-        lines.append(f"- {draft_state}")
+        lines.append(f"- {display_states.get('transition_draft') or '전환 초안을 다시 정해야 합니다.'}")
     accounting = pkg.get("accounting") or {}
     if accounting:
         calc_status = accounting.get("calculation_status") or {}
@@ -1724,6 +4136,8 @@ def _result_package_markdown(pkg: dict[str, Any], *, surface_mode: str = "intern
         analysis = accounting.get("accounting_analysis") or {}
         fx_calc = accounting.get("fx_calculation") or {}
         voucher_review = accounting.get("voucher_review") or {}
+        blocking_issue = str(calc_status.get("blocking_issue") or calc_status.get("reason") or fx_calc.get("failure_reason") or "").strip()
+        blocking_label = _accounting_reason_label(blocking_issue)
         lines.extend(
             [
                 "",
@@ -1733,6 +4147,8 @@ def _result_package_markdown(pkg: dict[str, Any], *, surface_mode: str = "intern
                 f"- 사유: {calc_status.get('reason') or calc_status.get('blocking_issue') or '-'}",
             ]
         )
+        if blocking_issue:
+            lines.append(f"- 차단 라벨: {blocking_label}입니다.")
         if input_validation.get("missing_required_inputs"):
             lines.append(f"- 누락 입력: {', '.join(input_validation.get('missing_required_inputs') or [])}")
         if analysis.get("candidate_methods"):
@@ -1786,79 +4202,7 @@ def _result_package_markdown(pkg: dict[str, Any], *, surface_mode: str = "intern
 
 
 def _result_explanation_markdown(explanation: ResultExplanationResponse) -> str:
-    taxonomy = explanation.taxonomy_view
-    cards = explanation.summary_cards or []
-    sections = explanation.section_views or []
-    if explanation.surface_mode == "external":
-        card_map = {card.card_key: card for card in cards}
-        judgment_body = getattr(card_map.get("judgment"), "body", "") or taxonomy.core_judgment.structural_judgment or "-"
-        strategy_body = getattr(card_map.get("strategy"), "body", "") or taxonomy.core_judgment.recommended_strategy or "-"
-        execution_body = getattr(card_map.get("execution"), "body", "") or ""
-        lines = [
-            f"# 구조 판단 - {explanation.project_id}",
-            "",
-            "## 핵심 판단",
-            f"- {judgment_body}",
-            "",
-            "## 왜 이 방향인가",
-            f"- {strategy_body}",
-            "",
-            "## 다음 단계",
-        ]
-        if execution_body:
-            lines.append(f"- {execution_body}")
-        if sections:
-            for section in sections:
-                lines.extend(["", f"### {section.title}"])
-                for row in str(section.text or "").splitlines():
-                    normalized = row.strip()
-                    if normalized:
-                        lines.append(f"- {normalized}")
-        return "\n".join(lines).strip() + "\n"
-    lines = [
-        f"# 구조 판단 - {explanation.project_id}",
-        "",
-        "## 구조 판단",
-        f"- {taxonomy.core_judgment.structural_judgment or '-'}",
-        "",
-        "## 권장 전략",
-        f"- {taxonomy.core_judgment.recommended_strategy or '-'}",
-        f"- 개선 방식: {taxonomy.core_judgment.top_decision_type or '-'}",
-        "",
-        "## 판단 근거",
-    ]
-    if taxonomy.evidence_view.top_priority_score is not None:
-        lines.append(f"- 우선순위 점수: {taxonomy.evidence_view.top_priority_score}")
-    score_breakdown = taxonomy.evidence_view.score_breakdown or {}
-    if score_breakdown:
-        lines.append(
-            "- 점수 요약: "
-            + ", ".join(f"{key}={value}" for key, value in score_breakdown.items())
-        )
-    explainability = taxonomy.evidence_view.explainability or {}
-    if explainability.get("score_summary"):
-        lines.append(f"- 계산 요약: {explainability.get('score_summary')}")
-    if cards:
-        lines.extend(["", "## 요약 카드"])
-        for card in cards:
-            lines.append(f"### {card.title}")
-            lines.append(f"- {card.body}")
-    if sections:
-        lines.extend(["", "## 다음 단계"])
-        for section in sections:
-            lines.append(f"### {section.title}")
-            for row in str(section.text or "").splitlines():
-                normalized = row.strip()
-                if normalized:
-                    lines.append(f"- {normalized}")
-    lines.extend(
-        [
-            "",
-            "## 설명 관점",
-            f"- {taxonomy.explanation_context.narrative_axis or '-'}",
-        ]
-    )
-    return "\n".join(lines).strip() + "\n"
+    return _render_result_explanation_markdown_impl(explanation)
 
 
 async def _result_package_docx_response(
@@ -1866,11 +4210,13 @@ async def _result_package_docx_response(
     pkg: dict[str, Any],
     *,
     surface_mode: str = "internal",
+    internal_export_mode: str = "deck-only",
 ) -> FileResponse:
     output_path, download_name = await _generate_result_package_docx(
         project,
         pkg,
         surface_mode=surface_mode,
+        internal_export_mode=internal_export_mode,
     )
     return FileResponse(
         path=output_path,
@@ -1885,6 +4231,7 @@ async def _generate_result_package_docx(
     pkg: dict[str, Any],
     *,
     surface_mode: str = "internal",
+    internal_export_mode: str = "deck-only",
 ) -> tuple[Path, str]:
     if not app_state.doc_service or not app_state.doc_service.is_available():
         raise HTTPException(status_code=503, detail="Document Service unavailable")
@@ -1894,7 +4241,11 @@ async def _generate_result_package_docx(
     suffix_name = "result.docx" if export_review_artifacts else "external_result.docx"
     download_name = _safe_download_name(project.project_name, suffix_name)
     title = f"{'결과 패키지' if export_review_artifacts else '구조 판단'} - {project.project_name}"
-    markdown_content = _result_package_markdown(pkg, surface_mode=normalized_surface_mode)
+    markdown_content = _result_package_markdown(
+        pkg,
+        surface_mode=normalized_surface_mode,
+        internal_export_mode=internal_export_mode,
+    )
     result = await app_state.doc_service.generate(
         DocumentRequest(
             content=markdown_content,
@@ -1915,6 +4266,7 @@ async def _result_package_pptx_response(
     pkg: dict[str, Any],
     *,
     surface_mode: str = "internal",
+    internal_export_mode: str = "deck-only",
 ) -> FileResponse:
     if not app_state.doc_service or not app_state.doc_service.is_available():
         raise HTTPException(status_code=503, detail="Document Service unavailable")
@@ -1924,16 +4276,18 @@ async def _result_package_pptx_response(
     suffix_name = "result.pptx" if export_review_artifacts else "external_result.pptx"
     download_name = _safe_download_name(project.project_name, suffix_name)
     title = f"{'결과 패키지' if export_review_artifacts else '구조 판단'} - {project.project_name}"
-    markdown_content = _result_package_markdown(pkg, surface_mode=normalized_surface_mode)
+    slide_schema = _resolve_slide_schema(pkg, surface_mode=normalized_surface_mode)
+    if not slide_schema:
+        raise HTTPException(status_code=500, detail="Slide schema unavailable")
     result = await app_state.doc_service.generate(
         DocumentRequest(
-            content=markdown_content,
+            content="",
             output_type=DocumentType.PPTX,
             title=title,
             filename=download_name,
+            payload=slide_schema,
             style_options={
-                "subtitle": f"{project.client_name} · 현대화 분석 결과 요약",
-                "font_size": 20,
+                "renderer": "slide_schema",
             },
         )
     )
@@ -1946,12 +4300,11 @@ async def _result_package_pptx_response(
 
 
 def _project_result_archive_paths(project_id: str, run_id: str) -> dict[str, Path]:
-    archive_dir = _PROJECT_RESULT_ARCHIVE_ROOT / (project_id or "unknown_project") / (run_id or "unknown_run")
-    return {
-        "dir": archive_dir,
-        "markdown": archive_dir / "result.md",
-        "docx": archive_dir / "result.docx",
-    }
+    return _build_project_result_archive_paths_impl(
+        archive_root=_PROJECT_RESULT_ARCHIVE_ROOT,
+        project_id=project_id,
+        run_id=run_id,
+    )
 
 
 async def _persist_project_result_archive(
@@ -1964,55 +4317,25 @@ async def _persist_project_result_archive(
     result_package: dict[str, Any] | None = None,
     docx_source_path: Path | None = None,
 ) -> dict[str, str]:
-    normalized_run_id = str(run_id or "").strip()
-    if not normalized_run_id:
-        return {}
-
-    snapshot = get_run_snapshot(normalized_run_id, db=db)
-    events = get_run_events(normalized_run_id, db=db)
-    structured = _extract_structured_result(events)
-    if structured is None:
-        return {}
-
-    archive_paths = _project_result_archive_paths(project.id, normalized_run_id)
-    archive_paths["dir"].mkdir(parents=True, exist_ok=True)
-
-    if result_package is None:
-        resolved_assets = assets if assets is not None else _build_assets_payload(project, db)
-        result_package = build_result_package(
-            project,
-            snapshot,
-            structured,
-            assets=resolved_assets,
-            polish_bundle=_extract_polish_bundle(events, structured),
-            app_version=app_version,
-        )
-
-    markdown_content = _result_package_markdown(result_package, surface_mode="internal")
-    archive_paths["markdown"].write_text(markdown_content, encoding="utf-8")
-
-    try:
-        if docx_source_path is not None:
-            shutil.copy2(str(docx_source_path), str(archive_paths["docx"]))
-        elif not archive_paths["docx"].exists():
-            generated_docx_path, _ = await _generate_result_package_docx(
-                project,
-                result_package,
-                surface_mode="internal",
-            )
-            shutil.copy2(str(generated_docx_path), str(archive_paths["docx"]))
-    except Exception as exc:
-        logger.warning(
-            "[Projects] Failed to persist DOCX archive for project=%s run=%s: %s",
-            project.id,
-            normalized_run_id,
-            exc,
-        )
-
-    return {
-        "markdown_path": str(archive_paths["markdown"]),
-        "docx_path": str(archive_paths["docx"]),
-    }
+    return await _persist_project_result_archive_impl(
+        project,
+        run_id=run_id,
+        db=db,
+        archive_root=_PROJECT_RESULT_ARCHIVE_ROOT,
+        logger=logger,
+        get_run_snapshot_fn=get_run_snapshot,
+        get_run_events_fn=get_run_events,
+        extract_structured_result_fn=_extract_structured_result,
+        build_assets_payload_fn=_build_assets_payload,
+        build_result_package_fn=build_result_package,
+        extract_polish_bundle_fn=_extract_polish_bundle,
+        result_package_markdown_fn=_result_package_markdown,
+        generate_result_package_docx_fn=_generate_result_package_docx,
+        assets=assets,
+        app_version=app_version,
+        result_package=result_package,
+        docx_source_path=docx_source_path,
+    )
 
 
 def _mark_run_failed(run_id: str, message: str, db: Session) -> None:
@@ -2059,9 +4382,131 @@ def _resolve_staged_resources(
     return ordered
 
 
+def _resolve_preview_resources(
+    *,
+    upload_session_id: str,
+    asset_manifest: list[ProjectAssetItem],
+    user: User | None,
+    db: Session,
+) -> list[tuple[ProjectAssetItem, TempResource]]:
+    if not asset_manifest:
+        raise HTTPException(status_code=400, detail="asset_manifest must contain at least one asset")
+    temp_file_ids = [item.temp_file_id for item in asset_manifest]
+    if len(set(temp_file_ids)) != len(temp_file_ids):
+        raise HTTPException(status_code=400, detail="Duplicate temp_file_id values are not allowed")
+
+    rows = db.query(TempResource).filter(TempResource.temp_file_id.in_(temp_file_ids)).all()
+    row_map = {row.temp_file_id: row for row in rows if row.temp_file_id}
+    missing_ids = [temp_file_id for temp_file_id in temp_file_ids if temp_file_id not in row_map]
+    if missing_ids:
+        raise HTTPException(status_code=400, detail=f"Unknown temp_file_id: {missing_ids[0]}")
+
+    ordered: list[tuple[ProjectAssetItem, TempResource]] = []
+    for asset_item in asset_manifest:
+        row = row_map[asset_item.temp_file_id]
+        if row.temp_session_id != upload_session_id:
+            raise HTTPException(status_code=400, detail="asset_manifest temp_file_id does not belong to upload_session_id")
+        if row.user_id is not None and (user is None or row.user_id != user.id):
+            raise HTTPException(status_code=403, detail="다른 사용자의 업로드 자산은 미리보기할 수 없습니다.")
+        if (row.stage_status or "staged") not in {"staged", "promoted"}:
+            raise HTTPException(status_code=400, detail="업로드 자산이 아직 미리보기 가능한 상태가 아닙니다.")
+        if not row.file_path or not row.extracted_relative_path:
+            raise HTTPException(status_code=400, detail="Staged upload is incomplete")
+        ordered.append((asset_item, row))
+    return ordered
+
+
+def _build_preview_review_assets(
+    *,
+    upload_session_id: str,
+    asset_manifest: list[ProjectAssetItem],
+    user: User | None,
+    db: Session,
+) -> list[AnonymizationAsset]:
+    assets: list[AnonymizationAsset] = []
+    for asset_item, row in _resolve_preview_resources(
+        upload_session_id=upload_session_id,
+        asset_manifest=asset_manifest,
+        user=user,
+        db=db,
+    ):
+        try:
+            original_path = resolve_temp_upload_path(row.file_path or "")
+            extracted_text = read_text(row.extracted_relative_path or "", project_asset=False)
+            original_bytes = original_path.read_bytes()
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=500, detail="업로드 자산 파일을 불러올 수 없습니다.") from exc
+        assets.append(
+            AnonymizationAsset(
+                asset_id=row.temp_file_id or asset_item.temp_file_id,
+                name=row.original_filename or asset_item.name,
+                temp_file_id=row.temp_file_id or asset_item.temp_file_id,
+                size=row.file_size or asset_item.size or 0,
+                kind_hint=asset_item.category_hint or "",
+                content_text=extracted_text,
+                original_bytes=original_bytes,
+            )
+        )
+    return assets
+
+
 @router.get("/projects/create", include_in_schema=False)
 async def project_create_view() -> FileResponse:
     return FileResponse(_static_file("projects_create.html"))
+
+
+@router.post("/projects/anonymization-review", response_model=ProjectAnonymizationPreviewResponse)
+async def project_anonymization_review_preview(
+    payload: ProjectAnonymizationPreviewRequest,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user_optional),
+) -> ProjectAnonymizationPreviewResponse:
+    assets = _build_preview_review_assets(
+        upload_session_id=payload.upload_session_id,
+        asset_manifest=payload.asset_manifest,
+        user=user,
+        db=db,
+    )
+    result = AnonymizationService().run_anonymization_pipeline(
+        AnonymizationRunRequest(
+            project_id=f"preview_{payload.upload_session_id}",
+            upload_session_id=payload.upload_session_id,
+            masking_level=MaskingLevel.FULL,
+            assets=assets,
+        )
+    )
+    review_report = result.review_report
+    analysis_context = AnalysisContextBuilder().build(
+        project_id=f"preview_{payload.upload_session_id}",
+        run_id="preview",
+        safe_bundle=result.safe_bundle,
+        goal=str(payload.goal or "").strip(),
+        constraints=list(payload.constraints or []),
+    )
+    question_guard = _SOURCE_QUESTION_GUARD.evaluate(
+        analysis_context=analysis_context,
+        raw_goal=str(payload.goal or "").strip(),
+        raw_constraints=list(payload.constraints or []),
+    )
+    label_less_risk_count = len(review_report.label_less_risks) if review_report else 0
+    label_less_warning_count = len(review_report.label_less_warnings) if review_report else 0
+    structure_checks = review_report.structure_checks if review_report else []
+    structure_issue_count = sum(1 for item in structure_checks if item.severity != "ok")
+    structure_risk_detected = any(item.severity == "risk" for item in structure_checks)
+    high_risk_detected = label_less_risk_count > 0 or structure_risk_detected
+    return ProjectAnonymizationPreviewResponse(
+        review_report=review_report,
+        display_review_report=build_display_review_report(review_report),
+        high_risk_detected=high_risk_detected,
+        label_less_risk_count=label_less_risk_count,
+        label_less_warning_count=label_less_warning_count,
+        structure_issue_count=structure_issue_count,
+        structure_risk_detected=structure_risk_detected,
+        source_question_candidates=question_guard.source_question_candidates,
+        blocked_user_questions=question_guard.blocked_user_questions,
+        review_user_questions=question_guard.review_user_questions,
+        question_guard_summary=question_guard.question_guard_summary,
+    )
 
 
 @router.get("/projects", include_in_schema=False)
@@ -2075,9 +4520,18 @@ async def projects_view_or_list(
         return FileResponse(_static_file("projects_create.html"))
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    projects = db.query(ModernizationProject).filter(ModernizationProject.user_id == user.id).order_by(ModernizationProject.created_at.desc()).all()
+    projects = (
+        db.query(ModernizationProject)
+        .filter(ModernizationProject.user_id == user.id)
+        .order_by(ModernizationProject.updated_at.desc(), ModernizationProject.created_at.desc())
+        .all()
+    )
+    if user.role == UserRole.ADMIN.value:
+        visible_projects = projects
+    else:
+        visible_projects = [project for project in projects if not _is_hidden_test_project(project)]
     items = []
-    for project in projects:
+    for project in visible_projects:
         snapshot = get_run_snapshot(project.run_id, db=db)
         _sync_project_status(project, snapshot, db)
         items.append(
@@ -2092,7 +4546,10 @@ async def projects_view_or_list(
                 "asset_manifest": _parse_json_list(project.asset_manifest_json),
             }
         )
-    return {"projects": items}
+    return {
+        "projects": items,
+        "recent_entries": _build_recent_project_entries(visible_projects, db),
+    }
 
 
 @router.post("/projects", response_model=ProjectStartResponse)
@@ -2105,6 +4562,7 @@ async def create_project(
     staged_resources = _resolve_staged_resources(payload, user, db)
     create_warnings = _detect_domain_mismatch_warning(
         project_name=payload.project_name,
+        goal=payload.goal,
         constraints=payload.constraints,
         asset_names=[item.name for item in payload.asset_manifest],
         asset_texts=[
@@ -2125,12 +4583,13 @@ async def create_project(
             run_id=run_id,
             project_name=payload.project_name,
             client_name=payload.client_name,
+            goal_text=payload.goal,
             template_key=payload.template_key,
             template_mode="recommended",
             constraints_json=json.dumps(payload.constraints, ensure_ascii=False),
             upload_session_id=payload.upload_session_id,
             asset_manifest_json=_serialize_asset_manifest([item.model_dump() for item in payload.asset_manifest]),
-            status="running",
+            status="pending",
         )
         db.add(project)
 
@@ -2190,7 +4649,7 @@ async def create_project(
         _mark_run_failed(run_id, f"Project asset promotion failed: {str(exc)[:300]}", db)
         raise HTTPException(status_code=500, detail="프로젝트 자산 승격에 실패했습니다.")
 
-    status = "running"
+    status = "pending"
     try:
         project = db.query(ModernizationProject).filter(ModernizationProject.id == project_id).first()
         ordered_assets = _ordered_project_assets(project, db) if project else []
@@ -2199,16 +4658,45 @@ async def create_project(
             for asset in ordered_assets
         ]
         app_state.TEMP_CONTEXT_STORE[payload.upload_session_id] = build_temp_context(context_parts)
+        # Project creation stays permissive even when the preview reported high
+        # risk; downstream analysis receives the marker-masked safe bundle.
         safe_bundle = _build_safe_bundle_for_project(project, db) if project else None
+        resolved_goal = resolve_project_goal(
+            inline_goal=payload.goal,
+            safe_bundle=safe_bundle,
+            project_name=payload.project_name,
+            client_name=payload.client_name,
+        )
+        if project is not None:
+            project.goal_text = resolved_goal
+            db.add(project)
+            db.commit()
+            db.refresh(project)
+        analysis_context = (
+            _build_and_store_analysis_context(
+                project,
+                run_id=run_id,
+                safe_bundle=safe_bundle,
+                goal=resolved_goal,
+                constraints=payload.constraints,
+                db=db,
+            )
+            if project is not None and safe_bundle is not None
+            else None
+        )
+        if analysis_context is not None:
+            create_warnings = list(dict.fromkeys(create_warnings + list(analysis_context.trust.warnings or [])))
         start_project_wrapped_run(
             run_id=run_id,
             session_id=session_id,
             project_name=payload.project_name,
             client_name=payload.client_name,
+            goal=resolved_goal,
             upload_session_id=payload.upload_session_id,
             constraints=payload.constraints,
             asset_manifest=payload.asset_manifest,
             safe_bundle=safe_bundle,
+            analysis_context=analysis_context,
         )
     except Exception as exc:
         project = db.query(ModernizationProject).filter(ModernizationProject.id == project_id).first()
@@ -2309,7 +4797,7 @@ async def reanalyze_project(
     sequence_no = _history_sequence_next(project.id, db)
     project.run_id = new_run_id
     project.session_id = new_session_id
-    project.status = "running"
+    project.status = "pending"
     db.add(
         _create_history_row(
             project_id=project.id,
@@ -2322,18 +4810,30 @@ async def reanalyze_project(
     db.commit()
     db.refresh(project)
 
-    status = "running"
+    status = "pending"
     try:
         safe_bundle = _build_safe_bundle_for_project(project, db)
+        project_goal = _resolved_project_goal(project, safe_bundle=safe_bundle, db=db)
+        project_constraints = _parse_json_list(project.constraints_json)
+        analysis_context = _build_and_store_analysis_context(
+            project,
+            run_id=new_run_id,
+            safe_bundle=safe_bundle,
+            goal=project_goal,
+            constraints=project_constraints,
+            db=db,
+        )
         start_project_wrapped_run(
             run_id=new_run_id,
             session_id=new_session_id,
             project_name=project.project_name,
             client_name=project.client_name,
+            goal=project_goal,
             upload_session_id=project.upload_session_id,
-            constraints=_parse_json_list(project.constraints_json),
+            constraints=project_constraints,
             asset_manifest=[ProjectAssetItem.model_validate(item) for item in _parse_json_list(project.asset_manifest_json)],
             safe_bundle=safe_bundle,
+            analysis_context=analysis_context,
         )
     except Exception as exc:
         project = db.query(ModernizationProject).filter(ModernizationProject.id == project.id).first()
@@ -2378,7 +4878,7 @@ async def run_project_analysis(
     sequence_no = _history_sequence_next(project.id, db)
     project.run_id = new_run_id
     project.session_id = new_session_id
-    project.status = "running"
+    project.status = "pending"
     db.add(
         _create_history_row(
             project_id=project.id,
@@ -2391,18 +4891,30 @@ async def run_project_analysis(
     db.commit()
     db.refresh(project)
 
-    status = "running"
+    status = "pending"
     try:
         safe_bundle = _build_safe_bundle_for_project(project, db)
+        project_goal = _resolved_project_goal(project, safe_bundle=safe_bundle, db=db)
+        project_constraints = _parse_json_list(project.constraints_json)
+        analysis_context = _build_and_store_analysis_context(
+            project,
+            run_id=new_run_id,
+            safe_bundle=safe_bundle,
+            goal=project_goal,
+            constraints=project_constraints,
+            db=db,
+        )
         start_project_wrapped_run(
             run_id=new_run_id,
             session_id=new_session_id,
             project_name=project.project_name,
             client_name=project.client_name,
+            goal=project_goal,
             upload_session_id=project.upload_session_id,
-            constraints=_parse_json_list(project.constraints_json),
+            constraints=project_constraints,
             asset_manifest=[ProjectAssetItem.model_validate(item) for item in _parse_json_list(project.asset_manifest_json)],
             safe_bundle=safe_bundle,
+            analysis_context=analysis_context,
         )
     except Exception as exc:
         project = db.query(ModernizationProject).filter(ModernizationProject.id == project.id).first()
@@ -2437,6 +4949,7 @@ async def project_detail(
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     project = _project_or_404(project_id, user, db)
+    _ensure_initial_history(project, db)
     snapshot = get_run_snapshot(project.run_id, db=db)
     _sync_project_status(project, snapshot, db)
     events = get_run_events(project.run_id, db=db)
@@ -2449,6 +4962,7 @@ async def project_detail(
             "run_id": project.run_id,
             "project_name": project.project_name,
             "client_name": project.client_name,
+            "goal": _project_text(project, "goal_text"),
             "template_key": project.template_key,
             "constraints": _parse_json_list(project.constraints_json),
             "asset_manifest": _parse_json_list(project.asset_manifest_json),
@@ -2472,6 +4986,8 @@ async def project_result(
     request: Request,
     format: str | None = Query(None),
     surface_mode: str = Query("internal", pattern="^(internal|external)$"),
+    internal_export_mode: str = Query("deck-only", pattern="^(deck-only|full)$"),
+    run_id: str | None = Query(None),
     db: Session = Depends(get_db),
     user: User | None = Depends(get_current_user_optional),
 ) -> Any:
@@ -2481,8 +4997,9 @@ async def project_result(
         raise HTTPException(status_code=401, detail="Not authenticated")
     project = _project_or_404(project_id, user, db)
     app_version = getattr(request.app, "version", None)
-    context = _load_project_result_context(project, db=db, app_version=app_version)
+    context = _load_project_result_context(project, db=db, app_version=app_version, run_id=run_id)
     full_result_package = context["result_package"]
+    target_run_id = str(context["run_id"])
     normalized_surface_mode = normalize_surface_mode(surface_mode)
     result_package = _surface_filtered_result_package(full_result_package, surface_mode=normalized_surface_mode)
     if normalized_surface_mode == "internal":
@@ -2491,11 +5008,12 @@ async def project_result(
                 project,
                 result_package,
                 surface_mode=normalized_surface_mode,
+                internal_export_mode=internal_export_mode,
             )
             try:
                 await _persist_project_result_archive(
                     project,
-                    run_id=project.run_id,
+                    run_id=target_run_id,
                     db=db,
                     assets=context["assets"],
                     app_version=app_version,
@@ -2506,7 +5024,7 @@ async def project_result(
                 logger.warning(
                     "[Projects] Failed to archive current run during DOCX export for project=%s run=%s: %s",
                     project.id,
-                    project.run_id,
+                    target_run_id,
                     exc,
                 )
             return FileResponse(
@@ -2518,7 +5036,7 @@ async def project_result(
         try:
             await _persist_project_result_archive(
                 project,
-                run_id=project.run_id,
+                run_id=target_run_id,
                 db=db,
                 assets=context["assets"],
                 app_version=app_version,
@@ -2528,22 +5046,36 @@ async def project_result(
             logger.warning(
                 "[Projects] Failed to archive current run on result view for project=%s run=%s: %s",
                 project.id,
-                project.run_id,
+                target_run_id,
                 exc,
             )
     if format == "md":
         download_name = _safe_download_name(project.project_name, "external_result.md" if normalized_surface_mode == "external" else "result.md")
         return Response(
-            content=_result_package_markdown(result_package, surface_mode=normalized_surface_mode),
+            content=_result_package_markdown(
+                result_package,
+                surface_mode=normalized_surface_mode,
+                internal_export_mode=internal_export_mode,
+            ),
             media_type="text/markdown; charset=utf-8",
             headers={
                 "Content-Disposition": _download_disposition(download_name, "project_result.md")
             },
         )
     if format == "docx":
-        return await _result_package_docx_response(project, result_package, surface_mode=normalized_surface_mode)
+        return await _result_package_docx_response(
+            project,
+            result_package,
+            surface_mode=normalized_surface_mode,
+            internal_export_mode=internal_export_mode,
+        )
     if format == "pptx":
-        return await _result_package_pptx_response(project, result_package, surface_mode=normalized_surface_mode)
+        return await _result_package_pptx_response(
+            project,
+            result_package,
+            surface_mode=normalized_surface_mode,
+            internal_export_mode=internal_export_mode,
+        )
     if format == "json":
         return result_package
     return result_package
@@ -2555,14 +5087,15 @@ async def project_result_explanation(
     request: Request,
     audience: str = Query("manager", pattern="^(developer|manager|client)$"),
     surface_mode: str = Query("internal", pattern="^(internal|external)$"),
+    run_id: str | None = Query(None),
     db: Session = Depends(get_db),
     user: User | None = Depends(get_current_user_optional),
 ) -> ResultExplanationResponse:
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     project = _project_or_404(project_id, user, db)
-    context = _load_project_result_context(project, db=db, app_version=getattr(request.app, "version", None))
-    return ExplanationPresenter().present(
+    context = _load_project_result_context(project, db=db, app_version=getattr(request.app, "version", None), run_id=run_id)
+    return _present_project_result_impl(
         project_id=project.id,
         result_package=context["result_package"],
         audience=audience,
@@ -2575,14 +5108,15 @@ async def project_result_qa(
     project_id: str,
     payload: ResultQARequest,
     request: Request,
+    run_id: str | None = Query(None),
     db: Session = Depends(get_db),
     user: User | None = Depends(get_current_user_optional),
 ) -> ResultQAResponse:
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     project = _project_or_404(project_id, user, db)
-    context = _load_project_result_context(project, db=db, app_version=getattr(request.app, "version", None))
-    return await ResultQuestionAnsweringService().answer(
+    context = _load_project_result_context(project, db=db, app_version=getattr(request.app, "version", None), run_id=run_id)
+    return await _answer_project_result_question_impl(
         project_id=project.id,
         result_package=context["result_package"],
         question=payload.question,

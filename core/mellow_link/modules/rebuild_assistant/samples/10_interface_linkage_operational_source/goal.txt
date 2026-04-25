@@ -1,0 +1,1 @@
+은행 전문 수신, interface staging 적재, ACK 상태 확정, retry/fail, PAY_ORDER 연계 흐름을 분석하라.
