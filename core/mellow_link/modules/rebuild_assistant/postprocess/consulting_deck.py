@@ -221,6 +221,72 @@ _CONCISE_REPLACEMENTS: tuple[tuple[str, str], ...] = (
     ("분리해야 합니다", "분리합니다"),
 )
 
+_EXTERNAL_LABEL_PREFIXES: dict[str, str] = {
+    "상황 / 목적": "",
+    "문제 정의": "문제: ",
+    "판단 질문": "검토 질문: ",
+    "선택지 비교": "선택지: ",
+    "판단 기준": "기준: ",
+    "결론": "",
+    "핵심 이유": "이유: ",
+    "누락된 정보": "추가 확인 필요: ",
+    "리스크": "리스크: ",
+    "숨겨진 전제 / 가정": "가정: ",
+    "단계별 추진 흐름": "",
+    "중점 실행 과제": "",
+    "근거": "근거: ",
+    "핵심 규칙": "핵심 규칙: ",
+    "설계 흐름": "",
+    "적용 방향": "적용 방향: ",
+    "후속 판단 포인트": "후속 판단 포인트: ",
+}
+
+_CODE_INPUT_HINTS: tuple[str, ...] = (
+    r"\bselect\b",
+    r"\bjoin\b",
+    r"\bwhere\b",
+    r"\binsert\b",
+    r"\bupdate\b",
+    r"\bdelete\b",
+    r"\bsql\b",
+    r"\bapi\b",
+    r"\bclass\b",
+    r"\bfunction\b",
+    r"\bdef\b",
+    r"\btable\b",
+    r"\bschema\b",
+    r"\bgl\b",
+    r"\bfifo\b",
+    r"\blot\b",
+    r"입력 검증",
+    r"저장 전",
+    r"차단 조건",
+    r"예외 처리",
+    r"파라미터",
+    r"조회 조건",
+    r"전표",
+    r"검증 규칙",
+)
+
+_DOCUMENT_INPUT_HINTS: tuple[str, ...] = (
+    r"보고서",
+    r"컨설팅",
+    r"개요",
+    r"배경",
+    r"목적",
+    r"비전",
+    r"계획",
+    r"전략",
+    r"방향",
+    r"효과",
+    r"현행",
+    r"추진",
+    r"개선",
+    r"문제 정의",
+    r"검토 질문",
+    r"제안",
+)
+
 
 def build_consulting_deck(
     contract: ConsultingMinContract,
@@ -234,6 +300,7 @@ def build_consulting_deck(
     normalized_surface_mode = "external" if surface_mode == "external" else "internal"
     normalized_family = _normalized_family(family)
     information_role = resolve_information_role(family=normalized_family, question_axis=question_axis)
+    surface_style = _surface_style(contract, family=normalized_family, surface_mode=normalized_surface_mode)
     implementation_actions = _implementation_action_items(contract)
     vision_actions = _vision_action_items(implementation_actions)
     chapters = []
@@ -249,11 +316,24 @@ def build_consulting_deck(
                 family=normalized_family,
                 information_role=information_role,
             )
-            resolved_items = _presentation_items(items, surface_mode=normalized_surface_mode)
+            resolved_items = _presentation_items(
+                items,
+                surface_mode=normalized_surface_mode,
+                chapter_key=chapter_key,
+                section_key=section_key,
+                surface_style=surface_style,
+            )
             sections.append(
                 {
                     "section_key": section_key,
-                    "title": _section_title(chapter_key, section_key, family=normalized_family, information_role=information_role),
+                    "title": _section_title(
+                        chapter_key,
+                        section_key,
+                        family=normalized_family,
+                        information_role=information_role,
+                        surface_mode=normalized_surface_mode,
+                        surface_style=surface_style,
+                    ),
                     "items": resolved_items or [_empty_state_message(section_key, surface_mode=normalized_surface_mode)],
                     "uses_placeholder": not bool(resolved_items),
                 }
@@ -374,13 +454,70 @@ def _normalized_family(family: str) -> str:
     return normalized if normalized in _FAMILY_CHAPTER_TITLES else ""
 
 
+def _surface_style(contract: ConsultingMinContract, *, family: str, surface_mode: str) -> str:
+    if surface_mode != "external":
+        return "document_style"
+    if family == "operational_source":
+        return "technical_style"
+    joined = " ".join(
+        [
+            *list(contract.context or []),
+            *list(contract.problem_definition or []),
+            *list(contract.decision_question or []),
+            *list(contract.options or []),
+            *list(contract.decision_criteria or []),
+            *list(contract.evidence or []),
+            *list(contract.missing_information or []),
+            *list(contract.as_is or []),
+            *list(contract.process_flow or []),
+            *list(contract.rules or []),
+            *list(contract.risks or []),
+            *list(contract.actions or []),
+        ]
+    ).lower()
+    code_score = sum(1 for pattern in _CODE_INPUT_HINTS if re.search(pattern, joined, re.IGNORECASE))
+    document_score = sum(1 for pattern in _DOCUMENT_INPUT_HINTS if re.search(pattern, joined, re.IGNORECASE))
+    if code_score >= 4 and (document_score <= 2 or code_score >= document_score * 2):
+        return "technical_style"
+    if code_score >= 3 and document_score >= 3:
+        return "mixed_style"
+    return "document_style"
+
+
 def _chapter_order(*, family: str, information_role: str) -> tuple[tuple[str, tuple[str, ...]], ...]:
     if family in {"operational_source", "option_comparison"} and information_role in _OPERATIONAL_ROLE_CHAPTER_ORDER:
         return _OPERATIONAL_ROLE_CHAPTER_ORDER[information_role]
     return _CHAPTER_ORDER
 
 
-def _section_title(chapter_key: str, section_key: str, *, family: str, information_role: str = "") -> str:
+def _section_title(
+    chapter_key: str,
+    section_key: str,
+    *,
+    family: str,
+    information_role: str = "",
+    surface_mode: str = "internal",
+    surface_style: str = "document_style",
+) -> str:
+    if surface_mode == "external":
+        if surface_style == "technical_style":
+            overrides = {
+                ("overview", "as_is"): "핵심 문제",
+                ("approach", "risks"): "영향",
+                ("implementation", "actions"): "권장 조치",
+                ("design", "rules"): "검증 포인트",
+            }
+            title = overrides.get((chapter_key, section_key))
+            if title:
+                return title
+        if surface_style == "mixed_style":
+            overrides = {
+                ("implementation", "process_flow"): "코드 분석 포인트",
+                ("design", "rules"): "코드 검증 포인트",
+            }
+            title = overrides.get((chapter_key, section_key))
+            if title:
+                return title
     role_title = _OPERATIONAL_ROLE_SECTION_TITLES.get(information_role, {}).get((chapter_key, section_key))
     if family in {"operational_source", "option_comparison"} and role_title:
         return role_title
@@ -404,10 +541,44 @@ def _chapter_title(chapter_key: str, *, family: str, surface_mode: str, informat
     return _CHAPTER_TITLES[surface_mode][chapter_key]
 
 
-def _presentation_items(items: list[str], *, surface_mode: str) -> list[str]:
-    if surface_mode != "external":
-        return [_normalize_spaces(item) for item in items if _normalize_spaces(item)]
-    return [_externalize_text(item) for item in items if _externalize_text(item)]
+def _presentation_items(
+    items: list[str],
+    *,
+    surface_mode: str,
+    chapter_key: str = "",
+    section_key: str = "",
+    surface_style: str = "document_style",
+) -> list[str]:
+    seen: set[str] = set()
+    output: list[str] = []
+    for item in items:
+        normalized = _normalize_spaces(item) if surface_mode != "external" else _externalize_item(item)
+        key = _comparison_key(normalized)
+        if not normalized or not key or key in seen:
+            continue
+        seen.add(key)
+        output.append(normalized)
+    if surface_mode == "external" and chapter_key == "approach" and section_key == "gap":
+        return _compact_external_judgment_items(output)
+    if surface_mode == "external" and surface_style == "technical_style":
+        section_map = {
+            ("overview", "as_is"): "핵심 문제",
+            ("approach", "risks"): "영향",
+            ("implementation", "actions"): "권장 조치",
+            ("design", "rules"): "검증 포인트",
+        }
+        prefix = section_map.get((chapter_key, section_key))
+        if prefix:
+            return _style_prefixed_items(output, prefix)
+    if surface_mode == "external" and surface_style == "mixed_style":
+        section_map = {
+            ("implementation", "process_flow"): "코드 분석 포인트",
+            ("design", "rules"): "검증 포인트",
+        }
+        prefix = section_map.get((chapter_key, section_key))
+        if prefix:
+            return _style_prefixed_items(output, prefix)
+    return output
 
 
 def _empty_state_message(section_key: str, *, surface_mode: str) -> str:
@@ -435,8 +606,67 @@ def _externalize_text(text: str) -> str:
     )
     for old, new in replacements:
         normalized = normalized.replace(old, new)
+    normalized = re.sub(r"^(따라서|즉|그리고)\s+", "", normalized)
+    normalized = normalized.replace("우선 검토안", "적용 방향")
+    normalized = normalized.replace("검토안", "적용 방향")
+    normalized = normalized.replace("개선 후보", "개선안")
+    normalized = normalized.replace("후속 개선 후보", "후속 개선안")
+    normalized = normalized.replace("후보", "대상")
     normalized = normalized.strip(" ,")
     return normalized
+
+
+def _externalize_item(text: str) -> str:
+    normalized = _normalize_spaces(text)
+    if not normalized:
+        return ""
+    match = re.match(r"^\[(?P<label>[^\]]+)\]\s*(?P<body>.+)$", normalized)
+    if not match:
+        return _externalize_text(normalized)
+    label = str(match.group("label") or "").strip()
+    body = _externalize_text(str(match.group("body") or "").strip())
+    if not body:
+        return ""
+    if label == "결론":
+        body = re.sub(r"^현 단계 우선 검토안:\s*", "", body).strip()
+        body = re.sub(r"^우선 검토안:\s*", "", body).strip()
+        body = re.sub(r"^(실행 착수 가능|조건 확인 후 실행|검증 후 적용|실행 불가)\s*:?\s*", "", body).strip()
+        if body == "추가 확인 후 확정 필요":
+            return "추가 확인 후 재판단"
+        return f"검증 후 적용: {_short_external_fragment(body, max_length=30)}" if body else ""
+    prefix = _EXTERNAL_LABEL_PREFIXES.get(label, "")
+    rendered = f"{prefix}{body}" if prefix else body
+    return _short_external_fragment(rendered, max_length=34 if label in {"핵심 이유", "근거", "누락된 정보", "리스크"} else 40)
+
+
+def _compact_external_judgment_items(items: list[str]) -> list[str]:
+    if not items:
+        return []
+    state_item = next((item for item in items if re.match(r"^(실행 착수 가능|조건 확인 후 실행|검증 후 적용|실행 불가):", item)), "")
+    reason_item = next((item for item in items if item.startswith("이유: ")), "")
+    support_item = next((item for item in items if item.startswith("근거: ") or item.startswith("기준: ")), "")
+    follow_up_item = next((item for item in items if item.startswith("추가 확인 필요: ")), "")
+    compacted = [item for item in (state_item, reason_item, follow_up_item or support_item) if item]
+    return compacted or items[:3]
+
+
+def _style_prefixed_items(items: list[str], prefix: str) -> list[str]:
+    output: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        normalized = _short_external_fragment(_normalize_spaces(item), max_length=34)
+        normalized = re.sub(r"^(실행 착수 가능|조건 확인 후 실행|검증 후 적용|실행 불가)\s*:?\s*", "", normalized).strip()
+        if not normalized:
+            continue
+        rendered = f"{prefix}: {normalized}"
+        key = _comparison_key(rendered)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        output.append(rendered)
+        if len(output) >= 3:
+            break
+    return output
 
 
 def _overview_items(contract: ConsultingMinContract) -> list[str]:
@@ -490,8 +720,8 @@ def _softened_conclusion_items(items: list[str], missing_information: list[str])
     if not missing_information:
         return conclusions
     if conclusions:
-        return [f"현 단계 우선 검토안: {conclusions[0]}"]
-    return ["추가 확인 후 확정 필요"]
+        return [f"검증 후 적용: {conclusions[0]}"]
+    return ["추가 확인 후 재판단"]
 
 
 def _labeled_group_items(groups: list[tuple[str, list[str]]]) -> list[str]:
@@ -611,6 +841,26 @@ def _concise_text(text: str) -> str:
     for old, new in _CONCISE_REPLACEMENTS:
         normalized = normalized.replace(old, new)
     return normalized.strip(" ,")
+
+
+def _short_external_fragment(text: str, *, max_length: int = 32) -> str:
+    normalized = _normalize_spaces(text).strip(" ,.")
+    if not normalized:
+        return ""
+    separators = ("입니다 ", "이며 ", "이므로 ", ", ", " · ", " 및 ", "해서 ", "하고 ")
+    for separator in separators:
+        if len(normalized) <= max_length:
+            break
+        if separator in normalized:
+            candidate = normalized.split(separator, 1)[0].strip(" ,.")
+            if candidate:
+                normalized = candidate
+    if len(normalized) <= max_length:
+        return normalized
+    clipped = normalized[: max_length + 1].rstrip()
+    if " " in clipped:
+        clipped = clipped.rsplit(" ", 1)[0].rstrip()
+    return clipped.strip(" ,.")
 
 
 def _normalize_spaces(text: str) -> str:

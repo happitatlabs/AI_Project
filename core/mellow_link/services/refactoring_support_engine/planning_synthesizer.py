@@ -61,6 +61,26 @@ class PlanningSynthesizer:
             return []
         return self.helper._ordered_templates_for_generation(prepared, applied_templates, grounded_rules)
 
+    def describe_execution_context(
+        self,
+        prepared: Any,
+        grounded_rules: list[GroundedBusinessRule],
+        retained_contracts: list[RetainedContract],
+        decisions: DecisionArtifacts | None,
+    ) -> dict[str, Any]:
+        anchored = self._apply_decision_anchor(prepared, grounded_rules, self._require_decisions(decisions))
+        template_ids = [item.template_id for item in anchored if str(item.template_id or "").strip()]
+        stage_profile = self.helper.execution_stage_profile(prepared, anchored)
+        return {
+            "primary_template_id": template_ids[0] if template_ids else "",
+            "template_ids": template_ids,
+            "family": str(getattr(getattr(decisions, "family_classification", None), "family", "") or "").strip(),
+            "primary_feature_mode": str(getattr(getattr(prepared, "signals", None), "primary_feature_mode", "") or "").strip(),
+            "stage_profile": stage_profile,
+            "related_rule_titles": [item.title for item in grounded_rules[:3]],
+            "related_contract_items": [item.item for item in retained_contracts[:3]],
+        }
+
     def build_priority_split_items(
         self,
         prepared: Any,
@@ -168,6 +188,11 @@ class PlanningSynthesizer:
                     item=f"{rule.title} 운영 기준을 확인하는 것이 필요합니다.",
                     reason=rule.confidence_reason or "직접 확인 가능한 운영 자산이 부족합니다.",
                     evidence=rule.evidence,
+                    target=rule.title,
+                    required_evidence=self._required_evidence_descriptions(rule.evidence),
+                    pass_criteria=f"{rule.title} 규칙의 입력, 상태, 결과 조건이 source evidence와 다시 연결됩니다.",
+                    failure_action="직접 근거가 확보되기 전에는 유지 계약 또는 실행 결론으로 확정하지 않습니다.",
+                    checkpoint_kind="rule_validation",
                 )
             )
         output: list[VerificationItem] = []
@@ -195,6 +220,11 @@ class PlanningSynthesizer:
                     item=f"{spec['item']} 운영 기준을 추가 자산으로 확인하는 것이 필요합니다.",
                     reason="직접 확인 가능한 상태값, 컬럼명 또는 규칙 조건 근거가 부족해 유지 계약으로 확정할 수 없습니다.",
                     evidence=[],
+                    target=str(spec["item"]),
+                    required_evidence=[f"키워드 확인: {', '.join(spec['keywords'][:3])}"],
+                    pass_criteria="상태값, 컬럼명, 규칙 조건을 뒷받침하는 직접 evidence가 추가 확보됩니다.",
+                    failure_action="직접 evidence 확보 전에는 유지 계약으로 승격하지 않고 검토 후보로 유지합니다.",
+                    checkpoint_kind="contract_confirmation",
                 )
             )
         if workflow_primary:
@@ -211,7 +241,18 @@ class PlanningSynthesizer:
             for item_text, reason in workflow_defaults:
                 if any(self.helper._normalize_key(existing.item) == self.helper._normalize_key(item_text) for existing in output):
                     continue
-                output.append(VerificationItem(item=item_text, reason=reason, evidence=[]))
+                output.append(
+                    VerificationItem(
+                        item=item_text,
+                        reason=reason,
+                        evidence=[],
+                        target="승인 단계·예외 승인 조건",
+                        required_evidence=["승인 단계 정의", "예외 승인 규칙", "통지/후속 처리 기준"],
+                        pass_criteria="승인 단계, 예외 승인, 후속 처리 기준이 같은 워크플로우 규칙으로 정리됩니다.",
+                        failure_action="승인 흐름을 고정하지 않고 추가 확인 항목으로 유지합니다.",
+                        checkpoint_kind="workflow_confirmation",
+                    )
+                )
         elif access_control_primary:
             access_defaults = [
                 (
@@ -230,7 +271,18 @@ class PlanningSynthesizer:
             for item_text, reason in access_defaults:
                 if any(self.helper._normalize_key(existing.item) == self.helper._normalize_key(item_text) for existing in output):
                     continue
-                output.append(VerificationItem(item=item_text, reason=reason, evidence=[]))
+                output.append(
+                    VerificationItem(
+                        item=item_text,
+                        reason=reason,
+                        evidence=[],
+                        target="권한·승인 범위",
+                        required_evidence=["권한 위임 범위", "예외 승인 조건", "후속 통지 기준"],
+                        pass_criteria="권한 위임 범위와 예외 승인 조건이 같은 정책 기준으로 정리됩니다.",
+                        failure_action="권한 정책을 확정하지 않고 조건부 검토안으로 유지합니다.",
+                        checkpoint_kind="access_control_confirmation",
+                    )
+                )
         if not output:
             fallback_template = self.helper._fallback_verification_template(prepared, grounded_rules)
             for template_id in ([fallback_template] if fallback_template else []):
@@ -240,6 +292,11 @@ class PlanningSynthesizer:
                             item="대리 승인 범위와 병렬 승인 가능 조건을 확인하는 것이 필요합니다.",
                             reason="승인 트리거와 승인 주체는 직접 확인되었지만 대리 승인 범위와 병렬 승인 조건은 추가 확인이 필요합니다.",
                             evidence=[],
+                            target="승인 단계·대리 승인 조건",
+                            required_evidence=["승인 트리거", "승인 주체", "대리 승인 범위"],
+                            pass_criteria="대리 승인과 병렬 승인 조건이 같은 워크플로우 규칙으로 정리됩니다.",
+                            failure_action="승인 구조를 고정하지 않고 추가 확인 대상으로 남깁니다.",
+                            checkpoint_kind="workflow_confirmation",
                         )
                     )
                 elif template_id == "state_transition":
@@ -248,6 +305,11 @@ class PlanningSynthesizer:
                             item="상태 전이 이후 후속 승인 또는 운영 처리 절차를 확인하는 것이 필요합니다.",
                             reason="상태 전이 규칙은 직접 확인되었지만 후속 운영 절차는 현재 자산에서 모두 확인되지 않았습니다.",
                             evidence=[],
+                            target="상태 전이 이후 처리 절차",
+                            required_evidence=["상태 전이 규칙", "후속 처리 절차", "운영 메시지 기준"],
+                            pass_criteria="상태 전이 후 처리 절차가 같은 상태 정책 기준으로 정리됩니다.",
+                            failure_action="후속 처리 절차를 추가 근거 확보 전까지 보류합니다.",
+                            checkpoint_kind="state_transition_confirmation",
                         )
                     )
                 elif template_id == "access_control":
@@ -256,6 +318,11 @@ class PlanningSynthesizer:
                             item="권한 규칙 적용 이후 외부 승인 또는 통지 절차를 확인하는 것이 필요합니다.",
                             reason="승인 주체는 직접 확인되었지만 후속 운영 절차는 추가 확인이 필요합니다.",
                             evidence=[],
+                            target="권한 정책 후속 절차",
+                            required_evidence=["승인 주체", "후속 승인 절차", "통지 기준"],
+                            pass_criteria="권한 정책 결과와 후속 승인/통지 절차가 같은 정책 기준으로 정리됩니다.",
+                            failure_action="권한 구조를 검토안으로 유지하고 후속 절차는 추가 확인 대상으로 남깁니다.",
+                            checkpoint_kind="access_control_confirmation",
                         )
                     )
                 elif template_id == "validation":
@@ -264,6 +331,11 @@ class PlanningSynthesizer:
                             item="검증 실패 이후 예외 처리와 운영 메시지 기준을 확인하는 것이 필요합니다.",
                             reason="차단 조건은 직접 확인되었지만 운영 메시지와 예외 처리 기준은 추가 확인이 필요합니다.",
                             evidence=[],
+                            target="차단 조건·예외 처리 기준",
+                            required_evidence=["차단 조건", "예외 처리 규칙", "운영 메시지 기준"],
+                            pass_criteria="검증 실패 후 처리 경로와 운영 메시지 기준이 같은 검증 규칙으로 정리됩니다.",
+                            failure_action="검증 계층 분리는 유지하되 예외 처리 결론은 보류합니다.",
+                            checkpoint_kind="validation_confirmation",
                         )
                     )
                 elif template_id == "amount_threshold":
@@ -272,6 +344,11 @@ class PlanningSynthesizer:
                             item="한도 초과 이후 후속 처리 기준과 사용자 안내 기준을 확인하는 것이 필요합니다.",
                             reason="금액 구간과 한도 경계는 직접 확인되었지만 한도 초과 이후 후속 처리 기준은 추가 확인이 필요합니다.",
                             evidence=[],
+                            target="금액 한도 초과 처리 기준",
+                            required_evidence=["금액 구간 경계", "한도 초과 후속 처리", "사용자 안내 기준"],
+                            pass_criteria="한도 초과 후속 처리 기준과 사용자 안내 기준이 같은 정책 기준으로 정리됩니다.",
+                            failure_action="한도 초과 처리안을 확정하지 않고 추가 검토 대상으로 남깁니다.",
+                            checkpoint_kind="threshold_confirmation",
                         )
                     )
         return self.helper._dedupe_by_normalized_text(output, attr="item")
@@ -309,3 +386,17 @@ class PlanningSynthesizer:
 
     def build_recommended_directions(self, prepared: Any) -> list[str]:
         return self.helper.build_recommended_directions(prepared)
+
+    def _required_evidence_descriptions(self, evidence) -> list[str]:
+        descriptions: list[str] = []
+        for item in list(evidence or [])[:3]:
+            asset_name = str(getattr(item, "asset_name", "") or "").strip()
+            locator = str(getattr(item, "locator", "") or "").strip()
+            excerpt = str(getattr(item, "excerpt", "") or "").strip()
+            if asset_name and locator:
+                descriptions.append(f"{asset_name}:{locator}")
+            elif asset_name:
+                descriptions.append(asset_name)
+            elif excerpt:
+                descriptions.append(excerpt[:80])
+        return descriptions

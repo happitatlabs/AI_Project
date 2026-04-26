@@ -266,6 +266,93 @@ class DocumentEntityTokenizer:
         "전개",
         "개요",
     }
+    _LOW_CONF_PLANNING_STEMS = {
+        "방향",
+        "계획",
+        "이행",
+        "목표",
+        "모델",
+        "전략",
+        "체계",
+        "개선",
+        "구축",
+        "설계",
+        "운영",
+        "관리",
+        "지원",
+        "효율",
+        "표준",
+        "최적",
+        "분석",
+        "도출",
+        "요구",
+        "도입",
+        "고려",
+        "정비",
+        "대응",
+        "방법",
+        "아키텍처",
+        "마스터",
+        "비전",
+        "개요",
+        "소개",
+        "목차",
+        "흐름",
+        "구성",
+        "전제",
+        "제약",
+        "차세대",
+        "노후",
+        "최신",
+        "신기술",
+        "정보기술",
+        "지능",
+        "구체",
+        "현실",
+        "이상",
+        "주요",
+        "문제",
+        "공정",
+        "자료",
+        "자재",
+        "재료",
+        "배부",
+        "코드",
+        "목록",
+        "비율",
+        "조회",
+        "기록",
+        "조성",
+        "조달",
+        "진행",
+        "반복",
+        "위치",
+        "변동",
+        "소요",
+        "이익",
+        "제품",
+        "사업",
+        "시스템",
+        "방법론",
+        "공정서",
+        "차선책",
+        "전면개편",
+        "현장",
+        "담당",
+    }
+    _LOW_CONF_NON_NAME_ENDINGS = (
+        "적인",
+        "화된",
+        "하게",
+        "하며",
+        "하여",
+        "한다",
+        "된다",
+        "도록",
+        "하기",
+        "해서",
+        "으로써",
+    )
     _DEPARTMENT_SUFFIXES = (
         "본부",
         "센터",
@@ -636,6 +723,23 @@ class DocumentEntityTokenizer:
         normalized = self._normalize_value(value)
         return bool(self._HEADING_OR_TOC_PATTERN.match(normalized) or self._TOC_DOT_LEADER_PATTERN.search(normalized))
 
+    def _looks_like_plain_heading_phrase(self, value: str) -> bool:
+        normalized = self._normalize_value(value)
+        if not normalized or self._has_explicit_person_context(normalized):
+            return False
+        tokens = [match.group(0) for match in re.finditer(r"[가-힣A-Za-z0-9]+", normalized)]
+        if not tokens or len(tokens) > 8:
+            return False
+        first_token = self._normalize_value(tokens[0])
+        compact = "".join(tokens)
+        if self._PERSON_KO_PATTERN.match(first_token) and self._looks_like_korean_person_name(first_token):
+            return False
+        if self._PERSON_EN_PATTERN.match(first_token) and " " in first_token:
+            return False
+        if len(compact) > 48:
+            return False
+        return any(stem in compact for stem in self._LOW_CONF_PLANNING_STEMS)
+
     def _looks_like_structured_requirement_line(self, value: str, *, section: str = "body") -> bool:
         normalized = self._normalize_value(value)
         if not normalized:
@@ -656,6 +760,44 @@ class DocumentEntityTokenizer:
             return True
         if (self._EMAIL_PATTERN.search(normalized) or self._PHONE_PATTERN.search(normalized)) and self._PERSON_CONTACT_NEARBY_PATTERN.search(normalized):
             return True
+        return False
+
+    def _contains_low_conf_planning_hint(self, value: str) -> bool:
+        normalized = self._normalize_value(value)
+        compact = normalized.replace(" ", "")
+        if not compact:
+            return False
+        if any(stem in compact for stem in self._LOW_CONF_PLANNING_STEMS):
+            return True
+        return any(compact.endswith(ending) for ending in self._LOW_CONF_NON_NAME_ENDINGS)
+
+    def _line_contains_potential_person_token(self, value: str) -> bool:
+        normalized = self._normalize_bullet_content(value)
+        for raw_token in re.findall(r"[가-힣A-Za-z0-9]+", normalized):
+            token = self._normalize_value(raw_token)
+            if self._PERSON_KO_PATTERN.match(token) and self._looks_like_korean_person_name(token):
+                return True
+            if self._PERSON_EN_PATTERN.match(token) and " " in token:
+                return True
+        return False
+
+    def _should_suppress_low_conf_term(self, token: str, *, line: str, section: str = "body") -> bool:
+        normalized_line = self._normalize_bullet_content(line)
+        normalized_token = self._normalize_value(token)
+        if not normalized_token:
+            return True
+        if self._has_explicit_person_context(normalized_line):
+            return False
+        if self._looks_like_plain_heading_phrase(normalized_line):
+            return True
+        if self._contains_accounting_domain_term(normalized_token):
+            return True
+        if self._contains_low_conf_planning_hint(normalized_token):
+            return True
+        if section.lower() in {"texts", "notes"}:
+            tokens = re.findall(r"[가-힣A-Za-z0-9]+", normalized_line)
+            if len(tokens) >= 4 and self._contains_low_conf_planning_hint(normalized_line) and not self._line_contains_potential_person_token(normalized_line):
+                return True
         return False
 
     def _has_specific_non_generic_term(self, value: str, *, ignore_tokens: set[str] | None = None) -> bool:
@@ -768,14 +910,20 @@ class DocumentEntityTokenizer:
             return []
         if self._looks_like_structured_requirement_line(normalized_line, section=section):
             return []
+        if self._looks_like_plain_heading_phrase(normalized_line):
+            return []
         excluded = {self._normalize_value(item) for item in (exclude or set()) if item}
         seen: "OrderedDict[str, None]" = OrderedDict()
         for raw_token in self._PERSON_LABELLESS_TOKEN_SPLIT_PATTERN.split(normalized_line):
             token = self._normalize_value(raw_token.strip("[]'\".!?"))
             if not token or token in excluded or self._is_person_stop_term(token) or self._looks_like_department(token):
                 continue
+            if self._should_suppress_low_conf_term(token, line=normalized_line, section=section):
+                continue
             candidate = self._normalize_person_value(self._trim_korean_postposition(token))
             if candidate in excluded or self._is_person_stop_term(candidate) or self._looks_like_department(candidate):
+                continue
+            if self._should_suppress_low_conf_term(candidate, line=normalized_line, section=section):
                 continue
             if self._PERSON_KO_PATTERN.match(candidate) and self._looks_like_korean_person_name(candidate):
                 seen.setdefault(candidate, None)

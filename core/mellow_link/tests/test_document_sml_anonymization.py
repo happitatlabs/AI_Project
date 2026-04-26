@@ -203,3 +203,16 @@ def test_person_candidates_skip_bpr_requirement_lines_but_keep_explicit_role_con
     assert list(tokenizer.iter_label_less_person_candidates("작성자: 홍길동", section="texts")) == ["홍길동"]
     assert list(tokenizer.iter_label_less_person_candidates("문의: 홍길동 / hgd@example.com", section="texts")) == ["홍길동"]
     assert list(tokenizer.iter_label_less_person_candidates("홍길동 부장", section="texts")) == ["홍길동"]
+
+
+def test_low_conf_terms_skip_consulting_headings_and_business_process_phrases():
+    tokenizer = DocumentEntityTokenizer()
+
+    assert list(tokenizer.iter_low_conf_term_candidates("방향성 수립", section="texts")) == []
+    assert list(tokenizer.iter_low_conf_term_candidates("차세대 경영정보시스템 구축 BPR/ISMP 수립 컨설팅", section="texts")) == []
+    assert list(tokenizer.iter_low_conf_term_candidates("현 시스템과 개선안의 이익분석", section="texts")) == []
+    assert list(tokenizer.iter_low_conf_term_candidates("경영정보시스템의 운영 환경과 기능 분석을 통하여 개선점을 도출하고 최적화된 모델을 구축할 수 있는 구체적인 이행 계획을 수립하고자 함", section="texts")) == []
+    assert list(tokenizer.iter_low_conf_term_candidates("생산의 각 부문(조립,부품,치공구)에서 적기에 작업을 수행하기 위해서는 W/O 발행을 위한", section="texts")) == []
+    assert list(tokenizer.iter_low_conf_term_candidates("진척담당(현장)으로부터 의뢰 받은 비정규 Work Order를 생성하고,", section="texts")) == []
+
+    assert list(tokenizer.iter_low_conf_term_candidates("홍길동 분석 시스템 구축", section="texts")) == ["홍길동"]
