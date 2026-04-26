@@ -128,6 +128,41 @@ class TemplateSupport:
                 or family in {"document_consulting", "option_comparison"}
             )
 
+    def execution_stage_profile(
+        self,
+        prepared: PreparedRebuildInput,
+        applied_templates: list[AppliedJudgmentTemplate],
+    ) -> dict[str, str]:
+            primary = self._primary_template(prepared, applied_templates)
+            template_id = str(getattr(primary, "template_id", "") or "").strip()
+            if not template_id and self._uses_document_neutral_template_fallback(prepared, applied_templates):
+                return {
+                    "template_id": "document_consulting",
+                    "stage_kind": "consulting_analysis",
+                    "domain_focus": self._document_focus_terms(prepared)[0],
+                }
+            stage_kind_map = {
+                "workflow": "workflow_design",
+                "state_transition": "state_transition_design",
+                "access_control": "access_control_design",
+                "query_filter": "query_model_design",
+                "validation": "validation_split",
+                "amount_threshold": "threshold_policy_design",
+            }
+            domain_focus_map = {
+                "workflow": "승인 단계와 예외 승인 구조",
+                "state_transition": "상태 전이 규칙과 처리 가능 상태",
+                "access_control": "권한 주체와 승인 범위",
+                "query_filter": "조회 조건과 필터 구조",
+                "validation": "차단 조건과 저장 전 검증",
+                "amount_threshold": "금액 구간과 한도 정책",
+            }
+            return {
+                "template_id": template_id,
+                "stage_kind": stage_kind_map.get(template_id, "implementation_plan"),
+                "domain_focus": domain_focus_map.get(template_id, self._primary_concept(prepared)),
+            }
+
     def infer_target_architecture(self, prepared: PreparedRebuildInput) -> list[str]:
             concept = self._primary_concept(prepared)
             primary = prepared.signals.primary_feature_mode

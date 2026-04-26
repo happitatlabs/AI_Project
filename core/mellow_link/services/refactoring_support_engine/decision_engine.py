@@ -12,13 +12,18 @@ from .policies import get_detector_policy, load_engine_policy_bundle
 from .runtime_contracts import assert_stage_action
 from .template_support import TemplateSupport
 from .schemas import (
+    DecisionBasis,
     DecisionArtifacts,
+    DecisionConflict,
     DecisionExplainability,
     DecisionRecord,
     DecisionSummary,
     DiagnosisArtifacts,
+    JudgmentCriteria,
     StructureAnalysisResult,
     make_stable_id,
+    max_recommendation_strength,
+    normalize_unit_interval,
 )
 
 
@@ -67,6 +72,15 @@ class DecisionEngine:
         "rewrite 제외",
         "재작성 금지",
         "재작성 제외",
+    )
+    GOAL_FORCING_KEYWORDS = (
+        "재구축",
+        "전환",
+        "마이그레이션",
+        "재설계",
+        "to-be",
+        "무조건",
+        "전면",
     )
     _ASSUMPTION_ALLOWED_MARKERS = {"가정", "전제", "조건부", "if_clause"}
     _ASSUMPTION_EXCLUDED_PREFIXES = ("가능하다면", "일반적으로", "통상적으로", "보통")
@@ -144,7 +158,19 @@ class DecisionEngine:
             prepared=prepared,
             retry_hint=retry_hint,
         )
-        decision_summary = self._build_summary(prepared, decisions)
+        decision_basis = self._build_decision_basis(
+            prepared,
+            diagnosis=diagnosis,
+            decisions=decisions,
+        )
+        conflicts = self._detect_decision_conflicts(
+            prepared,
+            diagnosis=diagnosis,
+            decisions=decisions,
+            decision_basis=decision_basis,
+        )
+        decision_basis = self._apply_conflict_strength_adjustments(decision_basis, conflicts)
+        decision_summary = self._build_summary(prepared, decisions, conflicts=conflicts)
         structural_judgment = self._structural_judgment(decision_summary)
         return DecisionArtifacts(
             decision_summary=decision_summary,
@@ -161,6 +187,8 @@ class DecisionEngine:
             decision_items=decision_items,
             assumptions=assumptions,
             synthetic_signal_detected=synthetic_signal_detected,
+            decision_basis=decision_basis,
+            conflicts=conflicts,
         )
 
     def _apply_retry_hint(
@@ -215,6 +243,7 @@ class DecisionEngine:
         hotspot_scores = {item.component_id: item.score for item in structure.structure_snapshot.hotspots}
         scoring_policy = self.policy_bundle.scoring_policy
         goal_prefers_migration = self._goal_prefers_migration(prepared)
+        raw_goal_prefers_migration = self._raw_goal_prefers_migration(prepared)
         asset_migration_support = self._has_asset_migration_support(prepared)
         decision_breakdowns: dict[str, dict[str, int]] = {}
         decision_explainability: dict[str, DecisionExplainability] = {}
@@ -239,7 +268,7 @@ class DecisionEngine:
                     evidence_ids=list(issue.evidence_ids),
                 )
             )
-        if goal_prefers_migration and not asset_migration_support:
+        if (goal_prefers_migration or raw_goal_prefers_migration) and not asset_migration_support:
             synthetic_signal_detected = True
         decisions, guard_triggered = self._apply_migration_hard_guard(decisions, diagnosis)
         synthetic_signal_detected = synthetic_signal_detected or guard_triggered
@@ -400,8 +429,32 @@ class DecisionEngine:
         )
 
     def _goal_prefers_migration(self, prepared: Any) -> bool:
-        goal = str(getattr(getattr(prepared, "intent", None), "goal", "") or getattr(prepared, "goal", "") or "").lower()
+        goal = self._effective_goal_text(prepared).lower()
         return any(keyword in goal for keyword in self.MIGRATION_SIGNAL_KEYWORDS)
+
+    def _raw_goal_prefers_migration(self, prepared: Any) -> bool:
+        goal = self._raw_goal_text(prepared).lower()
+        return any(keyword in goal for keyword in self.MIGRATION_SIGNAL_KEYWORDS)
+
+    def _raw_goal_forces_direction(self, prepared: Any) -> bool:
+        goal = self._raw_goal_text(prepared).lower()
+        return any(keyword in goal for keyword in self.GOAL_FORCING_KEYWORDS)
+
+    def _effective_goal_text(self, prepared: Any) -> str:
+        guarded = getattr(prepared, "guarded_decision_input", None)
+        if guarded is not None:
+            goal = str(getattr(guarded, "effective_goal", "") or "").strip()
+            if goal:
+                return goal
+        return str(getattr(getattr(prepared, "intent", None), "goal", "") or getattr(prepared, "goal", "") or "").strip()
+
+    def _raw_goal_text(self, prepared: Any) -> str:
+        guarded = getattr(prepared, "guarded_decision_input", None)
+        if guarded is not None:
+            goal = str(getattr(guarded, "raw_goal", "") or "").strip()
+            if goal:
+                return goal
+        return str(getattr(prepared, "raw_goal", "") or getattr(getattr(prepared, "intent", None), "goal", "") or getattr(prepared, "goal", "") or "").strip()
 
     def _has_asset_migration_support(self, prepared: Any) -> bool:
         assets = getattr(prepared, "assets", None)
@@ -418,7 +471,10 @@ class DecisionEngine:
         return any(keyword in combined for keyword in self.MIGRATION_ASSET_KEYWORDS)
 
     def _blocked_recommendation_types(self, prepared: Any) -> list[str]:
-        constraints = list(getattr(getattr(prepared, "intent", None), "constraints", []) or getattr(prepared, "constraints", []) or [])
+        guarded = getattr(prepared, "guarded_decision_input", None)
+        constraints = list(
+            getattr(guarded, "raw_constraints", []) or getattr(prepared, "raw_constraints", []) or getattr(getattr(prepared, "intent", None), "constraints", []) or []
+        )
         blocked: list[str] = []
         lowered = [str(item or "").lower() for item in constraints]
         if any(
@@ -535,9 +591,278 @@ class DecisionEngine:
     def _policy_for(self, detector_id: str):
         return get_detector_policy(detector_id, self.policy_bundle)
 
-    def _build_summary(self, prepared: Any, decisions: list[DecisionRecord]) -> DecisionSummary:
+    def _build_decision_basis(
+        self,
+        prepared: Any,
+        *,
+        diagnosis: DiagnosisArtifacts,
+        decisions: list[DecisionRecord],
+    ) -> list[DecisionBasis]:
+        issue_map = {item.issue_id: item for item in list(diagnosis.diagnosis_report.issues or [])}
+        missing_context_count = len(list(diagnosis.missing_context_details or []))
+        blocked_types = {
+            str(item or "").strip()
+            for item in list(getattr(prepared, "decision_constraint_filters", []) or [])
+            if str(item or "").strip()
+        }
+        raw_goal_signal_detected = self._raw_goal_prefers_migration(prepared)
+        goal_signal_applied = self._goal_prefers_migration(prepared)
+        asset_signal_detected = self._has_asset_migration_support(prepared)
+        raw_goal_text = self._raw_goal_text(prepared)
+        effective_goal_text = self._effective_goal_text(prepared)
+        bases: list[DecisionBasis] = []
+        for item in decisions:
+            issue = issue_map.get(item.issue_ids[0], None) if item.issue_ids else None
+            severity = max(0, int(getattr(issue, "severity", 0) or 0))
+            blast_radius = max(0, int(getattr(issue, "blast_radius", 0) or 0))
+            effort = max(0, int(getattr(issue, "effort", 0) or 0))
+            issue_confidence = normalize_unit_interval(getattr(issue, "confidence", 0.0) or 0.0)
+            evidence_ref_count = len(list(item.evidence_ids or []))
+            evidence_coverage = normalize_unit_interval(evidence_ref_count / 2.0)
+            evidence_strength = normalize_unit_interval(
+                (evidence_coverage * 0.45)
+                + (issue_confidence * 0.3)
+                + (0.25 if bool(item.issue_ids and item.evidence_ids) else 0.0)
+            )
+            input_sufficiency = normalize_unit_interval(1.0 - (min(missing_context_count, 3) / 3.0))
+            change_cost = normalize_unit_interval(effort / 5.0)
+            delivery_speed = normalize_unit_interval(1.0 - change_cost)
+            maintainability_gain = normalize_unit_interval((severity + blast_radius) / 10.0)
+            if item.decision_type == "refactor":
+                contract_stability = 0.9
+            elif item.decision_type == "redesign":
+                contract_stability = 0.65
+            else:
+                contract_stability = 0.5
+            contract_stability = normalize_unit_interval(contract_stability)
+            notes: list[str] = []
+            scoring_reasons: list[str] = []
+            if raw_goal_signal_detected and not goal_signal_applied:
+                notes.append("raw_goal_signal_dropped_by_source_guard")
+                scoring_reasons.append("raw_goal_signal_dropped_by_source_guard")
+            if self._raw_goal_forces_direction(prepared) and raw_goal_text.strip() != effective_goal_text.strip():
+                notes.append("raw_goal_direction_softened_by_source_guard")
+                scoring_reasons.append("raw_goal_direction_softened_by_source_guard")
+            if item.decision_type in blocked_types:
+                notes.append("user_constraint_blocks_decision_type")
+                scoring_reasons.append("blocked_by_constraint")
+            if not item.evidence_ids:
+                notes.append("missing_issue_evidence")
+                scoring_reasons.append("missing_issue_evidence")
+            if item.issue_ids and item.evidence_ids:
+                scoring_reasons.append("source_grounded_decision")
+            if missing_context_count:
+                scoring_reasons.append("missing_context_penalty")
+            risk_score = normalize_unit_interval((severity / 5.0) * 0.55 + (blast_radius / 5.0) * 0.45)
+            urgency_score = normalize_unit_interval((severity / 5.0) * 0.45 + (blast_radius / 5.0) * 0.35 + (evidence_strength * 0.2))
+            maintainability_score = normalize_unit_interval(
+                (maintainability_gain * 0.5)
+                + (contract_stability * 0.25)
+                + (input_sufficiency * 0.25)
+            )
+            confidence_penalty = 0.0
+            if not item.evidence_ids:
+                confidence_penalty += 0.25
+            if item.decision_type in blocked_types:
+                confidence_penalty += 0.2
+            if missing_context_count >= 2:
+                confidence_penalty += 0.1
+            elif missing_context_count == 1:
+                confidence_penalty += 0.05
+            if raw_goal_signal_detected and not goal_signal_applied:
+                confidence_penalty += 0.05
+            confidence_score = normalize_unit_interval(
+                (evidence_strength * 0.4)
+                + (input_sufficiency * 0.2)
+                + (issue_confidence * 0.2)
+                + (contract_stability * 0.2)
+                - confidence_penalty
+            )
+            recommendation_strength = self._recommendation_strength_for_basis(
+                confidence_score=confidence_score,
+                evidence_strength_score=evidence_strength,
+                input_sufficiency=input_sufficiency,
+                blocked=bool(item.decision_type in blocked_types),
+                has_evidence=bool(item.evidence_ids),
+            )
+            bases.append(
+                DecisionBasis(
+                    decision_id=item.decision_id,
+                    issue_ids=list(item.issue_ids or []),
+                    decision_type=item.decision_type,
+                    criteria=JudgmentCriteria(
+                        evidence_strength=evidence_strength,
+                        input_sufficiency=round(input_sufficiency, 2),
+                        change_cost=change_cost,
+                        delivery_speed=delivery_speed,
+                        maintainability_gain=maintainability_gain,
+                        contract_stability=contract_stability,
+                        notes=notes,
+                    ),
+                    evidence_ids=list(item.evidence_ids or []),
+                    source_grounded=bool(item.issue_ids and item.evidence_ids),
+                    goal_signal_detected=raw_goal_signal_detected,
+                    goal_signal_applied=goal_signal_applied,
+                    asset_signal_detected=asset_signal_detected,
+                    blocked_recommendation_types=sorted(blocked_types),
+                    evidence_strength_score=evidence_strength,
+                    risk_score=risk_score,
+                    urgency_score=urgency_score,
+                    maintainability_score=maintainability_score,
+                    confidence_score=confidence_score,
+                    recommendation_strength=recommendation_strength,
+                    scoring_reasons=scoring_reasons,
+                    summary=(
+                        f"{item.decision_type} 판단은 issue={','.join(item.issue_ids) or '-'} "
+                        f"evidence={len(item.evidence_ids)} priority={item.priority_score} "
+                        f"strength={recommendation_strength}"
+                    ),
+                )
+            )
+        return bases
+
+    def _recommendation_strength_for_basis(
+        self,
+        *,
+        confidence_score: float,
+        evidence_strength_score: float,
+        input_sufficiency: float,
+        blocked: bool,
+        has_evidence: bool,
+    ) -> str:
+        if blocked or not has_evidence:
+            return "blocked"
+        if confidence_score >= 0.7 and evidence_strength_score >= 0.65 and input_sufficiency >= 0.6:
+            return "assertive"
+        if confidence_score >= 0.5 and evidence_strength_score >= 0.45:
+            return "conditional"
+        return "review_required"
+
+    def _detect_decision_conflicts(
+        self,
+        prepared: Any,
+        *,
+        diagnosis: DiagnosisArtifacts,
+        decisions: list[DecisionRecord],
+        decision_basis: list[DecisionBasis],
+    ) -> list[DecisionConflict]:
+        del diagnosis
+        conflicts: list[DecisionConflict] = []
+        guarded = getattr(prepared, "guarded_decision_input", None)
+        raw_goal = self._raw_goal_text(prepared)
+        effective_goal = self._effective_goal_text(prepared)
+        source_guard_applied = bool(
+            guarded is not None
+            and getattr(guarded, "applied_question_source", "uninitialized") != "uninitialized"
+            and list(getattr(guarded, "selected_questions", []) or [])
+        )
+        raw_goal_signal_detected = self._raw_goal_prefers_migration(prepared)
+        goal_signal_applied = self._goal_prefers_migration(prepared)
+        asset_signal_detected = self._has_asset_migration_support(prepared)
+        if (
+            source_guard_applied
+            and self._raw_goal_forces_direction(prepared)
+            and raw_goal.strip()
+            and effective_goal.strip()
+            and raw_goal.strip() != effective_goal.strip()
+            and (
+                (raw_goal_signal_detected and not goal_signal_applied and not asset_signal_detected)
+                or not raw_goal_signal_detected
+            )
+        ):
+            conflicts.append(
+                DecisionConflict(
+                    conflict_id=make_stable_id("DCF", "goal_source_mismatch", raw_goal, effective_goal),
+                    conflict_type="goal_source_mismatch",
+                    severity="review_required",
+                    summary="사용자 질문의 방향 강제 신호가 있었지만 source evidence가 약하거나 불충분해 판단 축에는 직접 반영하지 않았습니다.",
+                    issue_ids=[],
+                    decision_ids=[],
+                    evidence_ids=[],
+                    resolution_hint="source-derived question axis와 evidence를 기준으로만 전략을 확정해야 합니다.",
+                )
+            )
+        top_decisions = list(decisions[:2])
+        if len(top_decisions) >= 2:
+            leading_types = {item.decision_type for item in top_decisions}
+            score_gap = abs(top_decisions[0].priority_score - top_decisions[1].priority_score)
+            if (
+                len(leading_types) >= 2
+                and score_gap <= 2
+                and "migration_consideration" in leading_types
+                and (raw_goal_signal_detected or goal_signal_applied)
+            ):
+                evidence_ids: list[str] = []
+                for basis in decision_basis:
+                    if basis.decision_id in {top_decisions[0].decision_id, top_decisions[1].decision_id}:
+                        evidence_ids.extend(list(basis.evidence_ids or []))
+                conflicts.append(
+                    DecisionConflict(
+                        conflict_id=make_stable_id("DCF", "strategy_tradeoff", *(item.decision_id for item in top_decisions)),
+                        conflict_type="strategy_tradeoff",
+                        severity="review_required",
+                        summary="상위 전략 후보의 점수가 근접해 refactor/redesign 또는 migration 판단을 단정하기 어렵습니다.",
+                        issue_ids=[issue_id for item in top_decisions for issue_id in list(item.issue_ids or [])],
+                        decision_ids=[item.decision_id for item in top_decisions],
+                        evidence_ids=list(dict.fromkeys(item for item in evidence_ids if item)),
+                        resolution_hint="상위 후보 간 추가 evidence 또는 제약 확인 전까지 조건부 판단으로 유지해야 합니다.",
+                    )
+                )
+        return conflicts
+
+    def _apply_conflict_strength_adjustments(
+        self,
+        decision_basis: list[DecisionBasis],
+        conflicts: list[DecisionConflict],
+    ) -> list[DecisionBasis]:
+        if not decision_basis or not conflicts:
+            return decision_basis
+        conflict_index: dict[str, list[DecisionConflict]] = {}
+        global_conflicts: list[DecisionConflict] = []
+        for item in conflicts:
+            if item.decision_ids:
+                for decision_id in item.decision_ids:
+                    normalized = str(decision_id or "").strip()
+                    if normalized:
+                        conflict_index.setdefault(normalized, []).append(item)
+            else:
+                global_conflicts.append(item)
+        updated: list[DecisionBasis] = []
+        for basis in decision_basis:
+            related_conflicts = list(conflict_index.get(basis.decision_id, []))
+            if global_conflicts:
+                related_conflicts.extend(global_conflicts)
+            recommendation_strength = basis.recommendation_strength
+            if any(item.severity == "blocking" for item in related_conflicts):
+                recommendation_strength = "blocked"
+            elif any(item.severity == "review_required" for item in related_conflicts):
+                recommendation_strength = max_recommendation_strength(recommendation_strength, "review_required")
+            elif any(item.severity == "warning" for item in related_conflicts):
+                recommendation_strength = max_recommendation_strength(recommendation_strength, "conditional")
+            scoring_reasons = list(basis.scoring_reasons or [])
+            for item in related_conflicts:
+                marker = f"conflict:{item.conflict_type}"
+                if marker not in scoring_reasons:
+                    scoring_reasons.append(marker)
+            updated.append(
+                basis.model_copy(
+                    update={
+                        "recommendation_strength": recommendation_strength,
+                        "scoring_reasons": scoring_reasons,
+                    }
+                )
+            )
+        return updated
+
+    def _build_summary(self, prepared: Any, decisions: list[DecisionRecord], *, conflicts: list[DecisionConflict] | None = None) -> DecisionSummary:
         if not decisions:
-            return DecisionSummary(recommended_strategy="리팩터링 우선", priority_queue=[])
+            return DecisionSummary(
+                recommended_strategy="리팩터링 우선",
+                priority_queue=[],
+                conditional=bool(conflicts),
+                review_required=any(item.severity in {"review_required", "blocking"} for item in list(conflicts or [])),
+                conflict_ids=[item.conflict_id for item in list(conflicts or [])],
+            )
         redesign_count = sum(1 for item in decisions if item.decision_type == "redesign")
         migration_count = sum(1 for item in decisions if item.decision_type == "migration_consideration")
         if self._should_prioritize_operational_analysis(prepared):
@@ -552,6 +877,9 @@ class DecisionEngine:
             decisions=decisions,
             recommended_strategy=strategy,
             priority_queue=[item.decision_id for item in decisions],
+            conditional=bool(conflicts),
+            review_required=any(item.severity in {"review_required", "blocking"} for item in list(conflicts or [])),
+            conflict_ids=[item.conflict_id for item in list(conflicts or [])],
         )
 
     def _structural_judgment(self, decision_summary: DecisionSummary) -> str:

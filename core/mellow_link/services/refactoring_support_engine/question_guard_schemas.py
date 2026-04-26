@@ -54,3 +54,16 @@ class QuestionGuardSummary(BaseModel):
     source_domain_terms: list[str] = Field(default_factory=list)
     preferred_question_axis: str = ""
     applied_question_source: Literal["source_candidates", "mixed_with_user", "generic_fallback"] = "generic_fallback"
+
+
+class GuardedDecisionInput(BaseModel):
+    raw_goal: str = ""
+    raw_constraints: list[str] = Field(default_factory=list)
+    effective_goal: str = ""
+    effective_constraints: list[str] = Field(default_factory=list)
+    raw_question_axis: str = ""
+    preferred_question_axis: str = ""
+    selected_questions: list[str] = Field(default_factory=list)
+    selected_question_types: list[str] = Field(default_factory=list)
+    source_domain_terms: list[str] = Field(default_factory=list)
+    applied_question_source: Literal["source_candidates", "mixed_with_user", "generic_fallback", "uninitialized"] = "uninitialized"

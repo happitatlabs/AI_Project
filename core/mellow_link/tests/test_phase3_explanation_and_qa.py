@@ -323,9 +323,9 @@ def test_explanation_presenter_hides_review_diff_preview_for_external_surface():
     assert internal.taxonomy_view.model_dump() == external.taxonomy_view.model_dump()
     assert [card.card_key for card in internal.summary_cards] == ["judgment", "strategy", "priority", "execution", "scope"]
     assert [card.card_key for card in external.summary_cards] == ["judgment", "strategy", "execution"]
-    assert [card.title for card in external.summary_cards] == ["핵심 판단", "왜 이 방향인가", "다음 단계"]
+    assert [card.title for card in external.summary_cards] == ["핵심 문제", "영향", "권장 조치"]
     assert [section.section_key for section in external.section_views] == ["recommended_option", "execution_plan", "risks"]
-    assert [section.title for section in external.section_views] == ["이 방향의 효과", "진행 흐름", "주의할 영향"]
+    assert [section.title for section in external.section_views] == ["권장 조치", "검증 포인트", "영향"]
     external_text = " ".join(card.body for card in external.summary_cards) + " " + " ".join(section.text for section in external.section_views)
     assert "decision type" not in external_text.lower()
     assert "severity" not in external_text.lower()
@@ -367,8 +367,8 @@ def test_operational_source_explanation_surface_uses_display_strategy_and_analys
 
     assert internal.taxonomy_view.core_judgment.recommended_strategy == result.decision_summary["recommended_strategy"]
     assert internal.taxonomy_view.core_judgment.display_strategy == "현행 분석 우선"
-    assert [card.title for card in external.summary_cards] == ["분석 성격", "우선 검토 기준", "검토 순서"]
-    assert [section.title for section in external.section_views] == ["검토 순서"]
+    assert [card.title for card in external.summary_cards] == ["핵심 문제", "영향", "권장 조치"]
+    assert [section.title for section in external.section_views] == ["권장 조치", "검증 포인트", "영향"]
     assert _section_by_key(internal, "report_purpose").title == "분석 목적"
     assert _section_by_key(internal, "one_line_conclusion").title == "자산 정체"
     assert _section_by_key(internal, "analysis_summary").title == "핵심 객체"
@@ -449,6 +449,13 @@ def test_explanation_presenter_generic_contract_surfaces_judgment_structure_and_
         }
     )
     patched_package["consulting_min_contract"] = patched_contract
+    patched_package["report_scope"] = ["컨설팅 개요", "현행 구조", "개선 방향", "추진 계획"]
+    patched_package["analysis_summary"] = ["현행 구조 요약", "개선 방향 요약"]
+    auth = deepcopy(patched_package.get("authoritative_payload") or {})
+    appendix = deepcopy(auth.get("appendix") or {})
+    appendix["evidence_index"] = [{"locator": "slide:1", "excerpt": "컨설팅 개요와 개선 방향 설명"}]
+    auth["appendix"] = appendix
+    patched_package["authoritative_payload"] = auth
 
     presenter = ExplanationPresenter()
     internal = presenter.present(
@@ -467,13 +474,25 @@ def test_explanation_presenter_generic_contract_surfaces_judgment_structure_and_
     assert "[상황 / 목적] 주문 생성 구조 판단을 정리합니다." in _section_by_key(internal, "report_purpose").text
     assert "[문제 정의] 상태 전이 로직이 여러 위치에 분산됩니다." in _section_by_key(internal, "report_purpose").text
     assert "[판단 질문] 주문 생성 경계를 분리할지 판단해야 합니다." in _section_by_key(internal, "one_line_conclusion").text
-    assert "[결론] 현 단계 우선 검토안: 옵션 A를 우선 적용합니다." in _section_by_key(internal, "one_line_conclusion").text
+    assert "[결론] 검증 후 적용: 옵션 A를 우선 적용합니다." in _section_by_key(internal, "one_line_conclusion").text
     assert "[근거] 주문 생성 조건이 여러 자산에 걸쳐 흩어져 있습니다." in _section_by_key(internal, "analysis_summary").text
     assert "[선택지 비교] 옵션 A: 서비스 경계 분리" in _section_by_key(internal, "recommended_option").text
     assert "[판단 기준] 정합성과 실행 가능성을 우선합니다." in _section_by_key(internal, "recommended_option").text
     assert "[누락된 정보] 실운영 예외 케이스: 추가 확인 필요" in _section_by_key(internal, "risks").text
-    assert "[결론] 현 단계 우선 검토안: 옵션 A를 우선 적용합니다" in _section_by_key(external, "recommended_option").text
-    assert "[누락된 정보] 실운영 예외 케이스: 추가 확인 필요" in _section_by_key(external, "risks").text
+    external_recommended = _section_by_key(external, "recommended_option").text
+    external_risks = _section_by_key(external, "risks").text
+    assert "[결론]" not in external_recommended
+    assert "[누락된 정보]" not in external_risks
+    recommended_lines = [line.strip() for line in external_recommended.splitlines() if line.strip()]
+    assert 1 <= len(recommended_lines) <= 3
+    assert all(line.startswith("- ") for line in recommended_lines)
+    assert any(token in external_recommended for token in ("실행 착수 가능", "조건 확인 후 실행", "검증 후 적용", "실행 불가"))
+    assert any(line.startswith("- 이유: ") for line in recommended_lines)
+    assert any(line.startswith("- 추가 확인 필요: ") for line in recommended_lines)
+    assert all(len(line) <= 40 for line in recommended_lines)
+    assert "우선 검토안" not in external_recommended
+    assert "후보" not in external_recommended
+    assert "추가 확인 필요: 실운영 예외 케이스: 추가 확인 필요" in external_risks
 
 
 @pytest.mark.asyncio
@@ -617,6 +636,131 @@ def test_operational_source_markdown_export_top_paragraph_drops_support_prefix()
 
     assert _first_section_paragraph(markdown).startswith("외화 입금, 출금, FIFO lot 소진")
     assert not _first_section_paragraph(markdown).startswith("보조 판단:")
+
+
+@pytest.mark.parametrize(
+    ("state", "planner_summary_patch", "schedule_summary_patch", "expected_label"),
+    [
+        ("blocked", {"blocked_execution": True, "first_stage_kind": "blocker_resolution"}, {"schedule_mode": "blocked_first"}, "실행 불가"),
+        ("review_required", {"verification_first": True, "first_stage_kind": "verification_first"}, {"schedule_mode": "verification_first"}, "검증 후 적용"),
+        ("conditional", {"first_stage_kind": "precondition_check"}, {"schedule_mode": "conditional_first"}, "조건 확인 후 실행"),
+        ("assertive", {"first_stage_kind": "execution_start"}, {"schedule_mode": "execution_first"}, "실행 착수 가능"),
+    ],
+)
+def test_external_surface_uses_only_standard_state_wording(state, planner_summary_patch, schedule_summary_patch, expected_label):
+    _, _, result_package = _build_ready_result_package()
+    patched = deepcopy(result_package)
+    governance = deepcopy(((patched.get("extensions") or {}).get("decision_governance") or {}))
+    governance["recommendation_strength"] = state
+    planner_summary = deepcopy(governance.get("planner_summary") or {})
+    planner_summary.update(planner_summary_patch)
+    governance["planner_summary"] = planner_summary
+    schedule_summary = deepcopy(governance.get("schedule_summary") or {})
+    schedule_summary.update(schedule_summary_patch)
+    governance["schedule_summary"] = schedule_summary
+    patched.setdefault("extensions", {})["decision_governance"] = governance
+
+    response = ExplanationPresenter().present(
+        project_id="proj_phase3_ready",
+        result_package=patched,
+        audience="manager",
+        surface_mode="external",
+    )
+
+    external_text = "\n".join(
+        [card.body for card in response.summary_cards] + [section.text for section in response.section_views]
+    )
+    assert expected_label in external_text
+    assert "우선 검토안" not in external_text
+    assert "검토안" not in external_text
+    assert "안전한 선택" not in external_text
+
+
+def test_external_surface_document_input_keeps_consulting_style_titles():
+    _, _, result_package = _build_ready_result_package()
+    patched = deepcopy(result_package)
+    patched["report_scope"] = ["컨설팅 개요", "현행 구조", "개선 방향", "추진 계획"]
+    patched["consulting_min_contract"] = {
+        "context": ["컨설팅 보고서 개요를 정리합니다."],
+        "problem_definition": ["현행 구조의 한계를 설명합니다."],
+        "decision_question": ["개선 방향을 어떻게 정리할지 검토합니다."],
+        "options": ["옵션 A: 단계적 개선"],
+        "decision_criteria": ["효과와 실행 가능성을 함께 봅니다."],
+        "evidence": ["현행 운영 구조와 개선 방향이 문서에 정리돼 있습니다."],
+        "missing_information": ["추가 보고서 확인 필요"],
+        "as_is": ["현행 구조와 개선 포인트를 문서로 정리합니다."],
+        "process_flow": ["1단계: 현행 구조 정리", "2단계: 개선 방향 검토"],
+        "rules": ["문서 기준과 추진 계획을 함께 확인합니다."],
+        "risks": ["세부 배경 자료가 부족하면 판단이 늦어질 수 있습니다."],
+        "actions": ["개선 방향과 추진 계획을 정리합니다."],
+    }
+    patched["analysis_summary"] = ["현행 구조 요약", "개선 방향 요약"]
+    auth = deepcopy(patched.get("authoritative_payload") or {})
+    appendix = deepcopy(auth.get("appendix") or {})
+    appendix["evidence_index"] = [{"locator": "slide:1", "excerpt": "컨설팅 개요와 개선 방향 설명"}]
+    auth["appendix"] = appendix
+    patched["authoritative_payload"] = auth
+
+    response = ExplanationPresenter().present(
+        project_id="proj_phase3_ready",
+        result_package=patched,
+        audience="manager",
+        surface_mode="external",
+    )
+
+    assert [card.title for card in response.summary_cards] == ["핵심 판단", "왜 이 방향인가", "다음 단계"]
+    assert _section_by_key(response, "execution_plan").title != "코드 분석 포인트"
+
+
+def test_external_surface_code_input_switches_to_technical_style():
+    _, _, result_package = _build_ready_result_package()
+    response = ExplanationPresenter().present(
+        project_id="proj_phase3_ready",
+        result_package=result_package,
+        audience="manager",
+        surface_mode="external",
+    )
+
+    assert [card.title for card in response.summary_cards] == ["핵심 문제", "영향", "권장 조치"]
+    assert _section_by_key(response, "recommended_option").title == "권장 조치"
+    assert _section_by_key(response, "execution_plan").title == "검증 포인트"
+    assert _section_by_key(response, "risks").title == "영향"
+    assert "선택지:" not in _section_by_key(response, "recommended_option").text
+
+
+def test_external_surface_mixed_input_adds_technical_block_but_keeps_document_base():
+    _, _, result_package = _build_ready_result_package()
+    patched = deepcopy(result_package)
+    patched["report_scope"] = ["컨설팅 개요", "현행 구조", "저장 전 차단 조건", "SQL 조건 매핑"]
+    patched["consulting_min_contract"] = {
+        **(patched.get("consulting_min_contract") or {}),
+        "context": ["컨설팅 보고서와 코드 구조를 함께 검토합니다."],
+        "problem_definition": ["현행 구조 설명과 저장 검증 규칙이 함께 존재합니다."],
+        "decision_question": ["개선 방향과 코드 적용 기준을 함께 검토합니다."],
+        "evidence": [
+            "현행 문서 설명과 SQL 조건 매핑이 함께 확인됩니다.",
+            "저장 전 차단 조건과 예외 처리 기준이 코드에 존재합니다.",
+        ],
+    }
+    auth = deepcopy(patched.get("authoritative_payload") or {})
+    appendix = deepcopy(auth.get("appendix") or {})
+    appendix["evidence_index"] = [
+        {"locator": "slide:1", "excerpt": "컨설팅 개요와 개선 방향 설명"},
+        {"locator": "line:10", "excerpt": "SELECT * FROM orders WHERE status = :status"},
+    ]
+    auth["appendix"] = appendix
+    patched["authoritative_payload"] = auth
+
+    response = ExplanationPresenter().present(
+        project_id="proj_phase3_ready",
+        result_package=patched,
+        audience="manager",
+        surface_mode="external",
+    )
+
+    assert [card.title for card in response.summary_cards] == ["핵심 판단", "왜 이 방향인가", "다음 단계"]
+    assert _section_by_key(response, "execution_plan").title == "코드 분석 포인트"
+    assert "검증 포인트:" in _section_by_key(response, "execution_plan").text
 
 
 def test_operational_source_markdown_export_dedupes_sections_and_preserves_registry_order():
@@ -956,17 +1100,21 @@ def test_result_explanation_and_qa_endpoints_are_additive_and_read_only(client, 
     assert external_body["provenance"]["field_visibility"]["review_diff"] == "hidden_by_policy"
     assert external_body["taxonomy_view"] == client_body["taxonomy_view"]
     assert [card["card_key"] for card in external_body["summary_cards"]] == ["judgment", "strategy", "execution"]
-    assert [card["title"] for card in external_body["summary_cards"]] == ["핵심 판단", "왜 이 방향인가", "다음 단계"]
+    assert [card["title"] for card in external_body["summary_cards"]] == ["핵심 문제", "영향", "권장 조치"]
     assert [section["section_key"] for section in external_body["section_views"]] == ["recommended_option", "execution_plan", "risks"]
-    assert [section["title"] for section in external_body["section_views"]] == ["이 방향의 효과", "진행 흐름", "주의할 영향"]
+    assert [section["title"] for section in external_body["section_views"]] == ["권장 조치", "검증 포인트", "영향"]
     external_text = " ".join(card["body"] for card in external_body["summary_cards"]) + " " + " ".join(section["text"] for section in external_body["section_views"])
     assert "decision type" not in external_text.lower()
     assert "severity" not in external_text.lower()
     assert "blast radius" not in external_text.lower()
     assert "해야" not in external_text
     assert "필요합니다" not in external_text
+    assert "[상황 / 목적]" not in external_text
+    assert "[문제 정의]" not in external_text
+    assert "[핵심 이유]" not in external_text
     assert "Decision Brief" not in external_text
     assert "ready" not in external_text.lower()
+    assert any(token in external_text for token in ("실행 착수 가능", "조건 확인 후 실행", "검증 후 적용", "실행 불가"))
     for card in external_body["summary_cards"]:
         assert all(not citation["decision_id"] and not citation["issue_id"] and not citation["evidence_id"] and not citation["locator"] for citation in card["citations"])
     for section in external_body["section_views"]:

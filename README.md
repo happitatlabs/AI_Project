@@ -90,6 +90,79 @@ AI_Project/
 | [`_archive/pipelines/pattern_extraction_pipeline`](./_archive/pipelines/pattern_extraction_pipeline) | 보관 | 구조/패턴 추출용 지원 파이프라인의 보관본 |
 | [`pattern_extraction_pipeline`](pattern_extraction_pipeline) | 문서용 | 실행 코드가 아니라 문서 랜딩 셸 |
 
+## 현재 대표 파이프라인
+
+현재 실사용 분석 흐름은 [`core/mellow_link`](core/mellow_link) 기준으로 아래 경로를 따른다.
+
+```text
+PPT/PPTX 업로드
+-> /chat/upload-temp
+-> extract_text_from_file()
+-> extract_presentation_sml()
+-> staged upload / project asset promotion
+-> AnonymizationService.run_anonymization_pipeline()
+-> AnalysisContextBuilder.build()
+-> SourceQuestionGuardService.evaluate()
+-> InputAssembler.prepare_analysis_context_input()
+-> RefactoringSupportEngineFacade.build_result()
+   -> StructureAnalyzer.analyze()
+   -> DiagnosisEngine.run()
+   -> DecisionEngine.run()
+   -> ValidationEngine.validate_decision()
+   -> ImprovementPlanner.run()
+   -> ResultPackager.package()
+-> runner event emit / result surface
+```
+
+현재 단계 해석:
+
+- 1단계 입력 분리/익명화/근거 기록은 주 경로가 있다.
+- 2단계 구조 분석 엔진은 실사용 가능 수준의 공통 분석 경로가 있다.
+- 3단계 전략/판단 엔진은 judgment criteria, validation contract, conflict handling까지 안정화가 진행된 상태다.
+- 4단계 실행 로드맵은 `ImprovementPlanner` 중심의 기본 경로를 넘어서, recommendation strength 기반 단계 분기, verification checkpoint, option strategy, lightweight schedule hint까지 반영하는 수준으로 고도화되어 있다.
+- 5단계 역할 분기형 오케스트레이션은 아직 확장 대상이다.
+
+## 외부용 표현 스타일
+
+현재 결과 surface는 판단 내용 자체를 바꾸지 않고, 입력 성격에 따라 외부용 표현만 다르게 정리한다.  
+이 분기는 payload나 엔진 계약을 바꾸지 않고 [`ExplanationPresenter`](core/mellow_link/services/refactoring_support_engine/explanation_presenter.py)와 [`consulting_deck`](core/mellow_link/modules/rebuild_assistant/postprocess/consulting_deck.py)에서만 수행된다.
+
+- `document`
+  - PPT, 보고서, 컨설팅 문서 같은 서술형 입력
+  - 외부용 결과는 기존 컨설팅 문서형 구조를 유지한다.
+  - 예: `문제 / 선택지 / 결론 / 이유`
+- `code`
+  - SQL, Python, Java, 운영 규칙처럼 기술형 입력
+  - 외부용 결과는 기술 요약형 구조로 바뀐다.
+  - 예: `핵심 문제 / 영향 / 권장 조치 / 검증 포인트`
+- `mixed`
+  - 문서 설명과 코드/SQL 근거가 함께 있는 입력
+  - 외부용 결과는 문서형 설명을 유지하되, 실행/검증 영역만 기술형 블록으로 분리한다.
+  - 예: `문서 설명 -> 코드 분석 포인트 -> 실행 계획`
+
+이 레이어의 목적은 같은 판단을 입력 성격에 맞게 더 읽기 쉽게 설명하는 것이며, `DecisionEngine`, `ImprovementPlanner`, `CanonicalRebuildPayload` 자체는 변경하지 않는다.
+
+## 품질 원칙
+
+현재 대표 파이프라인의 회귀 기준은 exact output snapshot이 아니라, 골든샘플 기반의 판단 구조 및 도메인 적합성 검증이다.  
+이 기준은 문장 표현 변화에는 유연하게 대응하면서도, 판단 품질과 실행 가능성을 안정적으로 유지하기 위한 설계다.
+
+좋은 결과란 다음 다섯 조건을 만족하는 결과를 뜻한다.
+
+- 도메인 적합: 입력 샘플군의 expected domain profile과 결과의 핵심 판단 축이 맞아야 한다.
+- 근거 기반: source, SML, safe source, question guard, evidence ref 없이 결론이 과도하게 강해지면 안 된다.
+- 오염 없음: source에 없는 `product`, `저장 전 검증`, `sql 파라미터`, `api validation` 같은 외부 도메인 문구가 섞이면 안 된다.
+- 실행 가능: 판단 결과가 planner의 단계, checkpoint, priority와 연결되어 실제로 착수 가능한 로드맵으로 떨어져야 한다.
+- 과도한 확신 없음: evidence 부족, conflict, blocked/review_required 상태에서는 단정형 결론을 피해야 한다.
+
+현재 이 품질 기준의 대표 회귀 진입점은 [`core/mellow_link/tests/test_ppt_batch_regression.py`](core/mellow_link/tests/test_ppt_batch_regression.py)이며, 최신 실행 결과는 [`core/mellow_link/tests/output/ppt_regression_report.json`](core/mellow_link/tests/output/ppt_regression_report.json)에 기록된다.
+
+표현 레이어도 같은 원칙을 따른다.
+
+- 내부용 결과는 구조와 근거를 더 많이 남긴다.
+- 외부용 결과는 라벨, 반복 문장, 긴 이유 문단을 줄여 바로 읽히는 형태로 정리한다.
+- 입력 타입별 스타일 분기는 판단 내용을 바꾸지 않고 wording만 바꾼다.
+
 ## 운영 메모
 
 - 루트 런처는 기본적으로 [`core/mellow_link`](core/mellow_link)를 우선 사용한다.
@@ -125,6 +198,7 @@ AI_Project/
 3. 필요하면 `ANONYMIZATION_STORAGE_ROOT=./core/mellow_link/data/anonymization`을 지정한다.
 4. `python -m mellow_link.main` 또는 [`launcher.py`](launcher.py)로 서버를 실행한다.
 5. `http://127.0.0.1:8000/projects/create`로 접속한다.
+6. 파일 업로드 후 `입력 익명화 리뷰`와 `Source Question Guard` 섹션에서 safe preview와 질문 후보를 확인한다.
 
 ## 현재 제품 진입점
 
@@ -138,3 +212,12 @@ AI_Project/
 
 `/modules/rebuild_assistant`는 현재 실행 화면이 아니라 안내 진입점이다.  
 실제 프로젝트 생성과 분석 시작은 `/projects/create`에서 진행한다.
+
+## 참조 문서
+
+현재 계약과 엔진 상태를 빠르게 확인할 때 우선 보는 문서는 아래다.
+
+- 루트 계약 현황: [`MODULE_CONTRACT_STATUS.md`](MODULE_CONTRACT_STATUS.md)
+- 제품 문서 인덱스: [`core/mellow_link/docs/README.md`](core/mellow_link/docs/README.md)
+- 판단/검증 거버넌스: [`core/mellow_link/docs/REFACTORING_SUPPORT_ENGINE_DECISION_GOVERNANCE.md`](core/mellow_link/docs/REFACTORING_SUPPORT_ENGINE_DECISION_GOVERNANCE.md)
+- 초보 사용자용 흐름: [`core/mellow_link/docs/MELLOW_LINK_BEGINNER_USER_GUIDE_KO.md`](core/mellow_link/docs/MELLOW_LINK_BEGINNER_USER_GUIDE_KO.md)
