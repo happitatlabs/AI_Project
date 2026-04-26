@@ -51,13 +51,14 @@ class RefactoringSupportEngineFacade:
             self.legacy_service,
             stage_control=stage_control,
         )
-        validation_result = self.validation_engine.validate_decision(
+        validation_result = self.validation_engine.coerce_result(self.validation_engine.validate_decision(
             prepared=prepared,
             diagnosis=diagnosis,
             decisions=decisions,
             stage_control=stage_control,
-        )
-        if validation_result["status"] == "fail":
+        ))
+        prepared.decision_validation_result = validation_result
+        if not validation_result.passed:
             enter_stage(stage_control, "decision")
             decisions = self.decision_engine.run(
                 prepared,
@@ -65,16 +66,17 @@ class RefactoringSupportEngineFacade:
                 diagnosis,
                 self.legacy_service,
                 stage_control=stage_control,
-                retry_hint=str(validation_result.get("retry_hint") or ""),
+                retry_hint=str(validation_result.retry_hint or ""),
             )
-            validation_result = self.validation_engine.validate_decision(
+            validation_result = self.validation_engine.coerce_result(self.validation_engine.validate_decision(
                 prepared=prepared,
                 diagnosis=diagnosis,
                 decisions=decisions,
                 stage_control=stage_control,
-            )
-            if validation_result["status"] == "fail":
-                failure_types = ", ".join(validation_result.get("failure_types") or [])
+            ))
+            prepared.decision_validation_result = validation_result
+            if not validation_result.passed:
+                failure_types = ", ".join(validation_result.failure_types or [])
                 raise ValueError(f"validation failed after single retry: {failure_types or 'unknown_failure'}")
 
         enter_stage(stage_control, "planning")

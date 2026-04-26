@@ -109,6 +109,7 @@
             <section class="print-card rounded-[2rem] border border-cyan-300/20 bg-cyan-500/5 p-6">
                 <p class="text-xs uppercase tracking-[0.24em] text-cyan-200">한 줄 결론</p>
                 <div id="executiveSummaryBox" class="mt-4"></div>
+                <div id="plannerSummaryBox" class="mt-4"></div>
             </section>
 
             <section id="customerIntentSection" class="print-card hidden rounded-[2rem] border border-amber-300/20 bg-amber-500/5 p-6">
@@ -151,6 +152,28 @@
                         <span data-collapsible-badge class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-cyan-500/10 group-open:text-cyan-200">펼치기</span>
                     </summary>
                     <div id="planBox" class="mt-4 space-y-4 text-sm text-slate-300"></div>
+                </details>
+            </section>
+            <section id="strategyScheduleSection" class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                <details id="strategyDetails" class="group">
+                    <summary class="flex cursor-pointer items-center justify-between gap-4">
+                        <div>
+                            <p class="text-xs uppercase tracking-[0.24em] text-slate-500">선택지별 실행 전략</p>
+                            <p class="mt-2 text-sm text-slate-400">기본은 접힌 상태로 두고, 우선 전략과 대안의 착수 조건을 비교할 때 펼쳐 확인합니다.</p>
+                        </div>
+                        <span data-collapsible-badge class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-cyan-500/10 group-open:text-cyan-200">펼치기</span>
+                    </summary>
+                    <div id="optionStrategiesBox" class="mt-4 space-y-4 text-sm text-slate-300"></div>
+                </details>
+                <details id="scheduleDetails" class="group mt-4">
+                    <summary class="flex cursor-pointer items-center justify-between gap-4">
+                        <div>
+                            <p class="text-xs uppercase tracking-[0.24em] text-slate-500">실행 순서 / 의존 관계</p>
+                            <p class="mt-2 text-sm text-slate-400">※ 실제 일정표가 아니라 실행 순서/의존 설명입니다.</p>
+                        </div>
+                        <span data-collapsible-badge class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-cyan-500/10 group-open:text-cyan-200">펼치기</span>
+                    </summary>
+                    <div id="scheduleHintsBox" class="mt-4 space-y-4 text-sm text-slate-300"></div>
                 </details>
             </section>
             </div>
@@ -585,6 +608,10 @@
             return ((((pkg || {}).extensions || {}).decision_governance || {}).surface_wording || {});
         }
 
+        function decisionGovernance(pkg) {
+            return ((((pkg || {}).extensions || {}).decision_governance || {}));
+        }
+
         function usesAnalysisFirstSurface(pkg) {
             return String((surfaceWording(pkg) || {}).mode || '') === 'analysis_first_operational_source';
         }
@@ -677,6 +704,148 @@
                 '<div class="text-xs uppercase tracking-[0.2em] ' + (accentClass || 'text-slate-500') + '">' + escapeHtml(label || '-') + '</div>' +
                 '<div class="mt-2 text-sm leading-7 text-slate-100">' + escapeHtml(body || '-') + '</div>' +
                 '</div>';
+        }
+
+        function plannerDisplayState(pkg) {
+            const governance = decisionGovernance(pkg);
+            const planner = governance.planner_summary || {};
+            const schedule = governance.schedule_summary || {};
+            const firstKind = String(planner.first_stage_kind || '').trim();
+            if (planner.blocked_execution) {
+                return {
+                    key: 'blocked',
+                    badge: '🔴 ⛔ 차단',
+                    tone: 'border-rose-300/20 bg-rose-500/10 text-rose-100',
+                    guidance: '차단 요인 해소 후 재판단'
+                };
+            }
+            if (planner.verification_first || firstKind === 'verification_first') {
+                return {
+                    key: 'review_required',
+                    badge: '🔵 🔍 검증',
+                    tone: 'border-sky-300/20 bg-sky-500/10 text-sky-100',
+                    guidance: '검증 우선, 검토 후 적용 후보'
+                };
+            }
+            if (firstKind === 'precondition_check' || String(schedule.schedule_mode || '') === 'conditional_first') {
+                return {
+                    key: 'conditional',
+                    badge: '🟡 ⚠ 조건',
+                    tone: 'border-amber-300/20 bg-amber-500/10 text-amber-100',
+                    guidance: '조건 확인 후 실행'
+                };
+            }
+            return {
+                key: 'assertive',
+                badge: '🟢 ▶ 실행',
+                tone: 'border-emerald-300/20 bg-emerald-500/10 text-emerald-100',
+                guidance: '실행 착수 가능'
+            };
+        }
+
+        function renderPlannerSummaryCard(pkg) {
+            const governance = decisionGovernance(pkg);
+            const planner = governance.planner_summary || {};
+            const schedule = governance.schedule_summary || {};
+            if (!Object.keys(planner).length && !Object.keys(schedule).length) {
+                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">실행 상태 요약 정보가 없습니다.</div>';
+            }
+            const state = plannerDisplayState(pkg);
+            return '<div class="rounded-3xl border ' + state.tone + ' px-5 py-5">' +
+                '<div class="flex flex-wrap items-center justify-between gap-3">' +
+                    '<div class="text-xs uppercase tracking-[0.2em]">실행 상태 요약</div>' +
+                    '<div class="rounded-full border border-current/20 bg-black/20 px-3 py-1 text-sm font-medium">' + escapeHtml(state.badge) + '</div>' +
+                '</div>' +
+                '<div class="mt-3 text-sm leading-7">' + escapeHtml(state.guidance) + '</div>' +
+                '<div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">' +
+                    renderDecisionMetric('첫 단계', planner.first_stage_title || '-', 'text-cyan-200') +
+                    renderDecisionMetric('우선순위', planner.first_stage_priority || '-', 'text-fuchsia-200') +
+                    renderDecisionMetric('시점', planner.first_stage_phase || '-', 'text-amber-200') +
+                    renderDecisionMetric('실행 모드', schedule.schedule_mode || '-', 'text-emerald-200') +
+                '</div>' +
+                '</div>';
+        }
+
+        function strategyStrengthLabel(value) {
+            const normalized = String(value || '').trim();
+            if (normalized === 'blocked') return '🔴 ⛔ 차단';
+            if (normalized === 'review_required') return '🔵 🔍 검증';
+            if (normalized === 'conditional') return '🟡 ⚠ 조건';
+            return '🟢 ▶ 실행';
+        }
+
+        function renderOptionStrategies(pkg) {
+            const governance = decisionGovernance(pkg);
+            const items = governance.option_execution_strategies || [];
+            if (!items.length) {
+                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">표시할 실행 전략이 없습니다.</div>';
+            }
+            return items.map(function (item) {
+                const primary = Boolean(item.primary);
+                const strategyLabel = (item.recommendation_strength === 'blocked' || item.recommendation_strength === 'review_required')
+                    ? '검증/보류 전략'
+                    : '실행 전략';
+                return '<details class="rounded-3xl border border-white/10 bg-black/20 px-4 py-4" ' + (primary ? 'open' : '') + '>' +
+                    '<summary class="flex cursor-pointer items-start justify-between gap-4">' +
+                        '<div>' +
+                            '<div class="flex flex-wrap items-center gap-2">' +
+                                '<div class="text-base font-medium text-slate-100">' + escapeHtml(item.option_title || item.option_label || '-') + '</div>' +
+                                (primary ? '<span class="rounded-full border border-emerald-300/20 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-200">우선 전략</span>' : '') +
+                            '</div>' +
+                            '<div class="mt-2 text-sm text-slate-400">' + escapeHtml(strategyLabel) + '</div>' +
+                        '</div>' +
+                        '<div class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-200">' + escapeHtml(strategyStrengthLabel(item.recommendation_strength)) + '</div>' +
+                    '</summary>' +
+                    '<div class="mt-4 grid gap-4 xl:grid-cols-2">' +
+                        renderDecisionMetric('선택 조건', item.when_to_choose || '-', 'text-cyan-200') +
+                        renderDecisionMetric('첫 조치', item.first_action || '-', 'text-emerald-200') +
+                    '</div>' +
+                    '<div class="mt-4 grid gap-4 xl:grid-cols-3">' +
+                        '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">필요 근거</div><div class="mt-2">' + listOrState(item.required_evidence || [], '추가 필요 근거가 없습니다.') + '</div></div>' +
+                        '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">주요 리스크</div><div class="mt-2">' + listOrState(item.key_risks || [], '주요 리스크가 없습니다.') + '</div></div>' +
+                        '<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">예상 산출물</div><div class="mt-2">' + listOrState(item.expected_deliverables || [], '예상 산출물이 없습니다.') + '</div></div>' +
+                    '</div>' +
+                    '<div class="mt-4">' + renderDecisionMetric('중단 / 대안 조건', item.fallback_or_exit_condition || '-', 'text-amber-200') + '</div>' +
+                    '</details>';
+            }).join('');
+        }
+
+        function renderScheduleHints(pkg) {
+            const governance = decisionGovernance(pkg);
+            const items = (governance.schedule_hints || []).slice().sort(function (a, b) {
+                return Number(a.sequence_index || 0) - Number(b.sequence_index || 0);
+            });
+            if (!items.length) {
+                return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">표시할 실행 순서 정보가 없습니다.</div>';
+            }
+            return '<div class="space-y-4">' + items.map(function (item) {
+                const depends = item.depends_on || [];
+                const parallel = item.can_parallelize_with || [];
+                const blockers = item.blocking_conditions || [];
+                return '<div class="rounded-3xl border border-white/10 bg-black/20 px-4 py-4">' +
+                    '<div class="flex flex-wrap items-center justify-between gap-3">' +
+                        '<div class="text-base font-medium text-slate-100">' + escapeHtml(item.stage_title || item.stage_id || '-') + '</div>' +
+                        '<div class="flex flex-wrap gap-2">' +
+                            '<span class="rounded-full border border-fuchsia-300/20 bg-fuchsia-500/10 px-3 py-1 text-xs text-fuchsia-100">#' + escapeHtml(item.sequence_index || 0) + '</span>' +
+                            '<span class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-200">' + escapeHtml(item.priority || '-') + '</span>' +
+                            '<span class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-200">' + escapeHtml(item.phase || '-') + '</span>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="mt-3 flex flex-wrap gap-2">' +
+                        (depends.length ? '<span class="rounded-full border border-amber-300/20 bg-amber-500/10 px-3 py-1 text-xs text-amber-100">선행 의존</span>' : '') +
+                        (parallel.length ? '<span class="rounded-full border border-sky-300/20 bg-sky-500/10 px-3 py-1 text-xs text-sky-100">병렬 가능</span>' : '') +
+                        (blockers.length ? '<span class="rounded-full border border-rose-300/20 bg-rose-500/10 px-3 py-1 text-xs text-rose-100">차단 조건</span>' : '') +
+                    '</div>' +
+                    '<div class="mt-4 grid gap-4 xl:grid-cols-2">' +
+                        renderDecisionMetric('선행 의존', depends.join(', ') || '-', 'text-amber-200') +
+                        renderDecisionMetric('병렬 가능 단계', parallel.join(', ') || '-', 'text-sky-200') +
+                    '</div>' +
+                    '<div class="mt-4 grid gap-4 xl:grid-cols-2">' +
+                        renderDecisionMetric('차단 조건', blockers.join(', ') || '-', 'text-rose-200') +
+                        renderDecisionMetric('권장 순서 이유', item.suggested_order_reason || '-', 'text-slate-500') +
+                    '</div>' +
+                    '</div>';
+            }).join('') + '</div>';
         }
 
         function renderComparisonPoints(points) {
@@ -2271,6 +2440,7 @@
             applyOperationalSurfaceCopy(pkg);
             document.getElementById('judgmentBoardBox').innerHTML = renderJudgmentBoard(pkg || {}, { mode: 'internal' });
             document.getElementById('executiveSummaryBox').innerHTML = renderExecutiveSummary(pkg || {});
+            document.getElementById('plannerSummaryBox').innerHTML = renderPlannerSummaryCard(pkg || {});
             const display = (pkg || {}).display || {};
             const sections = displaySections(pkg);
             const states = displayStates(pkg);
@@ -2302,6 +2472,8 @@
                 ? renderOperationalFollowupChecks(pkg, sections.design_options || {})
                 : renderOptions(sections.design_options || {});
             document.getElementById('planBox').innerHTML = renderPlan(sections.execution_plan || {});
+            document.getElementById('optionStrategiesBox').innerHTML = renderOptionStrategies(pkg || {});
+            document.getElementById('scheduleHintsBox').innerHTML = renderScheduleHints(pkg || {});
 
             const diagnosisHtml = [];
             diagnosisHtml.push('<div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">리스크</div><div class="mt-3">' + listOrState(((sections.risks || {}).items || []), ((sections.risks || {}).empty_message || '리스크 범위를 다시 확인해야 합니다.')) + '</div></div>');

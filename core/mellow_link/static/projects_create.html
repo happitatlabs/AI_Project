@@ -105,6 +105,11 @@
                         </div>
                         <div id="reviewRiskNotice" class="hidden mt-4 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100"></div>
                         <div id="reviewMetrics" class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4"></div>
+                        <div class="mt-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                            <div class="text-xs uppercase tracking-[0.2em] text-stone-500">Preview Quality</div>
+                            <div id="reviewQualityMetrics" class="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-5"></div>
+                            <div id="reviewQualityWarnings" class="mt-4 space-y-2"></div>
+                        </div>
                         <div class="mt-4 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
                             <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
                                 <div class="text-xs uppercase tracking-[0.2em] text-stone-500">Source Question Guard</div>
@@ -417,6 +422,36 @@
                 '</div>';
         }
 
+        function formatRatioValue(value) {
+            const numeric = Number(value || 0);
+            if (!Number.isFinite(numeric)) return '-';
+            return (numeric * 100).toFixed(1) + '%';
+        }
+
+        function previewQualityLabel(status) {
+            if (status === 'fail') return '검토 필요';
+            if (status === 'warning') return '주의';
+            return '정상';
+        }
+
+        function previewQualityTone(status) {
+            if (status === 'fail') return 'text-rose-200';
+            if (status === 'warning') return 'text-amber-100';
+            return 'text-emerald-200';
+        }
+
+        function renderQualityWarnings(items) {
+            if (!items || !items.length) {
+                return '<div class="text-sm text-stone-500">품질 경고가 없습니다.</div>';
+            }
+            return '<div class="space-y-2">' + items.map(function (item) {
+                return '<div class="rounded-2xl border border-amber-300/20 bg-amber-500/10 px-3 py-3 text-sm text-amber-100">' +
+                    '<div class="text-xs uppercase tracking-[0.2em] text-amber-200">품질 경고</div>' +
+                    '<div class="mt-2 leading-6">' + escapeHtml(item || '-') + '</div>' +
+                    '</div>';
+            }).join('') + '</div>';
+        }
+
         function tokenChipsHtml(items, labelKey, countKey, emptyText) {
             if (!items || !items.length) {
                 return '<div class="text-sm text-stone-500">' + escapeHtml(emptyText) + '</div>';
@@ -494,9 +529,12 @@
             const questionGuardMetrics = document.getElementById('questionGuardMetrics');
             const sourceQuestionCandidates = document.getElementById('sourceQuestionCandidates');
             const guardedUserQuestions = document.getElementById('guardedUserQuestions');
+            const reviewQualityMetrics = document.getElementById('reviewQualityMetrics');
+            const reviewQualityWarnings = document.getElementById('reviewQualityWarnings');
 
             const rawReport = payload && payload.review_report ? payload.review_report : null;
             const report = payload && payload.display_review_report ? payload.display_review_report : rawReport;
+            const qualityReport = rawReport || report;
             const questionSummary = payload && payload.question_guard_summary ? payload.question_guard_summary : null;
             const candidateItems = payload && payload.source_question_candidates ? payload.source_question_candidates : [];
             const blockedItems = payload && payload.blocked_user_questions ? payload.blocked_user_questions : [];
@@ -559,6 +597,15 @@
                 metricCardHtml('질문 후보', questionSummary ? String(questionSummary.source_question_candidate_count || 0) : '0', questionSummary && questionSummary.source_question_candidate_count ? 'text-emerald-200' : 'text-amber-100'),
                 metricCardHtml('SML Chars', questionSummary ? String(questionSummary.sml_text_length || 0) : '0', 'text-stone-100'),
             ].join('');
+
+            reviewQualityMetrics.innerHTML = [
+                metricCardHtml('Quality', previewQualityLabel(qualityReport ? qualityReport.preview_quality_status : ''), previewQualityTone(qualityReport ? qualityReport.preview_quality_status : '')),
+                metricCardHtml('Replacement Ratio', formatRatioValue(qualityReport ? qualityReport.replacement_ratio : 0), 'text-stone-100'),
+                metricCardHtml('Candidate Density', formatRatioValue(qualityReport ? qualityReport.candidate_density : 0), 'text-sky-200'),
+                metricCardHtml('Hidden Line Ratio', formatRatioValue(qualityReport ? qualityReport.hidden_line_ratio : 0), 'text-stone-100'),
+                metricCardHtml('Blocked Low-Conf', qualityReport ? String(qualityReport.low_conf_replacements_blocked || 0) : '0', 'text-amber-100')
+            ].join('');
+            reviewQualityWarnings.innerHTML = renderQualityWarnings(qualityReport ? qualityReport.overredaction_warnings : []);
 
             roleSummary.innerHTML = tokenChipsHtml(rawReport ? rawReport.role_token_summary : [], 'label', 'generated_count', '생성된 role token이 없습니다.');
             detectedTypes.innerHTML = tokenChipsHtml(rawReport ? rawReport.detected_original_types : [], 'label', 'count', '감지된 문서형 원문 유형이 없습니다.');
