@@ -20,11 +20,14 @@ from .template_support import TemplateSupport
 from .schemas import (
     DecisionArtifacts,
     DecisionSummary,
+    DecisionValidationResult,
     DiagnosisArtifacts,
     ExecutionStage,
     ImprovementArtifacts,
     StructureAnalysisResult,
     StructuredRefactoringResult,
+    max_recommendation_strength,
+    normalize_recommendation_strength,
 )
 
 
@@ -45,7 +48,7 @@ class ResultPackager:
         legacy_service: Any,
         *,
         stage_control: dict[str, object] | None = None,
-        validation_result: dict[str, Any] | None = None,
+        validation_result: Any | None = None,
     ) -> StructuredRebuildResult:
         stage_control_snapshot = snapshot_stage_control(
             assert_stage_action(
@@ -58,8 +61,18 @@ class ResultPackager:
         )
         decision_engine_guard_applied = bool(decisions.synthetic_signal_detected)
         decisions, packager_guard_applied = self._apply_decision_governance(decisions, diagnosis)
+        validation_contract = DecisionValidationResult.coerce(
+            validation_result or {"status": "pass", "failure_types": [], "retry_hint": ""}
+        )
+        legacy_validation_result = validation_contract.to_legacy_dict()
         confidence = legacy_service.estimate_confidence(prepared)
-        grounding_profile = self._build_recommendation_grounding_profile(prepared, diagnosis, decisions, confidence)
+        grounding_profile = self._build_recommendation_grounding_profile(
+            prepared,
+            diagnosis,
+            decisions,
+            confidence,
+            validation_result=validation_contract,
+        )
         constraint_filters = self._constraint_filters(prepared)
         diagnosis = self._apply_family_diagnosis_surface_templates(
             prepared=prepared,
@@ -86,6 +99,7 @@ class ResultPackager:
             packager_guard_applied=bool(packager_guard_applied),
             grounding_profile=grounding_profile,
             constraint_filters=constraint_filters,
+            validation_result=validation_contract,
         )
         extensions = dict(legacy_service._build_extensions(prepared) or {})
         extensions["decision_governance"] = governance_extension
@@ -106,6 +120,7 @@ class ResultPackager:
             decisions=decisions,
             improvement=improvement,
             question_axis=question_axis,
+            validation_result=validation_contract,
         )
         self._validate_judgment_canvas(judgment_canvas)
         authoritative = StructuredRefactoringResult(
@@ -115,7 +130,7 @@ class ResultPackager:
             improvement_plan_bundle=improvement.improvement_plan_bundle,
             judgment_canvas=deepcopy(judgment_canvas),
             stage_control=stage_control_snapshot,
-            validation_result=deepcopy(validation_result or {"status": "pass", "failure_types": [], "retry_hint": ""}),
+            validation_result=deepcopy(legacy_validation_result),
             appendix={
                 "evidence_index": [item.model_dump() for item in diagnosis.evidence_index],
                 "context_linkage": context_linkage,
@@ -176,6 +191,13 @@ class ResultPackager:
             confidence=confidence,
             extensions=result.extensions,
         )
+        narrative_bundle = self._align_narrative_bundle_with_planner(
+            narrative_bundle=narrative_bundle,
+            governance_extension=governance_extension,
+            improvement=improvement,
+            decisions=decisions,
+            validation_result=validation_contract,
+        )
         merged_extensions = dict(result.extensions if isinstance(result.extensions, dict) else {})
         merged_extensions["narrative"] = {
             "source": "deterministic_fallback",
@@ -232,7 +254,7 @@ class ResultPackager:
                 "safe_bundle_id": context_linkage["safe_bundle_id"],
                 "evidence_refs": context_linkage["evidence_refs"],
                 "stage_control": stage_control_snapshot,
-                "validation_result": deepcopy(validation_result or {"status": "pass", "failure_types": [], "retry_hint": ""}),
+                "validation_result": deepcopy(legacy_validation_result),
                 "judgment_canvas": deepcopy(judgment_canvas),
                 "appendix": result_appendix,
                 "canonical_payload": CanonicalRebuildPayload(
@@ -297,6 +319,7 @@ class ResultPackager:
         decisions: DecisionArtifacts,
         improvement: ImprovementArtifacts,
         question_axis: str,
+        validation_result: DecisionValidationResult,
     ) -> dict[str, Any]:
         decision_records = list(decisions.decision_summary.decisions or [])
         top_decision = decision_records[0] if decision_records else None
@@ -312,6 +335,8 @@ class ResultPackager:
         )
         design_options = list(improvement.design_options or [])
         recommended_option = improvement.recommended_option
+        planner_summary = self._planner_summary(improvement)
+        schedule_summary = self._schedule_summary(improvement)
         option_payloads = []
         for option in design_options[:3]:
             option_payloads.append(
@@ -352,17 +377,35 @@ class ResultPackager:
             },
         ]
 
+        recommendation_strength = self._effective_recommendation_strength(decisions, validation_result)
         conclusion_text = str(
             getattr(recommended_option, "selection_reason", "")
             or getattr(top_decision, "rationale", "")
             or decisions.decision_summary.recommended_strategy
             or "현재 근거에서 가장 안정적인 개선 방향을 우선 적용합니다."
         ).strip()
+        if bool(planner_summary.get("blocked_execution")):
+            conclusion_text = "현재 근거만으로는 결론을 확정할 수 없습니다. 먼저 차단 사유와 누락 근거를 해소한 뒤 재판단해야 합니다."
+        elif str(planner_summary.get("first_stage_kind") or "") == "verification_first" and conclusion_text and "검토" not in conclusion_text and "검증" not in conclusion_text:
+            conclusion_text = f"추가 검토가 필요한 판단: {conclusion_text}"
+        elif str(planner_summary.get("first_stage_kind") or "") == "precondition_check" and conclusion_text and "조건부" not in conclusion_text and "조건 확인" not in conclusion_text:
+            conclusion_text = f"현재 근거 기준의 조건부 판단: {conclusion_text}"
+        elif recommendation_strength == "review_required" and conclusion_text and "검토" not in conclusion_text:
+            conclusion_text = f"추가 검토가 필요한 판단: {conclusion_text}"
+        elif recommendation_strength == "blocked":
+            conclusion_text = "현재 근거만으로는 결론을 확정할 수 없습니다. 먼저 차단 사유와 누락 근거를 해소해야 합니다."
         risk_text = str(
             (improvement.risks[0] if improvement.risks else "")
             or (diagnosis.missing_context_details[0].reason if diagnosis.missing_context_details else "")
             or "근거가 얇은 지점은 후속 검증 없이 확정하면 안 됩니다."
         ).strip()
+        if recommendation_strength in {"review_required", "blocked"} and bool(validation_result.conflicts) and "충돌" not in risk_text:
+            risk_text = f"판단 충돌 가능성: {risk_text}"
+        elif recommendation_strength == "blocked" and "차단" not in risk_text:
+            risk_text = f"차단 사유 우선 확인: {risk_text}"
+        first_blocking_condition = str(schedule_summary.get("first_blocking_condition") or "").strip()
+        if first_blocking_condition and first_blocking_condition not in risk_text:
+            risk_text = f"{risk_text} 우선 중단 기준은 {first_blocking_condition}"
 
         return {
             "situation_purpose": {
@@ -438,13 +481,14 @@ class ResultPackager:
         blocked = list(getattr(prepared, "blocked_user_questions", []) or [])
         review = list(getattr(prepared, "review_user_questions", []) or [])
         summary = getattr(prepared, "question_guard_summary", None)
+        guarded_input = getattr(prepared, "guarded_decision_input", None)
         if not candidates and not blocked and not review and summary is None:
             return {}
         payload: dict[str, Any] = {
-            "raw_goal": str(getattr(prepared, "raw_goal", "") or ""),
-            "raw_constraints": list(getattr(prepared, "raw_constraints", []) or []),
-            "effective_goal": str(getattr(prepared, "goal", "") or ""),
-            "effective_constraints": list(getattr(prepared, "constraints", []) or []),
+            "raw_goal": str(getattr(guarded_input, "raw_goal", "") or getattr(prepared, "raw_goal", "") or ""),
+            "raw_constraints": list(getattr(guarded_input, "raw_constraints", []) or getattr(prepared, "raw_constraints", []) or []),
+            "effective_goal": str(getattr(guarded_input, "effective_goal", "") or getattr(prepared, "goal", "") or ""),
+            "effective_constraints": list(getattr(guarded_input, "effective_constraints", []) or getattr(prepared, "constraints", []) or []),
             "source_question_candidates": [
                 item.model_dump() if hasattr(item, "model_dump") else dict(item)
                 for item in candidates
@@ -458,11 +502,33 @@ class ResultPackager:
                 for item in review
             ],
         }
+        if guarded_input is not None:
+            payload["guarded_decision_input"] = guarded_input.model_dump()
         if summary is not None:
             payload["question_guard_summary"] = (
                 summary.model_dump() if hasattr(summary, "model_dump") else dict(summary)
             )
         return payload
+
+    def _primary_decision_basis(self, decisions: DecisionArtifacts):
+        decision_records = list(decisions.decision_summary.decisions or [])
+        top_decision_id = str(decision_records[0].decision_id or "").strip() if decision_records else ""
+        for item in list(getattr(decisions, "decision_basis", []) or []):
+            if str(getattr(item, "decision_id", "") or "").strip() == top_decision_id:
+                return item
+        return next(iter(list(getattr(decisions, "decision_basis", []) or [])), None)
+
+    def _effective_recommendation_strength(
+        self,
+        decisions: DecisionArtifacts,
+        validation_result: DecisionValidationResult,
+    ) -> str:
+        basis = self._primary_decision_basis(decisions)
+        base_strength = getattr(basis, "recommendation_strength", "review_required") if basis is not None else "review_required"
+        effective_strength = validation_result.apply_recommendation_strength(base_strength)
+        if any(item.severity == "warning" for item in list(validation_result.conflicts or [])):
+            effective_strength = max_recommendation_strength(effective_strength, "conditional")
+        return normalize_recommendation_strength(effective_strength)
 
     def _canvas_evidence_refs(
         self,
@@ -1552,12 +1618,25 @@ class ResultPackager:
         packager_guard_applied: bool,
         grounding_profile: dict[str, Any],
         constraint_filters: list[dict[str, str]],
+        validation_result: DecisionValidationResult,
     ) -> dict[str, Any]:
+        recommendation_strength = self._effective_recommendation_strength(decisions, validation_result)
         return {
             "synthetic_signal_detected": synthetic_signal_detected,
             "packager_guard_applied": packager_guard_applied,
             "intent_usage_policy": self._intent_usage_policy(),
             "recommendation_grounding": grounding_profile,
+            "recommendation_strength": recommendation_strength,
+            "validation_summary": {
+                "passed": validation_result.passed,
+                "retry_recommended": validation_result.retry_recommended,
+                "blocking_reason": validation_result.blocking_reason,
+                "issue_codes": [item.issue_code for item in list(validation_result.issues or [])],
+                "missing_evidence": list(validation_result.missing_evidence or []),
+                "review_required": any(item.severity == "review_required" for item in list(validation_result.issues or [])),
+            },
+            "decision_conflicts": [item.model_dump() for item in list(validation_result.conflicts or [])],
+            "decision_basis": [item.model_dump() for item in list(getattr(decisions, "decision_basis", []) or [])],
             "confidence_policy": self._confidence_policy(prepared, confidence),
             "constraint_filters_applied": constraint_filters,
             "family_classifier": family_classification.model_dump(),
@@ -1575,6 +1654,11 @@ class ResultPackager:
                 improvement=improvement,
                 grounding_profile=grounding_profile,
             ),
+            "planner_summary": self._planner_summary(improvement),
+            "option_execution_strategies": [item.model_dump() for item in list(getattr(improvement, "option_execution_strategies", []) or [])],
+            "primary_option_strategy": self._primary_option_strategy(improvement),
+            "schedule_hints": [item.model_dump() for item in list(getattr(improvement, "schedule_hints", []) or [])],
+            "schedule_summary": self._schedule_summary(improvement),
         }
 
     def _intent_usage_policy(self) -> dict[str, Any]:
@@ -1600,6 +1684,60 @@ class ResultPackager:
             ],
         }
 
+    def _planner_summary(self, improvement: ImprovementArtifacts) -> dict[str, Any]:
+        stages = list(getattr(getattr(improvement, "improvement_plan_bundle", None), "execution_stages", []) or [])
+        first_stage = stages[0] if stages else None
+        stage_kind = str(getattr(first_stage, "stage_kind", "") or "").strip()
+        return {
+            "execution_stage_count": len(stages),
+            "verification_checkpoint_count": len(list(getattr(improvement, "verification_checkpoints", []) or [])),
+            "first_stage_title": str(getattr(first_stage, "title", "") or "").strip(),
+            "first_stage_priority": str(getattr(first_stage, "priority", "") or "").strip(),
+            "first_stage_phase": str(getattr(first_stage, "phase", "") or "").strip(),
+            "first_stage_kind": stage_kind,
+            "verification_first": stage_kind in {"verification_first", "precondition_check", "blocker_resolution"},
+            "blocked_execution": stage_kind == "blocker_resolution",
+        }
+
+    def _primary_option_strategy(self, improvement: ImprovementArtifacts) -> dict[str, Any] | None:
+        strategies = list(getattr(improvement, "option_execution_strategies", []) or [])
+        primary = next((item for item in strategies if bool(getattr(item, "primary", False))), None)
+        if primary is None and strategies:
+            primary = strategies[0]
+        return primary.model_dump() if primary is not None else None
+
+    def _schedule_summary(self, improvement: ImprovementArtifacts) -> dict[str, Any]:
+        hints = list(getattr(improvement, "schedule_hints", []) or [])
+        first_hint = hints[0] if hints else None
+        stage_kind = str(getattr(first_hint, "stage_kind", "") or "").strip()
+        if stage_kind == "blocker_resolution":
+            mode = "blocked_first"
+        elif stage_kind == "verification_first":
+            mode = "verification_first"
+        elif stage_kind == "precondition_check":
+            mode = "conditional_first"
+        else:
+            mode = "execution_first"
+        first_blocking = ""
+        for item in hints:
+            blocking_conditions = list(getattr(item, "blocking_conditions", []) or [])
+            if blocking_conditions:
+                first_blocking = str(blocking_conditions[0] or "").strip()
+                break
+        first_dependency = ""
+        for item in hints:
+            depends_on = list(getattr(item, "depends_on", []) or [])
+            if depends_on:
+                first_dependency = str(depends_on[0] or "").strip()
+                break
+        return {
+            "schedule_stage_count": len(hints),
+            "has_parallelizable_steps": any(bool(list(getattr(item, "can_parallelize_with", []) or [])) for item in hints),
+            "first_blocking_condition": first_blocking,
+            "first_dependency": first_dependency,
+            "schedule_mode": mode,
+        }
+
     def _confidence_policy(self, prepared: Any, confidence: float) -> dict[str, Any]:
         return {
             "evidence_only": True,
@@ -1607,6 +1745,110 @@ class ResultPackager:
             "included_signals": self._evidence_presence(prepared),
             "excluded_signals": ["goal", "constraints", "scenario", "supporting_docs", "narrative_fallback"],
         }
+
+    def _align_narrative_bundle_with_planner(
+        self,
+        *,
+        narrative_bundle,
+        governance_extension: dict[str, Any],
+        improvement: ImprovementArtifacts,
+        decisions: DecisionArtifacts,
+        validation_result: DecisionValidationResult,
+    ):
+        family = str(getattr(getattr(decisions, "family_classification", None), "family", "") or "").strip()
+        if family == "operational_source":
+            return narrative_bundle
+        planner_summary = dict(governance_extension.get("planner_summary") or {})
+        schedule_summary = dict(governance_extension.get("schedule_summary") or {})
+        recommendation_strength = str(governance_extension.get("recommendation_strength") or "").strip() or self._effective_recommendation_strength(decisions, validation_result)
+        grounding_profile = dict(governance_extension.get("recommendation_grounding") or {})
+        if (bool(grounding_profile.get("insufficient_grounding")) or str(grounding_profile.get("level") or "") == "insufficient") and recommendation_strength != "blocked" and not bool(planner_summary.get("blocked_execution")):
+            return narrative_bundle
+        first_stage_kind = str(planner_summary.get("first_stage_kind") or "").strip()
+        schedule_mode = str(schedule_summary.get("schedule_mode") or "").strip()
+        recommended_option = getattr(improvement, "recommended_option", None)
+        option_name = str(getattr(recommended_option, "name", "") or "").strip() or "추천안"
+        blocking_reason = str(getattr(validation_result, "blocking_reason", "") or "").strip() or "차단 사유와 누락 근거 해소"
+
+        primary_reason = str(getattr(narrative_bundle, "primary_judgment_reason", "") or "").strip()
+        one_line = str(getattr(narrative_bundle, "one_line_conclusion", "") or "").strip()
+        executive_summary = list(getattr(narrative_bundle, "executive_summary_v2", []) or [])
+
+        if recommendation_strength == "blocked" or bool(planner_summary.get("blocked_execution")):
+            primary_reason = "현재 단계에서는 실행보다 차단 요인 해소와 근거 보강이 우선입니다."
+            one_line = "현재 단계에서는 실행에 착수할 수 없습니다. 차단 요인을 해소하고 누락 근거를 보강한 뒤 재판단해야 합니다."
+            executive_summary = self._replace_or_append_summary_line(
+                executive_summary,
+                prefix="조치:",
+                line="조치: 실행 권고보다 차단 요인 해소와 근거 보강을 먼저 진행합니다.",
+            )
+            executive_summary = self._replace_or_append_summary_line(
+                executive_summary,
+                prefix="다음 단계:",
+                line=f"다음 단계: {self._ensure_period(blocking_reason or '차단 요인 해소 후 재판단합니다.')}",
+            )
+        elif first_stage_kind == "verification_first" or schedule_mode == "verification_first":
+            if "검증" not in primary_reason and "검토" not in primary_reason:
+                primary_reason = "추가 검토 전까지는 실행보다 근거와 충돌 검증이 우선입니다."
+            if "검증" not in one_line and "검토" not in one_line:
+                one_line = "추가 검토 전까지는 실행보다 근거와 충돌 검증을 먼저 진행해야 합니다."
+            if not self._summary_contains_tokens(executive_summary, ("검증", "검토", "실행 후보")):
+                executive_summary = self._replace_or_append_summary_line(
+                    executive_summary,
+                    prefix="다음 단계:",
+                    line="다음 단계: 실행 전에 근거 및 충돌 검증을 먼저 진행하고 실행안은 후보 상태로 유지합니다.",
+                )
+        elif first_stage_kind == "precondition_check" or schedule_mode == "conditional_first" or recommendation_strength == "conditional":
+            if "조건부" not in primary_reason and "조건 확인" not in primary_reason:
+                primary_reason = f"{option_name}은 선행 조건을 확인한 뒤 적용 여부를 결정해야 하는 조건부 실행안입니다."
+            if "조건" not in one_line:
+                tail = "우선 검토해야 합니다." if one_line.endswith("우선 검토해야 합니다.") else "적용 여부를 결정해야 합니다."
+                one_line = f"{option_name}은 선행 조건을 확인한 뒤 {tail}"
+            if not self._summary_contains_tokens(executive_summary, ("조건", "전제")):
+                executive_summary = self._replace_or_append_summary_line(
+                    executive_summary,
+                    prefix="다음 단계:",
+                    line="다음 단계: 선행 조건을 확인한 뒤 실행 여부를 결정하고, 조건 미충족 시 보류 또는 대안을 비교합니다.",
+                )
+        elif (first_stage_kind == "execution_start" or schedule_mode == "execution_first" or recommendation_strength == "assertive"):
+            if "우선 검토" in primary_reason:
+                primary_reason = primary_reason.replace("우선 검토", "우선 실행")
+            if "검토안" in one_line:
+                one_line = one_line.replace("검토안", "실행안")
+            if "우선 검토해야 합니다" in one_line:
+                one_line = one_line.replace("우선 검토해야 합니다", "우선 적용해야 합니다")
+            if not self._summary_contains_tokens(executive_summary[:3], ("우선안", "적용", "착수")):
+                executive_summary = self._replace_or_append_summary_line(
+                    executive_summary,
+                    prefix="다음 단계:",
+                    line="다음 단계: 직접 확인된 근거를 바탕으로 즉시 적용 가능한 단계를 먼저 진행합니다.",
+                )
+
+        narrative_bundle.primary_judgment_reason = primary_reason
+        narrative_bundle.one_line_conclusion = one_line
+        narrative_bundle.executive_summary_v2 = executive_summary[:4]
+        return narrative_bundle
+
+    def _replace_or_append_summary_line(self, summary_lines: list[str], *, prefix: str, line: str) -> list[str]:
+        updated = list(summary_lines or [])
+        for index, item in enumerate(updated):
+            if str(item or "").startswith(prefix):
+                updated[index] = line
+                return updated
+        updated.append(line)
+        return updated[:4]
+
+    def _summary_contains_tokens(self, summary_lines: list[str], tokens: tuple[str, ...]) -> bool:
+        combined = " ".join(str(item or "") for item in list(summary_lines or []))
+        return any(token in combined for token in tokens)
+
+    def _ensure_period(self, text: str) -> str:
+        normalized = str(text or "").strip()
+        if not normalized:
+            return normalized
+        if normalized[-1] in ".!?":
+            return normalized
+        return normalized + "."
 
     def _evidence_presence(self, prepared: Any) -> dict[str, bool]:
         asset_presence = getattr(prepared, "asset_presence", None)
@@ -1625,6 +1867,8 @@ class ResultPackager:
         diagnosis: DiagnosisArtifacts,
         decisions: DecisionArtifacts,
         confidence: float,
+        *,
+        validation_result: DecisionValidationResult,
     ) -> dict[str, Any]:
         evidence_presence = self._evidence_presence(prepared)
         evidence_group_count = sum(1 for present in evidence_presence.values() if present)
@@ -1632,6 +1876,8 @@ class ResultPackager:
             1 for item in decisions.decision_summary.decisions if item.issue_ids and item.evidence_ids
         )
         missing_context_count = len(diagnosis.missing_context_details or [])
+        recommendation_strength = self._effective_recommendation_strength(decisions, validation_result)
+        basis = self._primary_decision_basis(decisions)
         reason_codes: list[str] = []
         if evidence_group_count == 0:
             reason_codes.append("no_structural_evidence")
@@ -1645,15 +1891,28 @@ class ResultPackager:
             reason_codes.append("missing_required_evidence")
         elif missing_context_count:
             reason_codes.append("partial_missing_context")
+        if list(validation_result.missing_evidence or []):
+            reason_codes.append("missing_decision_evidence")
+        if any(item.severity == "review_required" for item in list(validation_result.issues or [])):
+            reason_codes.append("review_required_conflict")
         if confidence < 0.25:
             reason_codes.append("low_confidence")
         elif confidence < 0.45:
             reason_codes.append("limited_confidence")
 
-        insufficient_grounding = "no_structural_evidence" in reason_codes
-        if insufficient_grounding:
+        insufficient_grounding = "no_structural_evidence" in reason_codes or recommendation_strength == "blocked"
+        if recommendation_strength == "blocked":
+            level = "insufficient"
+            recommendation_mode = "blocked"
+        elif insufficient_grounding:
             level = "insufficient"
             recommendation_mode = "observation_only"
+        elif recommendation_strength == "review_required":
+            level = "limited"
+            recommendation_mode = "review_required"
+        elif recommendation_strength == "conditional":
+            level = "limited"
+            recommendation_mode = "draft"
         elif reason_codes:
             level = "limited"
             recommendation_mode = "draft"
@@ -1668,6 +1927,10 @@ class ResultPackager:
             "evidence_group_count": evidence_group_count,
             "evidence_backed_decision_count": evidence_backed_decision_count,
             "missing_context_count": missing_context_count,
+            "recommendation_strength": recommendation_strength,
+            "confidence_score": getattr(basis, "confidence_score", 0.0) if basis is not None else 0.0,
+            "evidence_strength_score": getattr(basis, "evidence_strength_score", 0.0) if basis is not None else 0.0,
+            "scoring_reasons": list(getattr(basis, "scoring_reasons", []) or []) if basis is not None else [],
         }
 
     def _apply_recommendation_grounding(
@@ -1676,17 +1939,23 @@ class ResultPackager:
         grounding_profile: dict[str, Any],
     ) -> ImprovementArtifacts:
         level = str(grounding_profile.get("level") or "")
-        if level == "grounded":
+        recommendation_strength = str(grounding_profile.get("recommendation_strength") or "")
+        if level == "grounded" and recommendation_strength == "assertive":
             return improvement
 
         design_options = []
         for item in improvement.design_options:
             option_label = self._option_display_name(item.name)
-            if level == "insufficient":
+            if recommendation_strength == "blocked" or level == "insufficient":
                 selection_reason = (
                     f"직접 확인된 구조 근거가 부족하므로 {self._attach_topic_particle(option_label)} "
                     "확정안이 아니라 검토용 초안으로만 유지합니다."
                 )
+            elif recommendation_strength == "review_required":
+                selection_reason = (
+                    f"판단 충돌 또는 누락 근거가 있어 {self._attach_topic_particle(option_label)} "
+                    f"추가 검토 전까지 실행 후보로만 유지합니다. {self._soften_sentence(item.selection_reason)}"
+                ).strip()
             else:
                 selection_reason = (
                     f"직접 확인된 구조 근거가 제한적이므로 {self._attach_topic_particle(option_label)} 우선 검토안으로 유지합니다. "
@@ -1695,7 +1964,9 @@ class ResultPackager:
             design_options.append(item.model_copy(update={"selection_reason": selection_reason}))
 
         recommended_option = improvement.recommended_option
-        if recommended_option is not None and level == "limited":
+        if recommended_option is not None and (recommendation_strength == "blocked" or level == "insufficient"):
+            recommended_option = None
+        elif recommended_option is not None and recommendation_strength == "conditional":
             option_label = self._option_display_name(recommended_option.name)
             recommended_option = recommended_option.model_copy(
                 update={
@@ -1709,8 +1980,20 @@ class ResultPackager:
                     ],
                 }
             )
-        elif level == "insufficient":
-            recommended_option = None
+        elif recommended_option is not None and recommendation_strength == "review_required":
+            option_label = self._option_display_name(recommended_option.name)
+            recommended_option = recommended_option.model_copy(
+                update={
+                    "selection_reason": (
+                        f"판단 충돌 또는 누락 근거가 있어 {self._attach_topic_particle(option_label)} 추가 검토 전까지 실행 후보로만 유지합니다. "
+                        f"{self._soften_sentence(recommended_option.selection_reason)}"
+                    ).strip(),
+                    "expected_outcomes": [
+                        "상충 판단과 누락 근거가 해소되면 실행안으로 승격할 수 있습니다.",
+                        "현재 단계에서는 verification checkpoint를 먼저 통과해야 합니다.",
+                    ],
+                }
+            )
 
         improvement_plan_bundle = improvement.improvement_plan_bundle.model_copy(
             update={

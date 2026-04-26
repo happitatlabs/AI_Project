@@ -98,6 +98,20 @@ class InputAssembler:
                 include_asset_fields=include_asset_assumptions,
             ),
         )
+        prepared.guarded_decision_input = prepared.guarded_decision_input.model_copy(
+            update={
+                "raw_goal": intent.goal,
+                "raw_constraints": list(intent.constraints or []),
+                "effective_goal": intent.goal,
+                "effective_constraints": list(intent.constraints or []),
+                "raw_question_axis": prepared.question_axis,
+                "preferred_question_axis": prepared.question_axis,
+                "selected_questions": [intent.goal] if str(intent.goal or "").strip() else [],
+                "selected_question_types": [],
+                "source_domain_terms": [],
+                "applied_question_source": "uninitialized",
+            }
+        )
         prepared.signals = legacy_service.extract_feature_signals(prepared)
         prepared.missing_context = legacy_service.detect_missing_context(prepared)
         return prepared
@@ -140,11 +154,14 @@ class InputAssembler:
         accounting_asset_name = ""
         accounting_input_error = ""
         source_assumption_candidates: list[AssumptionItem] = []
+        has_guardable_document_source = False
         for source in analysis_context.source_blocks:
             content = (source.content or source.excerpt or "").strip()
             if not content:
                 continue
             asset_name = source.asset_name or source.locator or source.asset_id
+            if content.lower().startswith("[sml v1]"):
+                has_guardable_document_source = True
             source_assumption_candidates.extend(
                 self._collect_explicit_assumption_candidates(
                     content,
@@ -168,6 +185,7 @@ class InputAssembler:
             elif asset_type == "ui" or legacy_service._is_ui_asset_name(asset_name):
                 ui_blocks.append(block)
             elif asset_type == "doc" or legacy_service._is_doc_asset_name(asset_name):
+                has_guardable_document_source = True
                 doc_blocks.append(block)
             elif asset_type == "framework" or legacy_service._is_framework_asset_name(asset_name):
                 continue
@@ -214,20 +232,42 @@ class InputAssembler:
             raw_goal=analysis_context.intent.goal,
             raw_constraints=analysis_context.intent.constraints,
         )
+        apply_guarded_intent = bool(question_guard.source_question_candidates) and has_guardable_document_source
+        effective_goal = question_guard.effective_goal if apply_guarded_intent else analysis_context.intent.goal
+        effective_constraints = (
+            list(question_guard.effective_constraints)
+            if apply_guarded_intent
+            else list(analysis_context.intent.constraints or [])
+        )
+        preferred_question_axis = question_guard.preferred_question_axis if apply_guarded_intent else prepared.question_axis
         prepared.source_question_candidates = list(question_guard.source_question_candidates)
         prepared.blocked_user_questions = list(question_guard.blocked_user_questions)
         prepared.review_user_questions = list(question_guard.review_user_questions)
         prepared.question_guard_summary = question_guard.question_guard_summary
-        prepared.goal = question_guard.effective_goal
-        prepared.constraints = list(question_guard.effective_constraints)
+        prepared.guarded_decision_input = prepared.guarded_decision_input.model_copy(
+            update={
+                "raw_goal": analysis_context.intent.goal,
+                "raw_constraints": list(analysis_context.intent.constraints or []),
+                "effective_goal": effective_goal,
+                "effective_constraints": effective_constraints,
+                "raw_question_axis": prepared.question_axis,
+                "preferred_question_axis": preferred_question_axis,
+                "selected_questions": list(question_guard.question_guard_summary.selected_questions or []),
+                "selected_question_types": list(question_guard.question_guard_summary.selected_question_types or []),
+                "source_domain_terms": list(question_guard.question_guard_summary.source_domain_terms or []),
+                "applied_question_source": question_guard.question_guard_summary.applied_question_source,
+            }
+        )
+        prepared.goal = effective_goal
+        prepared.constraints = effective_constraints
         prepared.intent = prepared.intent.model_copy(
             update={
                 "goal": prepared.goal,
                 "constraints": list(prepared.constraints),
             }
         )
-        if question_guard.preferred_question_axis:
-            prepared.question_axis = question_guard.preferred_question_axis
+        if preferred_question_axis:
+            prepared.question_axis = preferred_question_axis
         prepared.scope_limited = legacy_service.is_scope_limited(prepared.goal)
         prepared.signals = legacy_service.extract_feature_signals(prepared)
         prepared.missing_context = legacy_service.detect_missing_context(prepared)
@@ -426,6 +466,8 @@ class InputAssembler:
             seed_structures = []
             safe_bundle_id = ""
             input_fingerprint = ""
+        asset_inventory = self._order_asset_inventory(asset_inventory)
+        source_blocks = self._order_source_blocks(source_blocks)
         missing_context = list(getattr(prepared, "missing_context_details", []) or [])
         if not missing_context:
             missing_context = [
@@ -663,6 +705,40 @@ class InputAssembler:
                 )
             )
         return asset_inventory, source_blocks
+
+    def _asset_inventory_sort_key(self, item: AssetInventoryItem) -> tuple[int, str, str]:
+        type_order = {
+            "source": 0,
+            "schema": 1,
+            "sql": 2,
+            "ui": 3,
+            "framework": 4,
+            "doc": 5,
+            "json": 6,
+        }
+        return (
+            type_order.get(str(item.asset_type or "").strip().lower(), 99),
+            str(item.name or "").strip().lower(),
+            str(item.asset_id or "").strip().lower(),
+        )
+
+    def _order_asset_inventory(self, asset_inventory: list[AssetInventoryItem]) -> list[AssetInventoryItem]:
+        return sorted(list(asset_inventory or []), key=self._asset_inventory_sort_key)
+
+    def _order_source_blocks(self, source_blocks: list[SourceBlock]) -> list[SourceBlock]:
+        return sorted(
+            list(source_blocks or []),
+            key=lambda item: (
+                self._asset_inventory_sort_key(
+                    AssetInventoryItem(
+                        asset_id=str(item.asset_id or ""),
+                        name=str(item.asset_name or ""),
+                        asset_type=str(item.asset_type or ""),
+                    )
+                ),
+                str(item.block_id or "").strip().lower(),
+            ),
+        )
 
     def _asset_type(self, asset_name: str, content: str = "") -> str:
         lowered = (asset_name or "").strip().lower()

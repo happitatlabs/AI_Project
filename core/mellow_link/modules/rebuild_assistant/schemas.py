@@ -176,6 +176,14 @@ class VerificationItem(BaseModel):
     item: str
     reason: str
     evidence: list[EvidenceRef] = Field(default_factory=list)
+    target: str = ""
+    required_evidence: list[str] = Field(default_factory=list)
+    pass_criteria: str = ""
+    failure_action: str = ""
+    priority: Literal["", "P0", "P1", "P2"] = ""
+    checkpoint_kind: str = ""
+    related_decision_ids: list[str] = Field(default_factory=list)
+    related_conflict_ids: list[str] = Field(default_factory=list)
 
 
 class DesignOption(BaseModel):

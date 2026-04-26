@@ -480,6 +480,50 @@ def test_preview_quality_summary_tracks_overredaction_signals_without_low_conf_r
     assert "[LOW_CONF_TERM_CANDIDATE]" not in canonical
 
 
+def test_review_report_does_not_revive_low_conf_for_consulting_overview_phrases():
+    sml = "\n".join(
+        [
+            "[SML v1]",
+            "presentation_file: overview_quality_deck.pptx",
+            "slide_count: 1",
+            "",
+            "[SLIDE 1]",
+            "title: 사업의 개요",
+            "texts:",
+            "- 방향성 수립",
+            "- 차세대 경영정보시스템 구축 BPR/ISMP 수립 컨설팅",
+            "- 현 시스템과 개선안의 이익분석",
+            "- 경영정보시스템의 운영 환경과 기능 분석을 통하여 개선점을 도출하고 최적화된 모델을 구축할 수 있는 구체적인 이행 계획을 수립하고자 함",
+        ]
+    )
+    result = AnonymizationService().run_anonymization_pipeline(
+        AnonymizationRunRequest(
+            project_id="proj_overview_quality",
+            assets=[
+                AnonymizationAsset(
+                    asset_id="asset_overview_quality",
+                    name="overview_quality_deck.pptx",
+                    temp_file_id="temp_overview_quality",
+                    kind_hint="presentation",
+                    content_text=sml,
+                    original_bytes=b"pptx-binary",
+                )
+            ],
+        )
+    )
+
+    assert result.review_report is not None
+    report = result.review_report
+    low_conf_warnings = [
+        item for item in list(report.label_less_warnings or [])
+        if str(getattr(item, "entity_type_guess", "") or "").strip() == "low_conf_term"
+    ]
+    preview_text = report.asset_previews[0].preview_text
+
+    assert low_conf_warnings == []
+    assert "[LOW_CONF_TERM_CANDIDATE]" not in preview_text
+
+
 def test_preview_quality_tracks_candidate_density_and_hidden_line_ratio():
     result = _run_label_less_person_filter_pipeline()
 

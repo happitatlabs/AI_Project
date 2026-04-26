@@ -30,6 +30,7 @@ from mellow_link.modules.rebuild_assistant.schemas import (
 from mellow_link.services.anonymization.schemas import SafeAnalysisBundle, StructureArtifact
 
 from .question_guard_schemas import (
+    GuardedDecisionInput,
     GuardedUserQuestion,
     QuestionGuardSummary,
     SourceQuestionCandidate,
@@ -191,6 +192,7 @@ class PreparedRebuildInput:
     blocked_user_questions: list[GuardedUserQuestion] = field(default_factory=list)
     review_user_questions: list[GuardedUserQuestion] = field(default_factory=list)
     question_guard_summary: QuestionGuardSummary = field(default_factory=QuestionGuardSummary)
+    guarded_decision_input: GuardedDecisionInput = field(default_factory=GuardedDecisionInput)
     stage_control: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -210,6 +212,18 @@ class PreparedRebuildInput:
             self.raw_constraints = list(self.constraints or [])
         if self.missing_context is None:
             self.missing_context = []
+        if not self.guarded_decision_input.raw_goal:
+            self.guarded_decision_input.raw_goal = self.raw_goal
+        if not self.guarded_decision_input.raw_constraints:
+            self.guarded_decision_input.raw_constraints = list(self.raw_constraints or [])
+        if not self.guarded_decision_input.effective_goal:
+            self.guarded_decision_input.effective_goal = self.goal
+        if not self.guarded_decision_input.effective_constraints:
+            self.guarded_decision_input.effective_constraints = list(self.constraints or [])
+        if not self.guarded_decision_input.raw_question_axis:
+            self.guarded_decision_input.raw_question_axis = self.question_axis
+        if not self.guarded_decision_input.preferred_question_axis:
+            self.guarded_decision_input.preferred_question_axis = self.question_axis
 
 
 class AssetInventoryItem(BaseModel):
@@ -418,10 +432,162 @@ class DecisionRecord(BaseModel):
     evidence_ids: list[str] = Field(default_factory=list)
 
 
+RecommendationStrength = Literal["assertive", "conditional", "review_required", "blocked"]
+
+
+def normalize_unit_interval(value: Any) -> float:
+    try:
+        numeric = float(value)
+    except Exception:
+        numeric = 0.0
+    return max(0.0, min(1.0, round(numeric, 2)))
+
+
+def normalize_recommendation_strength(value: Any) -> RecommendationStrength:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"assertive", "conditional", "review_required", "blocked"}:
+        return normalized  # type: ignore[return-value]
+    return "review_required"
+
+
+def max_recommendation_strength(*values: Any) -> RecommendationStrength:
+    order = {
+        "assertive": 0,
+        "conditional": 1,
+        "review_required": 2,
+        "blocked": 3,
+    }
+    strongest = "assertive"
+    for item in values:
+        candidate = normalize_recommendation_strength(item)
+        if order[candidate] > order[strongest]:
+            strongest = candidate
+    return strongest  # type: ignore[return-value]
+
+
+class JudgmentCriteria(BaseModel):
+    evidence_strength: float = 0.0
+    input_sufficiency: float = 0.0
+    change_cost: float = 0.0
+    delivery_speed: float = 0.0
+    maintainability_gain: float = 0.0
+    contract_stability: float = 0.0
+    notes: list[str] = Field(default_factory=list)
+
+
+class DecisionBasis(BaseModel):
+    decision_id: str
+    issue_ids: list[str] = Field(default_factory=list)
+    decision_type: str = ""
+    criteria: JudgmentCriteria = Field(default_factory=JudgmentCriteria)
+    evidence_ids: list[str] = Field(default_factory=list)
+    source_grounded: bool = False
+    goal_signal_detected: bool = False
+    goal_signal_applied: bool = False
+    asset_signal_detected: bool = False
+    blocked_recommendation_types: list[str] = Field(default_factory=list)
+    score_scale: Literal["0.0_to_1.0"] = "0.0_to_1.0"
+    evidence_strength_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    risk_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    urgency_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    maintainability_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    recommendation_strength: RecommendationStrength = "review_required"
+    scoring_reasons: list[str] = Field(default_factory=list)
+    summary: str = ""
+
+
+class DecisionConflict(BaseModel):
+    conflict_id: str
+    conflict_type: str
+    severity: Literal["warning", "review_required", "blocking"] = "warning"
+    summary: str = ""
+    issue_ids: list[str] = Field(default_factory=list)
+    decision_ids: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+    resolution_hint: str = ""
+
+
+class DecisionValidationIssue(BaseModel):
+    issue_code: str
+    severity: Literal["warning", "review_required", "blocking"] = "warning"
+    message: str = ""
+    issue_ids: list[str] = Field(default_factory=list)
+    decision_ids: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+
+
+class DecisionValidationResult(BaseModel):
+    passed: bool = True
+    issues: list[DecisionValidationIssue] = Field(default_factory=list)
+    conflicts: list[DecisionConflict] = Field(default_factory=list)
+    missing_evidence: list[str] = Field(default_factory=list)
+    retry_recommended: bool = False
+    blocking_reason: str | None = None
+    status: Literal["pass", "fail"] = "pass"
+    failure_types: list[str] = Field(default_factory=list)
+    retry_hint: str = ""
+
+    def apply_recommendation_strength(self, base_strength: RecommendationStrength | str) -> RecommendationStrength:
+        effective = normalize_recommendation_strength(base_strength)
+        if self.status == "fail" or self.blocking_reason or any(item.severity == "blocking" for item in self.issues):
+            return "blocked"
+        if list(self.missing_evidence or []):
+            effective = max_recommendation_strength(effective, "review_required")
+        if any(item.severity == "review_required" for item in self.issues):
+            effective = max_recommendation_strength(effective, "review_required")
+        elif any(item.severity == "warning" for item in self.issues):
+            effective = max_recommendation_strength(effective, "conditional")
+        return effective
+
+    def to_legacy_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "failure_types": list(self.failure_types),
+            "retry_hint": self.retry_hint,
+        }
+
+    @classmethod
+    def coerce(cls, payload: Any) -> "DecisionValidationResult":
+        if isinstance(payload, cls):
+            return payload
+        if isinstance(payload, dict):
+            status = str(payload.get("status") or "pass").strip().lower()
+            failure_types = [
+                str(item or "").strip()
+                for item in list(payload.get("failure_types") or [])
+                if str(item or "").strip()
+            ]
+            issues = [
+                DecisionValidationIssue(
+                    issue_code=code,
+                    severity="blocking" if status == "fail" else "warning",
+                    message=code,
+                )
+                for code in failure_types
+            ]
+            missing_evidence = ["decision_evidence_missing"] if "evidence_insufficient" in failure_types else []
+            return cls(
+                passed=status != "fail",
+                issues=issues,
+                conflicts=[],
+                missing_evidence=missing_evidence,
+                retry_recommended=status == "fail",
+                blocking_reason=None if status != "fail" else (failure_types[0] if failure_types else "validation_failed"),
+                status="fail" if status == "fail" else "pass",
+                failure_types=failure_types,
+                retry_hint=str(payload.get("retry_hint") or ""),
+            )
+        raise TypeError(f"Unsupported validation result payload: {type(payload)!r}")
+
+
 class DecisionSummary(BaseModel):
     decisions: list[DecisionRecord] = Field(default_factory=list)
     recommended_strategy: str = ""
     priority_queue: list[str] = Field(default_factory=list)
+    conditional: bool = False
+    review_required: bool = False
+    conflict_ids: list[str] = Field(default_factory=list)
 
 
 class DecisionArtifacts(BaseModel):
@@ -439,6 +605,8 @@ class DecisionArtifacts(BaseModel):
     decision_items: list[DecisionItem] = Field(default_factory=list)
     assumptions: list[AssumptionItem] = Field(default_factory=list)
     synthetic_signal_detected: bool = False
+    decision_basis: list[DecisionBasis] = Field(default_factory=list)
+    conflicts: list[DecisionConflict] = Field(default_factory=list)
 
 
 class RiskCheckpoint(BaseModel):
@@ -456,6 +624,44 @@ class ExecutionStage(BaseModel):
     verification_checkpoint_ids: list[str] = Field(default_factory=list)
     risk_ids: list[str] = Field(default_factory=list)
     depends_on: list[str] = Field(default_factory=list)
+    objective: str = ""
+    priority: Literal["", "P0", "P1", "P2"] = ""
+    phase: Literal["", "immediate", "next", "later"] = ""
+    stage_kind: str = ""
+    prerequisites: list[str] = Field(default_factory=list)
+    verification_methods: list[str] = Field(default_factory=list)
+    stop_conditions: list[str] = Field(default_factory=list)
+    deliverables: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    decision_basis_refs: list[str] = Field(default_factory=list)
+    fallback_action: str = ""
+
+
+class OptionExecutionStrategy(BaseModel):
+    option_label: str = ""
+    option_title: str = ""
+    primary: bool = False
+    recommendation_strength: RecommendationStrength = "review_required"
+    when_to_choose: str = ""
+    first_action: str = ""
+    required_evidence: list[str] = Field(default_factory=list)
+    key_risks: list[str] = Field(default_factory=list)
+    fallback_or_exit_condition: str = ""
+    expected_deliverables: list[str] = Field(default_factory=list)
+    related_decision_basis_refs: list[str] = Field(default_factory=list)
+
+
+class ExecutionScheduleHint(BaseModel):
+    stage_id: str = ""
+    stage_title: str = ""
+    sequence_index: int = 0
+    priority: Literal["", "P0", "P1", "P2"] = ""
+    phase: Literal["", "immediate", "next", "later"] = ""
+    depends_on: list[str] = Field(default_factory=list)
+    can_parallelize_with: list[str] = Field(default_factory=list)
+    blocking_conditions: list[str] = Field(default_factory=list)
+    suggested_order_reason: str = ""
+    stage_kind: str = ""
 
 
 class ImprovementPlanBundle(BaseModel):
@@ -477,6 +683,8 @@ class ImprovementArtifacts(BaseModel):
     recomposition_draft: LayeredListResult = Field(default_factory=LayeredListResult)
     risks: list[str] = Field(default_factory=list)
     recommended_directions: list[str] = Field(default_factory=list)
+    option_execution_strategies: list[OptionExecutionStrategy] = Field(default_factory=list)
+    schedule_hints: list[ExecutionScheduleHint] = Field(default_factory=list)
 
 
 class StructuredRefactoringResult(BaseModel):

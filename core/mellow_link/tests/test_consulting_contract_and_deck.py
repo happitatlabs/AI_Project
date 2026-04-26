@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+from mellow_link.tests import test_phase3_explanation_and_qa as _phase3_preload  # noqa: F401
 from mellow_link.modules.rebuild_assistant.postprocess.consulting_contract import (
     build_consulting_min_contract,
 )
@@ -250,7 +251,7 @@ def test_build_consulting_deck_reduces_repetition_and_filters_fx_fifo_overview_n
         "[문제 정의] 입금 lot 잔량과 출금 lot 소진 순서를 분리해야 동일 거래 계산이 흔들리지 않습니다",
     ]
     assert "[판단 질문] 현행 FIFO 기준을 유지할지 판단해야 합니다" in judgment_items
-    assert "[결론] 현 단계 우선 검토안: 현행 FIFO 기준 유지와 예외 검증 보강" in judgment_items
+    assert "[결론] 검증 후 적용: 현행 FIFO 기준 유지와 예외 검증 보강" in judgment_items
     assert any(item.startswith("[누락된 정보]") for item in risk_items)
     assert implementation_action_items == [
         "[중점 실행 과제] 입금 lot 적재와 출금 lot 소진 계산을 별도 FIFO 계산 계층으로 분리",
@@ -283,8 +284,92 @@ def test_build_consulting_deck_softens_conclusion_when_missing_information_exist
     judgment_items = deck["chapters"][1]["sections"][0]["items"]
     risk_items = deck["chapters"][1]["sections"][1]["items"]
 
-    assert "[결론] 현 단계 우선 검토안: 옵션 A. 조회 모델 분리" in judgment_items
+    assert "[결론] 검증 후 적용: 옵션 A. 조회 모델 분리" in judgment_items
     assert any(item.startswith("[누락된 정보]") for item in risk_items)
+
+
+def test_build_consulting_deck_external_surface_simplifies_internal_labels():
+    deck = build_consulting_deck(
+        ConsultingMinContract(
+            context=["주문 생성 구조 판단을 정리합니다."],
+            problem_definition=["상태 전이 로직이 여러 위치에 분산됩니다."],
+            decision_question=["주문 생성 경계를 분리할지 판단해야 합니다."],
+            options=["옵션 A: 서비스 경계 분리"],
+            decision_criteria=["정합성과 실행 가능성을 우선합니다."],
+            conclusion=["옵션 A를 우선 적용합니다."],
+            key_reasons=["상태 전이 로직이 여러 위치에 분산됩니다."],
+            missing_information=["실운영 예외 케이스: 추가 확인 필요"],
+        ),
+        project_name="판단 구조",
+        client_name="ACME",
+        surface_mode="external",
+    )
+
+    overview_items = deck["chapters"][0]["sections"][0]["items"]
+    judgment_items = deck["chapters"][1]["sections"][0]["items"]
+    risk_items = deck["chapters"][1]["sections"][1]["items"]
+
+    assert all("[" not in item for item in overview_items + judgment_items + risk_items)
+    assert overview_items[0] == "주문 생성 구조 판단을 정리합니다"
+    assert any(item.startswith("문제: ") for item in overview_items)
+    assert len(judgment_items) <= 3
+    assert any(item.startswith("검증 후 적용: ") or item.startswith("조건 확인 후 실행: ") or item.startswith("실행 착수 가능: ") or item.startswith("실행 불가: ") for item in judgment_items)
+    assert any(item.startswith("이유: ") for item in judgment_items)
+    assert all(len(item) <= 40 for item in judgment_items)
+    assert not any("검증 후 적용: 검증 후 적용:" in item for item in judgment_items)
+    assert "우선 검토안" not in " ".join(judgment_items)
+    assert "후보" not in " ".join(judgment_items)
+    assert any(item.startswith("추가 확인 필요: ") for item in risk_items)
+
+
+def test_build_consulting_deck_external_surface_uses_technical_style_for_code_like_contract():
+    deck = build_consulting_deck(
+        ConsultingMinContract(
+            problem_definition=["저장 전 차단 조건과 예외 처리 규칙이 한 흐름에 섞여 있습니다."],
+            risks=["차단 조건 누락 시 저장 흐름이 흔들릴 수 있습니다."],
+            actions=["검증 규칙을 별도 계층으로 분리합니다."],
+            rules=["저장 전 차단 조건을 먼저 검증해야 합니다."],
+            evidence=["SQL 조건 매핑과 저장 규칙이 같은 경계에 섞여 있습니다."],
+            process_flow=["1주차: 검증 규칙 구조화", "2주차: 저장 흐름 검증"],
+        ),
+        project_name="기술 판단",
+        client_name="ACME",
+        surface_mode="external",
+    )
+
+    sections = {
+        (chapter["chapter_key"], section["section_key"]): section
+        for chapter in deck["chapters"]
+        for section in chapter["sections"]
+    }
+    assert sections[("overview", "as_is")]["title"] == "핵심 문제"
+    assert sections[("approach", "risks")]["title"] == "영향"
+    assert sections[("implementation", "actions")]["title"] == "권장 조치"
+    assert sections[("design", "rules")]["title"] == "검증 포인트"
+    assert any(item.startswith("핵심 문제: ") for item in sections[("overview", "as_is")]["items"])
+
+
+def test_build_consulting_deck_external_surface_uses_mixed_style_for_document_plus_code_contract():
+    deck = build_consulting_deck(
+        ConsultingMinContract(
+            context=["컨설팅 개요와 기술 적용 기준을 함께 설명합니다."],
+            problem_definition=["현행 문서 설명과 저장 검증 규칙이 함께 존재합니다."],
+            evidence=["SQL 조건 매핑과 개선 방향 문서가 함께 확인됩니다."],
+            process_flow=["1단계: 개선 방향 정리", "2단계: SQL 검증 포인트 확인"],
+            rules=["저장 전 차단 조건을 먼저 검증해야 합니다."],
+        ),
+        project_name="혼합 판단",
+        client_name="ACME",
+        surface_mode="external",
+    )
+
+    sections = {
+        (chapter["chapter_key"], section["section_key"]): section
+        for chapter in deck["chapters"]
+        for section in chapter["sections"]
+    }
+    assert sections[("implementation", "process_flow")]["title"] == "코드 분석 포인트"
+    assert sections[("design", "rules")]["title"] == "코드 검증 포인트"
 
 
 def test_build_result_package_includes_consulting_contract_and_internal_deck():
@@ -383,6 +468,9 @@ def test_result_package_markdown_prefers_consulting_deck_and_separates_internal_
     assert "## 컨설팅 전개" in external_markdown
     assert "## 컨설팅 구현" in external_markdown
     assert "필요합니다" not in external_markdown
+    assert "[판단 질문]" not in external_markdown
+    assert "[결론]" not in external_markdown
+    assert "[핵심 이유]" not in external_markdown
     assert "## 참고 구조 비교" not in external_markdown
 
 
