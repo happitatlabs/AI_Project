@@ -73,6 +73,9 @@
 
 ### 제품 / 구조
 
+- [MELLOW_LINK_WHITEPAPER_KO.md](/C:/Users/Hyein/ClaudeAI/AI_Project/core/mellow_link/docs/MELLOW_LINK_WHITEPAPER_KO.md)
+  - 멜로우 링크 판맥 백서 초안
+  - 제품 정의, 핵심 아키텍처, 판단 통제, 품질 기준, 한계와 로드맵을 외부 설명용 흐름으로 정리
 - [MELLOW_LINK_BEGINNER_USER_GUIDE_KO.md](/C:/Users/Hyein/ClaudeAI/AI_Project/core/mellow_link/docs/MELLOW_LINK_BEGINNER_USER_GUIDE_KO.md)
   - 컴퓨터 초보자용 사용자 설명서
   - `/projects/create` 기준으로 로그인, 업로드, 분석 시작, 결과 확인, 저장 절차를 화면 문구 기준으로 설명
