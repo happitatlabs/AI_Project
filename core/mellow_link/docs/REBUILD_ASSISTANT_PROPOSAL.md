@@ -4,6 +4,7 @@ Overview
 Status note (2026-03-25)
 
 This document is an early proposal. The current implementation has moved to a project-scoped safe bundle flow.
+The current user-facing product name is `멜로우 링크 판맥(MellowLink Senseframe)`. `레거시 현대화 분석` remains the representative analysis scenario/function, not the product title.
 Current engine architecture is now split between a thin module adapter and
 `services/refactoring_support_engine`. For current structure, treat
 `refactoring_support_engine.md` as the primary source of truth.

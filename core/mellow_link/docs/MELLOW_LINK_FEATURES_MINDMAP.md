@@ -1,5 +1,8 @@
 # Mellow Link 에이전트 기능 마인드맵
 
+> 문서 상태: 내부 에이전트/런타임 기능 참고 문서.
+> 현재 사용자 대상 제품명은 `멜로우 링크 판맥(MellowLink Senseframe)`이며, 이 문서의 `Mellow Link`는 내부 기능 지도를 가리킨다.
+
 > 마인드맵 뷰어(Mermaid 지원) 또는 [Mermaid Live Editor](https://mermaid.live)에서 시각화 가능
 
 ```mermaid

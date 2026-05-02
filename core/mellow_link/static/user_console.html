@@ -15,14 +15,39 @@
             <div>
                 <p class="text-xs uppercase tracking-[0.28em] text-teal-300/80">Analysis Workspace</p>
                 <h1 class="mt-2 text-3xl font-semibold">분석 워크스페이스</h1>
-                <p class="mt-2 text-sm text-slate-400">업로드 자산을 정리하고 무엇을 분석 중인지, 어떤 조치 제안을 만들고 있는지, 결과 패키지에서 무엇을 결정하게 될지를 한 화면에서 확인합니다.</p>
+                <p class="mt-2 text-sm text-slate-400">업로드 자산을 정리하고 무엇을 분석 중인지, 어떤 판단 근거와 실행 준비 후보를 만들고 있는지, 결과 패키지에서 무엇을 결정하게 될지를 확인합니다.</p>
             </div>
             <nav class="flex flex-wrap gap-2 text-sm">
+                <button id="workspaceHelpToggle" type="button" aria-expanded="false" aria-controls="workspaceHelpPanel" class="rounded-full border border-white/10 px-3 py-2 text-xs text-slate-300 hover:bg-white/5">ⓘ 워크스페이스 사용법</button>
+                <a href="/static/analysis_workspace_guide.html" target="_blank" rel="noopener noreferrer" class="rounded-full border border-white/10 px-3 py-2 text-xs text-slate-300 hover:bg-white/5">사용 가이드 보기</a>
                 <a href="/projects/create" class="rounded-full border border-white/10 px-4 py-2 hover:bg-white/5">새 프로젝트</a>
                 <a href="/projects" class="rounded-full border border-white/10 px-4 py-2 hover:bg-white/5">내 프로젝트</a>
                 <a id="resultLink" href="#" class="rounded-full border border-white/10 px-4 py-2 hover:bg-white/5">결과 보기</a>
             </nav>
         </header>
+        <section id="workspaceHelpPanel" class="mt-4 hidden max-w-4xl rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-4 text-sm leading-7 text-slate-300">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="grid gap-4 md:grid-cols-2">
+                    <div>
+                        <p class="text-xs uppercase tracking-[0.2em] text-teal-200">먼저 볼 것</p>
+                        <p class="mt-2">프로젝트 개요, 진행 상태, 진행률을 확인합니다.</p>
+                    </div>
+                    <div>
+                        <p class="text-xs uppercase tracking-[0.2em] text-teal-200">결과 확인</p>
+                        <p class="mt-2">분석이 완료되면 결과 보기 버튼으로 판단판을 엽니다.</p>
+                    </div>
+                    <div>
+                        <p class="text-xs uppercase tracking-[0.2em] text-teal-200">추가 자료</p>
+                        <p class="mt-2">추가 자료 선택 후 추가 자료 업로드를 눌러 같은 프로젝트에 자산을 더합니다.</p>
+                    </div>
+                    <div>
+                        <p class="text-xs uppercase tracking-[0.2em] text-teal-200">재분석</p>
+                        <p class="mt-2">현재 자산 또는 추가 업로드 자료로 다시 분석해야 할 때 재분석을 누릅니다.</p>
+                    </div>
+                </div>
+                <button id="workspaceHelpClose" type="button" class="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-400 hover:bg-white/5">닫기</button>
+            </div>
+        </section>
 
         <div id="loadingState" class="mt-8 rounded-[2rem] border border-white/10 bg-slate-900/60 px-6 py-10 text-center text-sm text-slate-400">
             프로젝트 정보를 불러오는 중입니다.
@@ -31,29 +56,6 @@
         <div id="warningState" class="mt-8 hidden rounded-[2rem] border border-amber-300/20 bg-amber-500/10 px-6 py-5 text-sm text-amber-100"></div>
 
         <main id="workspaceView" class="mt-8 hidden space-y-6">
-            <section class="grid gap-6 xl:grid-cols-4">
-                <div class="rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
-                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">분석 목표</p>
-                    <h2 class="mt-3 text-xl font-semibold">무엇을 판단하나</h2>
-                    <div class="mt-4 text-sm leading-7 text-slate-300">레거시 기능 또는 화면 1개를 기준으로 유지할 것, 바꿀 것, 분리할 것을 판단할 수 있는 자료를 만듭니다.</div>
-                </div>
-                <div class="rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
-                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">분석 과정</p>
-                    <h2 class="mt-3 text-xl font-semibold">어떻게 진행되나</h2>
-                    <div class="mt-4 text-sm leading-7 text-slate-300">입력 정리 -> 자산 분석 -> 업무 규칙 및 설계 초안 추출 -> 조치 제안 생성 -> 결과 패키지 요약 순서로 진행합니다.</div>
-                </div>
-                <div class="rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
-                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">현재 생성물</p>
-                    <h2 class="mt-3 text-xl font-semibold">워크스페이스 역할</h2>
-                    <div class="mt-4 text-sm leading-7 text-slate-300">조치 제안은 분석 결과로부터 도출되며, 워크스페이스에서 생성되고 결과 패키지에서 요약 및 비교 형태로 정리됩니다.</div>
-                </div>
-                <div class="rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
-                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">추적과 재분석</p>
-                    <h2 class="mt-3 text-xl font-semibold">무엇이 남나</h2>
-                    <div class="mt-4 text-sm leading-7 text-slate-300">각 실행은 이력으로 남고, 추가 자료 업로드 후 같은 프로젝트에서 다시 분석해 결과를 비교할 수 있습니다.</div>
-                </div>
-            </section>
-
             <section class="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
                 <div class="rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
                     <p class="text-xs uppercase tracking-[0.24em] text-slate-500">프로젝트 개요</p>
@@ -77,59 +79,97 @@
                 </div>
             </section>
 
-            <section class="grid gap-6 xl:grid-cols-2">
-                <div class="rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
-                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">기능 분류</p>
-                    <h2 id="featureMode" class="mt-3 text-xl font-semibold">분석 중</h2>
-                    <div id="findingsBox" class="mt-4 space-y-3 text-sm text-slate-300"></div>
-                </div>
-                <div class="rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
-                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">업무 규칙</p>
-                    <h2 class="mt-3 text-xl font-semibold">검토 포인트</h2>
-                    <div id="rulesBox" class="mt-4 space-y-3 text-sm text-slate-300"></div>
-                </div>
-            </section>
-
-            <section class="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
-                <div class="rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
-                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">누락 / 확인 필요</p>
-                    <h2 class="mt-3 text-xl font-semibold">추가 자료 요청</h2>
-                    <div id="missingBox" class="mt-4 space-y-4 text-sm text-slate-300"></div>
-                </div>
-                <div class="rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
-                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">입력 자산</p>
-                    <h2 class="mt-3 text-xl font-semibold">업로드 자산 요약</h2>
-                    <div id="assetBox" class="mt-4 grid gap-3 md:grid-cols-2"></div>
-                </div>
-            </section>
-
-            <section id="anonymizationSection" class="hidden">
-                <div class="rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
-                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">입력 익명화</p>
-                    <h2 class="mt-3 text-xl font-semibold">Safe Bundle 노출 요약</h2>
-                    <div id="anonymizationBox" class="mt-4 space-y-4"></div>
-                </div>
-            </section>
-
-            <section class="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
-                <div class="rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
-                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">재분석</p>
-                    <h2 class="mt-3 text-xl font-semibold">추가 자료 업로드 및 재실행</h2>
-                    <div class="mt-4 flex flex-wrap items-center gap-3">
-                        <input id="reanalysisFile" type="file" class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-200" />
+            <section class="rounded-[2rem] border border-teal-300/20 bg-teal-500/5 p-6">
+                <div class="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                        <p class="text-xs uppercase tracking-[0.24em] text-teal-200">다음 행동</p>
+                        <h2 class="mt-3 text-xl font-semibold">결과 확인 또는 재분석</h2>
+                    </div>
+                    <div class="flex flex-wrap gap-3">
+                        <a id="primaryResultLink" href="#" class="rounded-full border border-cyan-400/20 bg-cyan-500/10 px-4 py-2 text-sm text-cyan-100 hover:bg-cyan-500/20">결과 보기</a>
+                        <label class="inline-flex cursor-pointer items-center rounded-full border border-white/10 bg-black/20 px-4 py-2 text-sm text-slate-200 hover:bg-white/5">
+                            추가 자료 선택
+                            <input id="reanalysisFile" type="file" class="sr-only" />
+                        </label>
                         <button id="uploadAdditionalAssetBtn" class="rounded-full border border-cyan-400/20 bg-cyan-500/10 px-4 py-2 text-sm text-cyan-100 hover:bg-cyan-500/20">추가 자료 업로드</button>
                         <button id="reanalysisBtn" class="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-100 hover:bg-emerald-500/20">재분석</button>
                     </div>
-                    <div id="uploadActionState" class="mt-3 text-xs text-slate-500">같은 프로젝트에 신규 자산을 추가하고 다시 분석할 수 있습니다.</div>
-                    <div id="rerunActionState" class="mt-2 text-xs text-slate-500">신규 업로드가 없어도 현재 자산으로 재분석할 수 있습니다.</div>
-                    <div id="pendingAssetBox" class="mt-4 space-y-3"></div>
                 </div>
-                <div class="rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
-                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">실행 이력</p>
-                    <h2 class="mt-3 text-xl font-semibold">최신 실행 기준</h2>
-                    <p class="mt-2 text-sm leading-7 text-slate-400">실행 단위별 상태를 추적하고, 결과 패키지 부록의 provenance와 함께 어떤 입력과 어떤 run에서 판단이 나왔는지 확인합니다.</p>
+                <div id="uploadActionState" class="mt-3 text-xs text-slate-500">같은 프로젝트에 신규 자산을 추가하고 다시 분석할 수 있습니다.</div>
+                <div id="rerunActionState" class="mt-2 text-xs text-slate-500">신규 업로드가 없어도 현재 자산으로 재분석할 수 있습니다.</div>
+                <div id="pendingAssetBox" class="mt-4 space-y-3"></div>
+            </section>
+
+            <section class="grid gap-6 xl:grid-cols-2">
+                <details class="group rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                    <summary class="flex cursor-pointer items-center justify-between gap-4">
+                        <div>
+                            <p class="text-xs uppercase tracking-[0.24em] text-slate-500">기능 분류</p>
+                            <h2 id="featureMode" class="mt-3 text-xl font-semibold">분석 중</h2>
+                        </div>
+                        <span class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-cyan-500/10 group-open:text-cyan-200">펼치기</span>
+                    </summary>
+                    <div id="findingsBox" class="mt-4 space-y-3 text-sm text-slate-300"></div>
+                </details>
+                <details class="group rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                    <summary class="flex cursor-pointer items-center justify-between gap-4">
+                        <div>
+                            <p class="text-xs uppercase tracking-[0.24em] text-slate-500">업무 규칙</p>
+                            <h2 class="mt-3 text-xl font-semibold">검토 포인트</h2>
+                        </div>
+                        <span class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-cyan-500/10 group-open:text-cyan-200">펼치기</span>
+                    </summary>
+                    <div id="rulesBox" class="mt-4 space-y-3 text-sm text-slate-300"></div>
+                </details>
+            </section>
+
+            <section class="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+                <details class="group rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                    <summary class="flex cursor-pointer items-center justify-between gap-4">
+                        <div>
+                            <p class="text-xs uppercase tracking-[0.24em] text-slate-500">누락 / 확인 필요</p>
+                            <h2 class="mt-3 text-xl font-semibold">추가 자료 요청</h2>
+                        </div>
+                        <span class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-cyan-500/10 group-open:text-cyan-200">펼치기</span>
+                    </summary>
+                    <div id="missingBox" class="mt-4 space-y-4 text-sm text-slate-300"></div>
+                </details>
+                <details class="group rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                    <summary class="flex cursor-pointer items-center justify-between gap-4">
+                        <div>
+                            <p class="text-xs uppercase tracking-[0.24em] text-slate-500">입력 자산</p>
+                            <h2 class="mt-3 text-xl font-semibold">업로드 자산 요약</h2>
+                        </div>
+                        <span class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-cyan-500/10 group-open:text-cyan-200">펼치기</span>
+                    </summary>
+                    <div id="assetBox" class="mt-4 grid gap-3 md:grid-cols-2"></div>
+                </details>
+            </section>
+
+            <section id="anonymizationSection" class="hidden">
+                <details class="group rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                    <summary class="flex cursor-pointer items-center justify-between gap-4">
+                        <div>
+                            <p class="text-xs uppercase tracking-[0.24em] text-slate-500">입력 익명화</p>
+                            <h2 class="mt-3 text-xl font-semibold">Safe Bundle 노출 요약</h2>
+                        </div>
+                        <span class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-cyan-500/10 group-open:text-cyan-200">펼치기</span>
+                    </summary>
+                    <div id="anonymizationBox" class="mt-4 space-y-4"></div>
+                </details>
+            </section>
+
+            <section>
+                <details class="group rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+                    <summary class="flex cursor-pointer items-center justify-between gap-4">
+                        <div>
+                            <p class="text-xs uppercase tracking-[0.24em] text-slate-500">실행 이력</p>
+                            <h2 class="mt-3 text-xl font-semibold">최신 실행 기준</h2>
+                        </div>
+                        <span class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-cyan-500/10 group-open:text-cyan-200">펼치기</span>
+                    </summary>
                     <div id="historyBox" class="mt-4 space-y-3"></div>
-                </div>
+                </details>
             </section>
         </main>
     </div>
@@ -498,6 +538,7 @@
             renderPendingAssets();
             renderRunHistory(payload.run_history || []);
             document.getElementById('resultLink').href = '/projects/' + encodeURIComponent(project.id) + '/result';
+            document.getElementById('primaryResultLink').href = '/projects/' + encodeURIComponent(project.id) + '/result';
         }
 
         async function loadProject() {
@@ -536,6 +577,17 @@
         });
 
         document.addEventListener('click', function (event) {
+            if (event.target && event.target.id === 'workspaceHelpToggle') {
+                const button = document.getElementById('workspaceHelpToggle');
+                const panel = document.getElementById('workspaceHelpPanel');
+                const isOpen = button.getAttribute('aria-expanded') === 'true';
+                button.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+                panel.classList.toggle('hidden', isOpen);
+            }
+            if (event.target && event.target.id === 'workspaceHelpClose') {
+                document.getElementById('workspaceHelpToggle').setAttribute('aria-expanded', 'false');
+                document.getElementById('workspaceHelpPanel').classList.add('hidden');
+            }
             if (event.target && event.target.id === 'uploadAdditionalAssetBtn') {
                 uploadAdditionalAsset();
             }

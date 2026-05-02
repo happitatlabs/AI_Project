@@ -65,6 +65,7 @@ _LEGACY_SUBMODULES: Dict[str, str] = {
     "image_workflow": ".image_workflow",
     "image_schemas": ".image_schemas",
     "video_processor": ".video_processor",
+    "presentation_extraction": ".presentation_extraction",
 }
 
 

@@ -1,5 +1,8 @@
 # MellowLink Technical Specification
 
+> 문서 상태: 역사/내부 아키텍처 참고 문서.
+> 현재 사용자 대상 제품명은 `멜로우 링크 판맥(MellowLink Senseframe)`이다. 이 문서의 `MellowLink`는 FSM/ReAct/RAG 기반 내부 런타임/에이전트 계층을 설명한다.
+
 **Version:** 1.0
 **Date:** 2026-02-12
 **Author:** Architecture Review

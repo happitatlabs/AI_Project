@@ -1,5 +1,9 @@
 # System Configuration Reference
 
+Document status: historical/internal runtime reference.
+Current user-facing product name: `멜로우 링크 판맥(MellowLink Senseframe)`.
+Mellow-Link references in this document describe the internal runtime and local service topology.
+
 Generated: 2026-01-22
 Updated: 2026-02-15
 

@@ -675,8 +675,15 @@ def test_rebuild_assistant_runner_emits_authoritative_payload(monkeypatch):
         "diagnosis_report",
         "decision_summary",
         "improvement_plan_bundle",
+        "judgment_canvas",
+        "stage_control",
+        "validation_result",
         "appendix",
     }
+    structured = payload["structured_result"]
+    assert structured["judgment_canvas"] == payload["authoritative_payload"]["judgment_canvas"]
+    assert structured["stage_control"] == payload["authoritative_payload"]["stage_control"]
+    assert structured["validation_result"] == payload["authoritative_payload"]["validation_result"]
 
 
 def test_rebuild_assistant_runner_applies_ai_narrative_only_to_top_fields(monkeypatch):
