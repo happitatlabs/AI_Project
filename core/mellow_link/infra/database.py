@@ -460,7 +460,12 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 def get_password_hash(password: str) -> str:
     """Hash password. No plaintext fallback (security)."""
-    return pwd_context.hash(password)
+    try:
+        return pwd_context.hash(password)
+    except Exception:
+        import bcrypt
+        password_bytes = password.encode("utf-8")
+        return bcrypt.hashpw(password_bytes, bcrypt.gensalt()).decode("utf-8")
 
 def create_access_token(data: dict, expires_delta: timedelta = None, role: str = UserRole.USER.value):
     to_encode = data.copy()

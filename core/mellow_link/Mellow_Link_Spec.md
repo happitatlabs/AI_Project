@@ -1,8 +1,12 @@
 # Mellow-Link: AI Orchestration System Specification
 
+> 문서 상태: 역사/내부 기술 참고 문서.
+> 현재 사용자 대상 제품명은 `멜로우 링크 판맥(MellowLink Senseframe)`이며, 이 문서의 `Mellow-Link`는 내부 오케스트레이션/런타임 계층을 가리킨다.
+> 제품 정의와 사용자용 설명은 `docs/README.md`와 `docs/MELLOW_LINK_BEGINNER_USER_GUIDE_KO.md`를 우선한다.
+
 **Version:** 2.0
 **Updated:** 2026-02-24
-**Status:** Production
+**Status:** Historical/Internal Reference
 
 ---
 

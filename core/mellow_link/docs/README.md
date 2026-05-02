@@ -1,13 +1,13 @@
-# Mellow-Link Docs
+# 멜로우 링크 판맥 Docs
 
-`mellow_link/docs`는 현재 활성 문서의 인덱스다.  
+`mellow_link/docs`는 현재 활성 문서의 인덱스다.
 과거 복사본과 정리 대상 문서는 [`_backup`](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/_backup)에 둔다.
 
 `rebuild_assistant` / `refactoring_support_engine` 구조의 source of truth는
 [`refactoring_support_engine.md`](/C:/Users/Hyein/ClaudeAI/AI_Project/refactoring_support_engine.md)다.
 `mellow_link/docs` 아래 문서는 제품 상태, 계약, 운영 맥락을 보조 설명한다.
 
-현재 기준 핵심 제품은 상품명 `레거시 현대화 분석`이며, 제품 정의는 `레거시 시스템을 분석하고, 현대화 방향과 실행 가능한 조치를 제안하는 AI 도구`다.
+현재 기준 핵심 제품은 상품명 `멜로우 링크 판맥`이며, 영문명은 `MellowLink Senseframe`이다. 제품 정의는 `레거시 시스템의 구조, 흐름, 판단 근거를 분석하고 실행 가능한 현대화 방향으로 정리하는 웹 기반 판단 지원 프로그램`이다. `레거시 현대화 분석`은 대표 분석 시나리오/기능 설명으로 유지한다.
 
 현재 제품 단계는 아래와 같이 고정한다.
 
@@ -50,7 +50,7 @@
 3. [`refactoring_support_engine.md`](/C:/Users/Hyein/ClaudeAI/AI_Project/refactoring_support_engine.md)
 4. 상태 / 설명 / 제안 문서
 
-`Contract` 문서가 없으면 실행하지 않는다.  
+`Contract` 문서가 없으면 실행하지 않는다.
 `rebuild_assistant` 관련 구조 변경 후에는 먼저 [`refactoring_support_engine.md`](/C:/Users/Hyein/ClaudeAI/AI_Project/refactoring_support_engine.md)를 갱신하고,
 상태/샘플 변화가 있으면 [REBUILD_ASSISTANT_RESULT_STATUS_2026-03-28.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/REBUILD_ASSISTANT_RESULT_STATUS_2026-03-28.md)를 후속 갱신한다.
 
@@ -73,6 +73,9 @@
 
 ### 제품 / 구조
 
+- [MELLOW_LINK_WHITEPAPER_KO.md](/C:/Users/Hyein/ClaudeAI/AI_Project/core/mellow_link/docs/MELLOW_LINK_WHITEPAPER_KO.md)
+  - 멜로우 링크 판맥 백서 초안
+  - 제품 정의, 핵심 아키텍처, 판단 통제, 품질 기준, 한계와 로드맵을 외부 설명용 흐름으로 정리
 - [MELLOW_LINK_BEGINNER_USER_GUIDE_KO.md](/C:/Users/Hyein/ClaudeAI/AI_Project/core/mellow_link/docs/MELLOW_LINK_BEGINNER_USER_GUIDE_KO.md)
   - 컴퓨터 초보자용 사용자 설명서
   - `/projects/create` 기준으로 로그인, 업로드, 분석 시작, 결과 확인, 저장 절차를 화면 문구 기준으로 설명
@@ -134,7 +137,7 @@
 - [REBUILD_ASSISTANT_POLISH_UI_RENDERING_CONTRACT_2026-03-30.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/REBUILD_ASSISTANT_POLISH_UI_RENDERING_CONTRACT_2026-03-30.md)
   - 결과 패키지 UI에서 audience / delivery mode별 회계 표현 변형본 선택 렌더링 Contract
 - [mellow_link/modules/rebuild_assistant/README.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/modules/rebuild_assistant/README.md)
-  - 대표 상품 실행 방식과 입력/출력 계약, 결정 지원 필드 요약
+  - 대표 분석 시나리오/기능 실행 방식과 입력/출력 계약, 결정 지원 필드 요약
 - [REBUILD_ASSISTANT_PROPOSAL.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/REBUILD_ASSISTANT_PROPOSAL.md)
   - 초기 제안서 성격 문서
   - 현재 구현 기준은 모듈 README와 익명화 상태 문서를 우선 본다

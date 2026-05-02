@@ -1,4 +1,8 @@
 Mellow-Link Agent UI Architecture v1
+
+문서 상태: 내부 UI/운영 콘솔 참고 문서.
+현재 사용자 대상 제품명은 `멜로우 링크 판맥(MellowLink Senseframe)`이며, 이 문서의 `Mellow-Link`는 내부 에이전트/런타임 UI 계층을 가리킨다.
+
 1. 설계 목적
 
 Mellow-Link 에이전트 시스템은 동일한 실행(run_id)을

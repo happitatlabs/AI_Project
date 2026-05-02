@@ -459,6 +459,44 @@ class ImprovementPlanner:
             }
         )
 
+    def _gate_week_reference_fields(
+        self,
+        execution_plan: list[ExecutionPlanWeek],
+        verification_checkpoints: list[VerificationItem],
+    ) -> dict[str, list[str]]:
+        for week in list(execution_plan or []):
+            related_rules = self._dedupe_strings(
+                [str(item or "").strip() for item in list(week.related_rules or []) if str(item or "").strip()]
+            )[:3]
+            related_contracts = self._dedupe_strings(
+                [str(item or "").strip() for item in list(week.related_contracts or []) if str(item or "").strip()]
+            )[:3]
+            if related_rules or related_contracts:
+                return {"related_rules": related_rules, "related_contracts": related_contracts}
+
+        related_rules = self._dedupe_strings(
+            [
+                str(item.target or "").strip()
+                for item in list(verification_checkpoints or [])[:3]
+                if str(item.target or "").strip()
+            ]
+        )[:3]
+        if related_rules:
+            return {"related_rules": related_rules, "related_contracts": []}
+
+        related_contracts: list[str] = []
+        for item in list(verification_checkpoints or [])[:3]:
+            related_contracts.extend(
+                [str(value or "").strip() for value in list(item.required_evidence or []) if str(value or "").strip()]
+            )
+            related_contracts.extend(
+                [str(value or "").strip() for value in list(item.related_decision_ids or []) if str(value or "").strip()]
+            )
+            related_contracts.extend(
+                [str(value or "").strip() for value in list(item.related_conflict_ids or []) if str(value or "").strip()]
+            )
+        return {"related_rules": [], "related_contracts": self._dedupe_strings(related_contracts)[:3]}
+
     def _adjust_execution_plan(
         self,
         execution_plan: list[ExecutionPlanWeek],
@@ -469,6 +507,7 @@ class ImprovementPlanner:
     ) -> list[ExecutionPlanWeek]:
         if recommendation_strength == "assertive":
             return execution_plan
+        gate_refs = self._gate_week_reference_fields(execution_plan, verification_checkpoints)
         if recommendation_strength == "blocked":
             blocker_tasks = [item.item for item in verification_checkpoints[:3]] or [
                 str(getattr(validation_result, "blocking_reason", "") or "차단 사유를 해소합니다.").strip()
@@ -478,6 +517,8 @@ class ImprovementPlanner:
                     week_label="선행 검증",
                     goal="실행 차단 요인 해소",
                     tasks=blocker_tasks,
+                    related_rules=gate_refs["related_rules"],
+                    related_contracts=gate_refs["related_contracts"],
                     roles=["분석", "검증"],
                     deliverables=["차단 사유 해소 여부 확인", "추가 근거 확보"],
                 )
@@ -488,11 +529,23 @@ class ImprovementPlanner:
             week_label="선행 검증",
             goal=gate_goal,
             tasks=gate_tasks,
+            related_rules=gate_refs["related_rules"],
+            related_contracts=gate_refs["related_contracts"],
             roles=["분석", "검증"],
             deliverables=["검증 결과 정리", "실행안 유지 여부 결정"],
         )
         if execution_plan and execution_plan[0].goal == gate_stage.goal:
-            return execution_plan
+            if execution_plan[0].related_rules or execution_plan[0].related_contracts:
+                return execution_plan
+            return [
+                execution_plan[0].model_copy(
+                    update={
+                        "related_rules": gate_refs["related_rules"],
+                        "related_contracts": gate_refs["related_contracts"],
+                    }
+                ),
+                *list(execution_plan[1:]),
+            ]
         return [gate_stage] + list(execution_plan or [])
 
     def _primary_decision_basis(self, decisions: DecisionArtifacts) -> DecisionBasis | None:
