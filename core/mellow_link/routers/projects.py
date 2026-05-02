@@ -179,6 +179,107 @@ _OPERATIONAL_ROLE_MARKDOWN_SECTION_REGISTRY: dict[str, tuple[dict[str, Any], ...
         {"semantic": "execution_plan", "section_key": "execution_plan", "render": "list"},
     ),
 }
+_EXTERNAL_TECHNICAL_MARKDOWN_SECTION_REGISTRY: tuple[dict[str, Any], ...] = (
+    {
+        "semantic": "technical_problem",
+        "section_key": "analysis_summary",
+        "title": "핵심 문제",
+        "render": "list",
+        "source_keys": ("executive_summary_v2", "analysis_summary", "one_line_conclusion"),
+    },
+    {
+        "semantic": "technical_impact",
+        "section_key": "risks",
+        "title": "영향",
+        "render": "list",
+        "source_keys": ("risks", "primary_judgment_reason"),
+    },
+    {
+        "semantic": "technical_action",
+        "section_key": "recommended_option",
+        "title": "권장 조치",
+        "render": "list",
+        "source_keys": ("recommended_option", "recommended_directions"),
+    },
+    {
+        "semantic": "technical_verification",
+        "section_key": "execution_plan",
+        "title": "검증 포인트",
+        "render": "list",
+        "source_keys": ("execution_plan",),
+    },
+)
+_EXTERNAL_MIXED_MARKDOWN_SECTION_REGISTRY: tuple[dict[str, Any], ...] = (
+    {
+        "semantic": "document_context",
+        "section_key": "report_purpose",
+        "title": "문서 설명",
+        "render": "paragraph",
+        "source_keys": ("report_purpose",),
+    },
+    {
+        "semantic": "document_judgment",
+        "section_key": "executive_summary_v2",
+        "title": "핵심 판단",
+        "render": "list",
+        "source_keys": ("executive_summary_v2", "one_line_conclusion"),
+    },
+    {
+        "semantic": "technical_block",
+        "section_key": "execution_plan",
+        "title": "코드 분석 포인트",
+        "render": "list",
+        "source_keys": ("execution_plan",),
+    },
+    {
+        "semantic": "technical_action",
+        "section_key": "recommended_option",
+        "title": "권장 조치",
+        "render": "list",
+        "source_keys": ("recommended_option", "recommended_directions"),
+    },
+    {
+        "semantic": "technical_verification",
+        "section_key": "risks",
+        "title": "검증 포인트",
+        "render": "list",
+        "source_keys": ("risks", "primary_judgment_reason"),
+    },
+)
+_MARKDOWN_CODE_INPUT_HINTS: tuple[str, ...] = (
+    r"\bselect\b",
+    r"\bjoin\b",
+    r"\bwhere\b",
+    r"\binsert\b",
+    r"\bupdate\b",
+    r"\bdelete\b",
+    r"\bsql\b",
+    r"\bapi\b",
+    r"\bclass\b",
+    r"\bfunction\b",
+    r"\bprocedure\b",
+    r"\btrigger\b",
+    r"\btable\b",
+    r"\bschema\b",
+    r"저장\s*전",
+    r"검증",
+    r"파라미터",
+    r"상태\s*전이",
+    r"예외\s*처리",
+)
+_MARKDOWN_DOCUMENT_INPUT_HINTS: tuple[str, ...] = (
+    r"보고서",
+    r"컨설팅",
+    r"개요",
+    r"목적",
+    r"비전",
+    r"계획",
+    r"전략",
+    r"개선",
+    r"제안",
+    r"요구사항",
+    r"업무\s*프로세스",
+)
 _DIAGNOSIS_MARKDOWN_SECTION_TITLES: dict[str, str] = {
     "report_purpose": "현행 요약",
     "executive_summary_v2": "문제 정의",
@@ -3537,6 +3638,83 @@ def _uses_family_markdown_registry(pkg: dict[str, Any]) -> bool:
     return family in {"operational_source", "option_comparison"} or _effective_package_information_role(pkg) == "diagnosis"
 
 
+def _markdown_surface_source_fragments(pkg: dict[str, Any]) -> list[str]:
+    fragments: list[str] = []
+    for key in ("report_scope", "analysis_summary", "executive_summary_v2", "report_questions"):
+        value = pkg.get(key) if isinstance(pkg, dict) else []
+        if isinstance(value, list):
+            fragments.extend(str(item).strip() for item in value if str(item).strip())
+    contract = pkg.get("consulting_min_contract") if isinstance(pkg, dict) else {}
+    contract = contract if isinstance(contract, dict) else {}
+    for key in (
+        "context",
+        "problem_definition",
+        "decision_question",
+        "options",
+        "decision_criteria",
+        "evidence",
+        "missing_information",
+        "as_is",
+        "process_flow",
+        "rules",
+        "risks",
+        "actions",
+    ):
+        value = contract.get(key)
+        if isinstance(value, list):
+            fragments.extend(str(item).strip() for item in value[:4] if str(item).strip())
+    authoritative = pkg.get("authoritative_payload") if isinstance(pkg, dict) else {}
+    authoritative = authoritative if isinstance(authoritative, dict) else {}
+    appendix = authoritative.get("appendix") if isinstance(authoritative.get("appendix"), dict) else {}
+    for evidence in appendix.get("evidence_index") or []:
+        if not isinstance(evidence, dict):
+            continue
+        for key in ("locator", "excerpt", "asset_name", "asset_type"):
+            text = str(evidence.get(key) or "").strip()
+            if text:
+                fragments.append(text)
+    return [fragment for fragment in fragments if fragment]
+
+
+def _external_markdown_surface_style(pkg: dict[str, Any], *, surface_mode: str) -> str:
+    if normalize_surface_mode(surface_mode) != "external":
+        return "document_style"
+    family = str(_family_classification_from_pkg(pkg).get("family") or "").strip()
+    if family == "operational_source":
+        return "technical_style"
+    joined_text = "\n".join(_markdown_surface_source_fragments(pkg)).lower()
+    code_score = sum(1 for pattern in _MARKDOWN_CODE_INPUT_HINTS if re.search(pattern, joined_text, re.IGNORECASE))
+    document_score = sum(1 for pattern in _MARKDOWN_DOCUMENT_INPUT_HINTS if re.search(pattern, joined_text, re.IGNORECASE))
+    if code_score >= 4 and (document_score <= 2 or code_score >= document_score * 2):
+        return "technical_style"
+    if code_score >= 3 and document_score >= 3:
+        return "mixed_style"
+    return "document_style"
+
+
+def _external_markdown_section_registry(
+    pkg: dict[str, Any],
+    *,
+    surface_mode: str,
+    surface_style: str,
+) -> tuple[dict[str, Any], ...]:
+    if normalize_surface_mode(surface_mode) != "external":
+        return _markdown_section_registry(pkg)
+    if surface_style == "technical_style":
+        return _EXTERNAL_TECHNICAL_MARKDOWN_SECTION_REGISTRY
+    if surface_style == "mixed_style":
+        return _EXTERNAL_MIXED_MARKDOWN_SECTION_REGISTRY
+    return _markdown_section_registry(pkg)
+
+
+def _markdown_section_heading(pkg: dict[str, Any], entry: dict[str, Any], *, surface_style: str) -> str:
+    title = str(entry.get("title") or "").strip()
+    if title:
+        return title
+    section_key = str(entry.get("section_key") or "").strip()
+    return _surface_section_title_from_pkg(pkg, section_key, section_key)
+
+
 def _split_markdown_line_fragments(text: str) -> list[str]:
     prepared: list[str] = []
     for raw_line in str(text or "").splitlines():
@@ -3729,14 +3907,19 @@ def _render_consulting_deck_markdown(
     )
     lines = [title]
     surface_mode = consulting_deck.get("surface_mode") or "internal"
+    surface_style = _external_markdown_surface_style(pkg, surface_mode=str(surface_mode))
     header = str(consulting_deck.get("role_header") or "").strip() or role_header(
         family=_effective_family_for_consulting_surface(pkg),
         question_axis=package_question_axis(pkg),
     )
-    if header:
+    if header and normalize_surface_mode(str(surface_mode)) != "external":
         lines.extend(["", header])
     if _uses_family_markdown_registry(pkg):
-        for entry in _markdown_section_registry(pkg):
+        for entry in _external_markdown_section_registry(
+            pkg,
+            surface_mode=str(surface_mode),
+            surface_style=surface_style,
+        ):
             section_key = str(entry.get("section_key") or "").strip()
             if not section_key:
                 continue
@@ -3749,7 +3932,7 @@ def _render_consulting_deck_markdown(
             )
             if not section_lines:
                 continue
-            heading = _surface_section_title_from_pkg(pkg, section_key, section_key)
+            heading = _markdown_section_heading(pkg, entry, surface_style=surface_style)
             lines.extend(["", f"## {heading}"])
             if str(entry.get("render") or "paragraph").strip() == "list":
                 lines.extend(f"- {item}" for item in section_lines)

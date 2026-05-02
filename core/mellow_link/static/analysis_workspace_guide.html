@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>멜로우 링크 판맥 분석 워크스페이스 가이드 | MellowLink Senseframe</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --bg: #f8fafc;
+            --panel: #ffffff;
+            --ink: #111827;
+            --muted: #4b5563;
+            --line: #dbe3ef;
+            --accent: #0f766e;
+            --accent-soft: #ccfbf1;
+            --warn: #92400e;
+            --danger: #991b1b;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--ink);
+            font-family: "Pretendard", "Segoe UI", Arial, sans-serif;
+            line-height: 1.7;
+        }
+
+        a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        .page {
+            max-width: 1120px;
+            margin: 0 auto;
+            padding: 32px 20px 56px;
+        }
+
+        .topbar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 28px;
+        }
+
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            background: #fff;
+            padding: 8px 14px;
+            color: #334155;
+            font-size: 14px;
+        }
+
+        .eyebrow {
+            margin: 0 0 10px;
+            color: var(--accent);
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: clamp(30px, 4vw, 48px);
+            line-height: 1.18;
+            letter-spacing: 0;
+        }
+
+        .lead {
+            max-width: 860px;
+            margin: 18px 0 0;
+            color: var(--muted);
+            font-size: 18px;
+        }
+
+        .notice {
+            margin-top: 24px;
+            border-left: 4px solid var(--accent);
+            background: var(--accent-soft);
+            padding: 16px 18px;
+            color: #134e4a;
+        }
+
+        .quick-answer {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+            margin-top: 18px;
+        }
+
+        .quick-answer .item {
+            background: #fff;
+        }
+
+        .layout {
+            display: grid;
+            grid-template-columns: 260px minmax(0, 1fr);
+            gap: 28px;
+            margin-top: 34px;
+        }
+
+        .toc {
+            position: sticky;
+            top: 20px;
+            align-self: start;
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            background: var(--panel);
+            padding: 18px;
+        }
+
+        .toc h2 {
+            margin: 0 0 10px;
+            font-size: 15px;
+        }
+
+        .toc ol {
+            margin: 0;
+            padding-left: 20px;
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .toc li + li {
+            margin-top: 6px;
+        }
+
+        .content {
+            display: grid;
+            gap: 18px;
+        }
+
+        section {
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            background: var(--panel);
+            padding: 24px;
+        }
+
+        h2 {
+            margin: 0 0 14px;
+            font-size: 24px;
+            letter-spacing: 0;
+        }
+
+        h3 {
+            margin: 22px 0 10px;
+            font-size: 18px;
+        }
+
+        p {
+            margin: 0 0 12px;
+        }
+
+        ul,
+        ol {
+            margin: 0 0 12px;
+            padding-left: 22px;
+        }
+
+        li + li {
+            margin-top: 6px;
+        }
+
+        .grid {
+            display: grid;
+            gap: 12px;
+        }
+
+        .grid.two {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .grid.three {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .item {
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            background: #fbfdff;
+            padding: 14px;
+        }
+
+        .item strong {
+            display: block;
+            margin-bottom: 6px;
+        }
+
+        .status {
+            display: inline-flex;
+            margin-right: 6px;
+            margin-bottom: 6px;
+            border-radius: 999px;
+            background: #eef2ff;
+            padding: 3px 9px;
+            color: #3730a3;
+            font-size: 13px;
+            font-weight: 700;
+        }
+
+        .status.ok {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .status.partial {
+            background: #fef3c7;
+            color: var(--warn);
+        }
+
+        .status.later {
+            background: #e0f2fe;
+            color: #075985;
+        }
+
+        .status.out {
+            background: #fee2e2;
+            color: var(--danger);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0 4px;
+            font-size: 15px;
+        }
+
+        th,
+        td {
+            border: 1px solid var(--line);
+            padding: 10px 12px;
+            text-align: left;
+            vertical-align: top;
+        }
+
+        th {
+            background: #f1f5f9;
+        }
+
+        .flow {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 10px;
+            margin-top: 12px;
+        }
+
+        .step {
+            min-height: 74px;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            background: #f8fafc;
+            padding: 12px;
+            font-size: 14px;
+        }
+
+        .step span {
+            display: block;
+            margin-bottom: 6px;
+            color: var(--accent);
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .muted {
+            color: var(--muted);
+        }
+
+        @media (max-width: 900px) {
+            .layout {
+                grid-template-columns: 1fr;
+            }
+
+            .toc {
+                position: static;
+            }
+
+            .grid.two,
+            .grid.three,
+            .flow,
+            .quick-answer {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <header>
+            <div class="topbar">
+                <a class="back-link" href="/projects/create">워크스페이스로 돌아가기</a>
+                <span class="muted">공통 사용 가이드 / 화면별 사용법 모음</span>
+            </div>
+            <p class="eyebrow">MellowLink Senseframe</p>
+            <h1>멜로우 링크 판맥 분석 워크스페이스 가이드</h1>
+            <p class="lead">
+                멜로우 링크 판맥은 입력 자료가 어떤 판단을 요구하는지, 무엇을 근거로 봐야 하는지, 어디가 부족한지, 어떤 선택지가 있는지, 실행해도 되는지를 정리하는 웹 기반 판단 지원 프로그램입니다.
+                분석 워크스페이스는 그 판단 구조를 검토하고 보완하는 작업 공간입니다.
+            </p>
+            <div class="notice">
+                분석 품질은 입력 자료의 목적, 범위, 근거 수준에 영향을 받습니다.
+                자료가 많더라도 목적과 판단 질문이 불명확하면 결과 신뢰도가 낮아질 수 있습니다.
+                여러 자료를 함께 넣을 경우, 가능하면 자료의 관계와 분석 목적을 함께 입력해 주세요.
+            </div>
+            <div class="quick-answer" aria-label="한눈에 보는 사용 흐름">
+                <div class="item">
+                    <strong>1. 무엇을 넣나</strong>
+                    소스코드, 화면 캡처, SQL, 설계서, 업무 문서, PPT 같은 판단 근거 자료를 넣습니다.
+                </div>
+                <div class="item">
+                    <strong>2. 얼마나 걸리나</strong>
+                    단일 기능·단일 화면 기준 자료는 보통 수 분 단위로 판단판 초안을 확인하는 흐름을 목표로 합니다. 자료량과 실행 환경에 따라 달라질 수 있습니다.
+                </div>
+                <div class="item">
+                    <strong>3. 무엇이 나오나</strong>
+                    판단 질문, 근거, 부족한 정보, 선택지, 리스크, 실행 가능 여부를 정리한 판단판과 문서화 산출물이 나옵니다.
+                </div>
+                <div class="item">
+                    <strong>4. 무엇을 할 수 있나</strong>
+                    회의 검토, 보완 자료 요청, 실행 보류/진행 판단, 내부 보고, 외부 공유용 자료 작성에 활용할 수 있습니다.
+                </div>
+            </div>
+        </header>
+
+        <div class="layout">
+            <aside class="toc" aria-label="목차">
+                <h2>목차</h2>
+                <ol>
+                    <li><a href="#guide-map">가이드 구성</a></li>
+                    <li><a href="#overview">개요</a></li>
+                    <li><a href="#purpose">개발 목적과 지향점</a></li>
+                    <li><a href="#inputs">입력 가능한 자료</a></li>
+                    <li><a href="#flow">분석 처리 흐름</a></li>
+                    <li><a href="#read-result">결과 화면 읽는 방법</a></li>
+                    <li><a href="#screen-guides">화면별 사용법</a></li>
+                    <li><a href="#examples">유형별 활용 예시</a></li>
+                    <li><a href="#current-state">현재 구현 수준</a></li>
+                    <li><a href="#limits">한계와 검증 필요 항목</a></li>
+                    <li><a href="#roadmap">향후 고도화 방향</a></li>
+                    <li><a href="#effects">기대 효과</a></li>
+                </ol>
+            </aside>
+
+            <main class="content">
+                <section id="guide-map">
+                    <h2>가이드 구성</h2>
+                    <p>
+                        이 문서는 모든 화면에서 공통으로 참고하는 사용 가이드입니다.
+                        각 화면의 `ⓘ 사용법`, `ⓘ 워크스페이스 사용법`, `ⓘ 판단판 사용법`은 해당 화면에서 바로 눌러야 할 버튼과 짧은 조작 순서만 안내합니다.
+                    </p>
+                    <div class="grid two">
+                        <div class="item">
+                            <strong>1. 공통 내용</strong>
+                        멜로우 링크 판맥의 목적, 입력 자료, 분석 처리 흐름, 결과 해석 기준, 신뢰도와 상태값 의미를 설명합니다.
+                        </div>
+                        <div class="item">
+                            <strong>2. 화면별 사용법</strong>
+                            프로젝트 생성 화면, 분석 워크스페이스 화면, 결과 판단판 화면에서 사용자가 어떤 순서로 확인하고 조작해야 하는지 정리합니다.
+                        </div>
+                    </div>
+                </section>
+
+                <section id="overview">
+                    <h2>1. 멜로우 링크 판맥 개요</h2>
+                    <p>
+                        멜로우 링크 판맥은 컨설팅 자료, SQL, 설계서, 구현 문서, PPT 등 다양한 입력 자료를 바탕으로 사용자가 판단해야 할 문제를 구조화합니다.
+                    </p>
+                    <p>
+                        이 도구는 자료를 요약하는 데서 멈추지 않고, 자료가 요구하는 판단, 확인해야 할 근거, 부족한 정보, 가능한 선택지, 실행 가능 여부를 분리하여 검토 가능한 형태로 정리하는 것을 목표로 합니다.
+                    </p>
+                </section>
+
+                <section id="purpose">
+                    <h2>2. 개발 목적과 지향점</h2>
+                    <p>
+                        목표는 사용자가 흩어진 자료를 넣었을 때, 그 자료가 요구하는 판단과 근거, 부족한 지점, 선택지, 실행 가능 여부를 구조화하여 더 나은 판단을 하도록 돕는 것입니다.
+                    </p>
+                    <div class="grid two">
+                        <div class="item">
+                            <strong>중심 가치</strong>
+                            답을 대신 확정하기보다 어떤 판단이 필요한지 드러냅니다.
+                        </div>
+                        <div class="item">
+                            <strong>근거 구분</strong>
+                            예쁜 요약보다 근거와 추정을 분리합니다.
+                        </div>
+                        <div class="item">
+                            <strong>결정 지원</strong>
+                            무엇을 결정해야 하고 무엇이 아직 부족한지 보여줍니다.
+                        </div>
+                        <div class="item">
+                            <strong>후속 작업</strong>
+                            검토자가 실행 가능 여부를 판단할 수 있는 판단판과 문서화 결과를 제공합니다.
+                        </div>
+                    </div>
+                </section>
+
+                <section id="inputs">
+                    <h2>3. 입력 가능한 자료 유형</h2>
+                    <p>현재 또는 향후 지원 대상은 다음과 같습니다. 입력 자료가 명확할수록 분석 결과의 신뢰도가 높아집니다.</p>
+                    <div class="grid three">
+                        <div class="item">SQL 파일</div>
+                        <div class="item">프로시저, 트리거, 쿼리 문장</div>
+                        <div class="item">PPT/PPTX 컨설팅 자료</div>
+                        <div class="item">설계서</div>
+                        <div class="item">구현 자료</div>
+                        <div class="item">업무 설명 문서</div>
+                        <div class="item">테이블 정의서</div>
+                        <div class="item">여러 파일을 묶은 복합 자료</div>
+                    </div>
+                </section>
+
+                <section id="flow">
+                    <h2>4. 분석 처리 흐름</h2>
+                    <p>기본 처리 흐름은 다음과 같습니다.</p>
+                    <div class="flow">
+                        <div class="step"><span>1</span>입력 자료 수집</div>
+                        <div class="step"><span>2</span>민감 정보 익명화</div>
+                        <div class="step"><span>3</span>자료 유형 분리</div>
+                        <div class="step"><span>4</span>구조 분석</div>
+                        <div class="step"><span>5</span>문제 및 리스크 추출</div>
+                        <div class="step"><span>6</span>판단 기준과 부족한 근거 정리</div>
+                        <div class="step"><span>7</span>선택지와 실행 가능 여부 구성</div>
+                        <div class="step"><span>8</span>판단판과 문서화 산출물 생성</div>
+                    </div>
+                </section>
+
+                <section id="read-result">
+                    <h2>5. 결과 화면 읽는 방법</h2>
+                    <h3>판단판 기본 구조</h3>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>항목</th>
+                                <th>읽는 기준</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>상황 / 목적</td><td>왜 이 판단을 하고 있는지 확인합니다.</td></tr>
+                            <tr><td>문제 정의</td><td>지금 무엇이 막혀 있는지 확인합니다.</td></tr>
+                            <tr><td>판단 질문</td><td>그래서 무엇을 결정해야 하는지 확인합니다.</td></tr>
+                            <tr><td>선택지 비교</td><td>가능한 대안과 차이를 확인합니다.</td></tr>
+                            <tr><td>판단 기준</td><td>비용, 리스크, 속도, 유지보수 등 판단 기준을 확인합니다.</td></tr>
+                            <tr><td>결론</td><td>권장 방향을 확인합니다.</td></tr>
+                            <tr><td>리스크</td><td>판단이 틀리거나 실행하지 않을 때의 위험과 검증 필요 항목을 확인합니다.</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3>상태값 해석</h3>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>상태</th>
+                                <th>의미</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>실행 가능</td><td>현재 근거만으로 실행 판단이 가능합니다.</td></tr>
+                            <tr><td>조건 확인 후 실행</td><td>일부 조건을 확인한 뒤 실행할 수 있습니다.</td></tr>
+                            <tr><td>검증 후 실행</td><td>핵심 근거가 부족하여 추가 검증이 필요합니다.</td></tr>
+                            <tr><td>차단 / 실행 금지</td><td>현재 자료 기준으로 실행하면 위험하거나 판단 근거가 부족합니다.</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3>신뢰도 해석</h3>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>신뢰도</th>
+                                <th>의미</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>높음</td><td>입력 자료와 판단 근거가 충분히 연결되어 있습니다.</td></tr>
+                            <tr><td>중간</td><td>주요 판단은 가능하지만 일부 근거 확인이 필요합니다.</td></tr>
+                            <tr><td>낮음</td><td>자료 부족, 목적 불명확, 입력 불일치 등으로 결과를 바로 신뢰하기 어렵습니다.</td></tr>
+                        </tbody>
+                    </table>
+                </section>
+
+                <section id="screen-guides">
+                    <h2>화면별 사용법</h2>
+                    <p>
+                        화면별 `ⓘ ... 사용법` 버튼은 짧은 조작 안내입니다. 아래 내용은 같은 흐름을 조금 더 자세히 풀어 쓴 공통 참고 설명입니다.
+                    </p>
+                    <div class="grid three">
+                        <div class="item">
+                            <strong>프로젝트 생성 화면</strong>
+                            <ol>
+                                <li>로그인 상태를 확인합니다.</li>
+                                <li>프로젝트명, 고객사명, 분석 목표를 입력합니다.</li>
+                                <li>SQL, PPT, 설계서, 업무 문서 등 분석할 자료를 업로드합니다.</li>
+                                <li>익명화 리뷰와 표시 안내를 확인합니다.</li>
+                                <li>프로젝트를 생성한 뒤 워크스페이스 또는 결과 화면으로 이동합니다.</li>
+                            </ol>
+                        </div>
+                        <div class="item">
+                            <strong>분석 워크스페이스 화면</strong>
+                            <ol>
+                                <li>프로젝트 개요와 진행 상태를 먼저 확인합니다.</li>
+                                <li>분석이 완료되면 결과 보기 버튼으로 판단판을 엽니다.</li>
+                                <li>추가 자료가 있으면 파일을 선택하고 추가 자료 업로드를 실행합니다.</li>
+                                <li>현재 자산으로 다시 분석해야 할 때는 재분석을 실행합니다.</li>
+                                <li>진행 이력과 자산 목록으로 어떤 근거가 사용됐는지 확인합니다.</li>
+                            </ol>
+                        </div>
+                        <div class="item">
+                            <strong>결과 판단판 화면</strong>
+                            <ol>
+                                <li>결정 요약에서 최종 판단과 실행 상태를 확인합니다.</li>
+                                <li>상황, 문제, 판단 질문, 선택지, 기준, 결론, 리스크 순서로 읽습니다.</li>
+                                <li>검증 필요, 차단, 신뢰도 낮음 상태가 있으면 즉시 실행하지 않고 근거를 보강합니다.</li>
+                                <li>내부 검토 화면과 외부 공유 화면을 구분해 확인합니다.</li>
+                                <li>필요하면 검토용 Markdown, DOCX, PPTX, PDF로 내보냅니다.</li>
+                            </ol>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="examples">
+                    <h2>6. 유형별 활용 예시</h2>
+                    <div class="grid two">
+                        <div class="item">
+                            <strong>SQL/프로시저 분석</strong>
+                            SQL, 프로시저, 트리거를 입력하면 현재 로직의 역할, 처리 흐름, 테이블 관계, 잠재 리스크, 개선 가능성을 검토하는 데 활용할 수 있습니다.
+                        </div>
+                        <div class="item">
+                            <strong>PPT 컨설팅 자료 분석</strong>
+                            PPT 자료를 입력하면 목차, 전개 흐름, 핵심 메시지, 근거 부족 영역, 보완이 필요한 장표를 확인하는 데 활용할 수 있습니다.
+                        </div>
+                        <div class="item">
+                            <strong>설계/구현 자료 분석</strong>
+                            설계서나 구현 자료를 입력하면 업무 흐름, 화면 구조, 테이블 구조, 구현 단계에서 필요한 확인 항목을 정리하는 데 활용할 수 있습니다.
+                        </div>
+                        <div class="item">
+                            <strong>복합 자료 묶음 분석</strong>
+                            여러 자료를 함께 입력하면 자료 간 관계를 바탕으로 현재 상태, 문제, 개선 방향을 종합 검토할 수 있습니다. 단, 자료 간 관계가 불명확하면 결과 신뢰도가 낮아질 수 있습니다.
+                        </div>
+                    </div>
+                </section>
+
+                <section id="current-state">
+                    <h2>7. 현재 구현 수준</h2>
+                    <p>현재 구현 수준은 과장하지 않고 다음 상태로 구분합니다.</p>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>영역</th>
+                                <th>상태</th>
+                                <th>설명</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>기초 파이프라인 안정화</td>
+                                <td><span class="status ok">구현됨</span></td>
+                                <td>입력 분리, 익명화, 근거 기록, 진단 리포트의 기본 흐름을 제공합니다.</td>
+                            </tr>
+                            <tr>
+                                <td>구조 분석 엔진</td>
+                                <td><span class="status partial">부분 구현됨</span></td>
+                                <td>문서, 코드성 자료, DB 관련 자료, 메모성 입력을 구분하여 분석하는 기준을 확장하고 있습니다.</td>
+                            </tr>
+                            <tr>
+                                <td>전략 추천 엔진</td>
+                                <td><span class="status partial">부분 구현됨</span></td>
+                                <td>선택지 생성, 추천 조건, 금지 조건, 판단 충돌 정리를 지원합니다.</td>
+                            </tr>
+                            <tr>
+                                <td>실행 로드맵</td>
+                                <td><span class="status partial">부분 구현됨</span></td>
+                                <td>실행 우선순위와 단계별 계획을 생성하되, 실제 변경 실행이나 배포 자동화는 현재 범위가 아닙니다.</td>
+                            </tr>
+                            <tr>
+                                <td>오케스트레이션</td>
+                                <td><span class="status later">실험 중</span></td>
+                                <td>역할별 AI 분기, 중간 검증 루프, 실패 시 재요청, 최종 취합은 단계적으로 고도화 중입니다.</td>
+                            </tr>
+                            <tr>
+                                <td>무승인 자동 실행</td>
+                                <td><span class="status out">현재 범위 아님</span></td>
+                                <td>분석 결과를 근거로 코드를 자동 수정하거나 배포까지 수행하는 기능은 제공하지 않습니다.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </section>
+
+                <section id="limits">
+                    <h2>8. 한계와 검증 필요 항목</h2>
+                    <p>분석 워크스페이스는 입력 자료에 없는 사실을 보장하지 않습니다. 다음 경우에는 결과를 그대로 실행하지 말고 추가 검토가 필요합니다.</p>
+                    <ul>
+                        <li>입력 자료의 목적이 불명확한 경우</li>
+                        <li>자료 간 관계가 설명되지 않은 경우</li>
+                        <li>핵심 테이블 또는 업무 기준이 누락된 경우</li>
+                        <li>결과 신뢰도가 낮음으로 표시된 경우</li>
+                        <li>검증 필요 항목이 남아 있는 경우</li>
+                    </ul>
+                </section>
+
+                <section id="roadmap">
+                    <h2>9. 향후 고도화 방향</h2>
+                    <ul>
+                        <li>SQL/프로시저/트리거 분석 정확도 강화</li>
+                        <li>PPT 컨설팅 자료의 목차, 흐름, 전개 구조 분석 강화</li>
+                        <li>설계/구현 자료의 업무 흐름, 테이블 관계, 화면 구조 추출 강화</li>
+                        <li>여러 자료를 한 번에 넣었을 때 자료 간 관계를 자동 정렬</li>
+                        <li>결과를 내부 검토용, 의사결정자 보고용, 외부 공유용으로 분리 출력</li>
+                        <li>실행 로드맵과 후속 작업 관리 기능 강화</li>
+                        <li>특정 컨설팅 판단 영역에서 재현성 있고 검증 가능한 분석 결과 제공</li>
+                    </ul>
+                </section>
+
+                <section id="effects">
+                    <h2>10. 기대 효과</h2>
+                    <div class="grid two">
+                        <div class="item">자료 검토 시간을 줄일 수 있습니다.</div>
+                        <div class="item">문제와 판단 기준을 명확히 분리할 수 있습니다.</div>
+                        <div class="item">근거 부족 영역을 빠르게 확인할 수 있습니다.</div>
+                        <div class="item">의사결정 전 리스크를 점검할 수 있습니다.</div>
+                        <div class="item">컨설팅 산출물 작성과 후속 검토의 기준점을 만들 수 있습니다.</div>
+                    </div>
+                </section>
+            </main>
+        </div>
+    </div>
+</body>
+</html>

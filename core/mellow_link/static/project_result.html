@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>판단판</title>
+    <title>판단판 | MellowLink Senseframe</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="/static/anonymization_display.js"></script>
     <style>
@@ -21,11 +21,13 @@
     <div class="max-w-7xl mx-auto px-6 py-8">
         <header class="no-print flex flex-wrap items-center justify-between gap-4">
             <div>
-                <p id="surfaceBadge" class="text-xs uppercase tracking-[0.28em] text-cyan-300/80">내부 검토</p>
+                <p id="surfaceBadge" class="text-xs uppercase tracking-[0.28em] text-cyan-300/80">MellowLink Senseframe · 내부 검토</p>
                 <h1 id="pageTitle" class="mt-2 text-3xl font-semibold">판단판</h1>
-                <p id="pageDescription" class="mt-2 text-sm text-slate-400">문서 묶음 대신 상황, 문제, 판단 질문, 선택지 비교, 기준, 결론, 리스크를 한 화면에서 검토합니다.</p>
+                <p id="pageDescription" class="mt-2 text-sm text-slate-400">문서 묶음 대신 상황, 문제, 판단 질문, 선택지 비교, 기준, 결론, 리스크를 판단판에서 검토합니다.</p>
             </div>
             <nav class="flex flex-wrap gap-2 text-sm">
+                <button id="resultHelpToggle" type="button" aria-expanded="false" aria-controls="resultHelpPanel" class="rounded-full border border-white/10 px-3 py-2 text-xs text-slate-300 hover:bg-white/5">ⓘ 판단판 사용법</button>
+                <a href="/static/analysis_workspace_guide.html" target="_blank" rel="noopener noreferrer" class="rounded-full border border-white/10 px-3 py-2 text-xs text-slate-300 hover:bg-white/5">사용 가이드 보기</a>
                 <div class="flex overflow-hidden rounded-full border border-white/10 bg-slate-950/60">
                     <button id="surfaceModeInternalBtn" class="px-4 py-2 text-sm text-slate-200">내부</button>
                     <button id="surfaceModeExternalBtn" class="px-4 py-2 text-sm text-slate-400">외부</button>
@@ -43,6 +45,15 @@
                 </div>
             </nav>
         </header>
+        <section id="resultHelpPanel" class="no-print mt-4 hidden max-w-3xl rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-4 text-sm leading-7 text-slate-300">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                    <p id="resultHelpTitle" class="text-xs uppercase tracking-[0.2em] text-cyan-200">내부 검토 화면</p>
+                    <ol id="resultHelpList" class="mt-3 list-decimal space-y-1 pl-5"></ol>
+                </div>
+                <button id="resultHelpClose" type="button" class="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-400 hover:bg-white/5">닫기</button>
+            </div>
+        </section>
 
         <div id="loadingState" class="mt-8 rounded-[2rem] border border-white/10 bg-slate-900/60 px-6 py-10 text-center text-sm text-slate-400">
             결과 패키지를 준비하는 중입니다.
@@ -50,83 +61,99 @@
         <div id="errorState" class="mt-8 hidden rounded-[2rem] border border-rose-400/20 bg-rose-500/10 px-6 py-5 text-sm text-rose-200"></div>
 
         <main id="resultView" class="mt-8 hidden space-y-6">
-            <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
+            <section id="projectHeaderSection" class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
                 <p class="text-xs uppercase tracking-[0.24em] text-slate-500">프로젝트</p>
                 <h2 id="projectTitle" class="mt-3 text-3xl font-semibold">-</h2>
                 <p id="projectMeta" class="mt-3 text-sm text-slate-400">-</p>
                 <div id="anonymizationDisplayNote" class="mt-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-xs leading-6 text-slate-400">
                     표시 안내: [PERSON], [ORG], [PROJECT], [TERM] 등은 익명 처리된 민감정보입니다.
                 </div>
+                <div class="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-300">
+                    <span>분석 워크스페이스 안내</span>
+                    <a href="/static/analysis_workspace_guide.html" target="_blank" rel="noopener noreferrer" class="rounded-full border border-cyan-300/20 bg-cyan-500/10 px-3 py-1 text-cyan-100 hover:bg-cyan-500/20">사용 가이드 보기</a>
+                </div>
             </section>
 
             <div id="internalSurface" class="space-y-6">
             <section id="reviewDiffStickyBar" class="no-print sticky top-4 z-30 hidden rounded-[1.5rem] border border-cyan-300/20 bg-slate-950/95 px-4 py-3 backdrop-blur">
             </section>
-            <section class="print-card rounded-[2rem] border border-cyan-300/20 bg-slate-900/70 p-4 sm:p-6">
+            <section class="print-card rounded-[2rem] border border-cyan-300/20 bg-cyan-500/5 p-6">
                 <div class="flex flex-wrap items-start justify-between gap-4">
                     <div>
-                        <p class="text-xs uppercase tracking-[0.24em] text-cyan-200">판단판</p>
-                        <h3 class="mt-3 text-2xl font-semibold text-slate-100">한 화면에서 보는 판단 흐름</h3>
-                        <p class="mt-2 text-sm leading-7 text-slate-300">분리된 분석 결과를 판단 항목 단위로 재배치한 내부 검토 화면입니다.</p>
+                        <p class="text-xs uppercase tracking-[0.24em] text-cyan-200">내부 검토 판단</p>
+                        <h3 class="mt-3 text-2xl font-semibold text-slate-100">이 판단을 믿고 진행해도 되는가?</h3>
+                        <p id="internalProjectMetaMini" class="mt-2 text-sm leading-7 text-slate-400">-</p>
                     </div>
-                    <div class="rounded-2xl border border-cyan-300/20 bg-cyan-500/10 px-4 py-3 text-xs leading-6 text-cyan-100">
-                        비교 중심
+                    <div class="no-print flex flex-wrap gap-2 text-sm">
+                        <details class="group relative">
+                            <summary class="inline-flex cursor-pointer items-center rounded-full border border-cyan-300/20 bg-cyan-500/10 px-4 py-2 text-cyan-100 hover:bg-cyan-500/20">결과 내보내기</summary>
+                            <div class="absolute right-0 z-20 mt-2 w-56 rounded-2xl border border-white/10 bg-slate-950 px-3 py-3 text-xs shadow-2xl">
+                                <button id="internalDownloadMdBtn" type="button" class="block w-full rounded-xl px-3 py-2 text-left text-slate-200 hover:bg-white/5">마크다운</button>
+                                <button id="internalDownloadDocxBtn" type="button" class="block w-full rounded-xl px-3 py-2 text-left text-slate-200 hover:bg-white/5">DOCX</button>
+                                <button id="internalDownloadPptxBtn" type="button" class="block w-full rounded-xl px-3 py-2 text-left text-slate-200 hover:bg-white/5">PPTX</button>
+                                <button id="internalPrintBtn" type="button" class="block w-full rounded-xl px-3 py-2 text-left text-slate-200 hover:bg-white/5">PDF 저장</button>
+                            </div>
+                        </details>
+                        <a id="internalWorkspaceLink" href="#" class="rounded-full border border-white/10 px-4 py-2 text-slate-200 hover:bg-white/5">워크스페이스로 이동</a>
+                        <button id="internalExternalShareBtn" type="button" class="rounded-full border border-white/10 px-4 py-2 text-slate-200 hover:bg-white/5">외부 공유 화면 보기</button>
                     </div>
                 </div>
-                <div id="judgmentBoardBox" class="mt-6 space-y-5"></div>
-            </section>
-            <div id="legacyDocumentSurface" class="hidden">
-            <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
-                <details id="readingGuideDetails" class="group">
-                    <summary class="flex cursor-pointer items-center justify-between gap-4">
-                        <div>
-                            <p class="text-xs uppercase tracking-[0.24em] text-slate-500">읽는 방법</p>
-                            <p class="mt-2 text-sm text-slate-400">기본은 접힌 상태로 두고, 문서 흐름이 낯설 때만 펼쳐 확인합니다.</p>
-                        </div>
-                        <span data-collapsible-badge class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-cyan-500/10 group-open:text-cyan-200">펼치기</span>
-                    </summary>
-                    <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                        <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
-                            <div class="text-xs uppercase tracking-[0.2em] text-slate-500">분석 목표</div>
-                            <div class="mt-3 text-sm leading-7 text-slate-200">레거시 기능 또는 화면 1개에 대해 무엇을 유지하고 무엇을 바꿔야 하는지 판단합니다.</div>
-                        </div>
-                        <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
-                            <div class="text-xs uppercase tracking-[0.2em] text-slate-500">읽는 순서</div>
-                            <div id="readingGuideSequenceText" class="mt-3 text-sm leading-7 text-slate-200">결정 요약 -> 판단 근거 -> 실행 조치 -> 유지 계약 -> 설계 선택지 -> 실행 계획 -> 범위 및 한계 순서로 보면 승인 판단이 빨라집니다.</div>
-                        </div>
-                        <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
-                            <div class="text-xs uppercase tracking-[0.2em] text-slate-500">회의에서 결정할 것</div>
-                            <div class="mt-3 text-sm leading-7 text-slate-200">어떤 방향을 채택할지, 무엇부터 바꿀지, 추가 자료가 필요한지, 다음 단계 검토를 진행할지를 결정합니다.</div>
-                        </div>
-                        <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
-                            <div class="text-xs uppercase tracking-[0.2em] text-slate-500">근거 및 추적</div>
-                            <div class="mt-3 text-sm leading-7 text-slate-200">핵심 업무 규칙 카드의 근거 자산, 부록의 provenance, 입력 자산 목록으로 판단 근거를 추적할 수 있습니다.</div>
-                        </div>
-                    </div>
-                </details>
-            </section>
-
-            <section class="print-card rounded-[2rem] border border-cyan-300/20 bg-cyan-500/5 p-6">
-                <p class="text-xs uppercase tracking-[0.24em] text-cyan-200">한 줄 결론</p>
+                <div id="internalReviewStatusStrip" class="mt-5"></div>
+                <p class="mt-4 text-xs uppercase tracking-[0.2em] text-cyan-200">결정 요약</p>
                 <div id="executiveSummaryBox" class="mt-4"></div>
                 <div id="plannerSummaryBox" class="mt-4"></div>
             </section>
-
+            <section class="print-card rounded-[2rem] border border-cyan-300/20 bg-slate-900/70 p-4 sm:p-6">
+                <details id="readingGuideDetails" class="group">
+                    <summary class="flex cursor-pointer items-center justify-between gap-4">
+                        <div>
+                            <p class="text-xs uppercase tracking-[0.24em] text-cyan-200">판단판 전체 흐름</p>
+                            <h3 class="mt-3 text-xl font-semibold text-slate-100">상세 판단 흐름</h3>
+                            <p class="mt-2 text-sm leading-7 text-slate-400">상황, 문제, 선택지, 기준, 결론을 필요할 때 펼쳐 확인합니다.</p>
+                        </div>
+                        <span data-collapsible-badge class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-cyan-500/10 group-open:text-cyan-200">펼치기</span>
+                    </summary>
+                    <div id="judgmentBoardBox" class="mt-6 space-y-5"></div>
+                </details>
+            </section>
+            <div id="legacyDocumentSurface" class="hidden">
             <section id="customerIntentSection" class="print-card hidden rounded-[2rem] border border-amber-300/20 bg-amber-500/5 p-6">
-                <p class="text-xs uppercase tracking-[0.24em] text-amber-200">고객이 원하는 방향</p>
-                <p class="mt-2 text-sm leading-7 text-slate-300">고객 요구는 구조 판단의 제약 조건이므로, 우선 조치와 실행 범위를 좁힐 때 함께 확인해야 합니다.</p>
-                <div id="customerIntentBox" class="mt-5"></div>
+                <details class="group">
+                    <summary class="flex cursor-pointer items-center justify-between gap-4">
+                        <div>
+                            <p class="text-xs uppercase tracking-[0.24em] text-amber-200">고객이 원하는 방향</p>
+                            <p class="mt-2 text-sm leading-7 text-slate-300">권장 조치와 실행 범위에 반영된 고객 제약입니다.</p>
+                        </div>
+                        <span data-collapsible-badge class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-amber-500/10 group-open:text-amber-200">펼치기</span>
+                    </summary>
+                    <div id="customerIntentBox" class="mt-5"></div>
+                </details>
             </section>
 
             <section id="structureComparisonSection" class="print-card hidden rounded-[2rem] border border-emerald-300/20 bg-emerald-500/5 p-6">
-                <p class="text-xs uppercase tracking-[0.24em] text-emerald-200">구조 비교</p>
-                <p class="mt-2 text-sm leading-7 text-slate-300">변경 전, 변경 후, 근거 순으로 비교해 승인 범위를 좁히는 본문 영역입니다. 익명화된 실제 패턴 위에서 개선 방향을 다시 쓰며, 새 helper 이름만 예시로 생성될 수 있습니다.</p>
-                <div id="structureComparisonBox" class="mt-5 space-y-4"></div>
+                <details class="group">
+                    <summary class="flex cursor-pointer items-center justify-between gap-4">
+                        <div>
+                            <p class="text-xs uppercase tracking-[0.24em] text-emerald-200">구조 비교</p>
+                            <p class="mt-2 text-sm leading-7 text-slate-300">변경 전, 변경 후, 근거 순으로 비교해 승인 범위를 좁히는 본문 영역입니다.</p>
+                        </div>
+                        <span data-collapsible-badge class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-emerald-500/10 group-open:text-emerald-200">펼치기</span>
+                    </summary>
+                    <div id="structureComparisonBox" class="mt-5 space-y-4"></div>
+                </details>
             </section>
 
             <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
-                <p class="text-xs uppercase tracking-[0.24em] text-slate-500">근거 자산</p>
-                <div id="coreRulesBox" class="mt-4 space-y-3 text-sm text-slate-300"></div>
+                <details class="group">
+                    <summary class="flex cursor-pointer items-center justify-between gap-4">
+                        <div>
+                            <p class="text-xs uppercase tracking-[0.24em] text-slate-500">근거 자산</p>
+                            <p class="mt-2 text-sm text-slate-400">판단에 사용된 규칙과 기준입니다.</p>
+                        </div>
+                        <span data-collapsible-badge class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-cyan-500/10 group-open:text-cyan-200">펼치기</span>
+                    </summary>
+                    <div id="coreRulesBox" class="mt-4 space-y-3 text-sm text-slate-300"></div>
+                </details>
             </section>
 
             <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
@@ -134,7 +161,7 @@
                     <summary class="flex cursor-pointer items-center justify-between gap-4">
                         <div>
                             <p id="optionsSectionLabel" class="text-xs uppercase tracking-[0.24em] text-slate-500">설계 선택지</p>
-                            <p id="optionsSectionDescription" class="mt-2 text-sm text-slate-400">기본은 접힌 상태로 두고, 비교가 필요할 때 펼쳐 확인합니다.</p>
+                            <p id="optionsSectionDescription" class="mt-2 text-sm text-slate-400">권장안과 대안의 차이를 비교합니다.</p>
                         </div>
                         <span data-collapsible-badge class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-cyan-500/10 group-open:text-cyan-200">펼치기</span>
                     </summary>
@@ -147,7 +174,7 @@
                     <summary class="flex cursor-pointer items-center justify-between gap-4">
                         <div>
                             <p id="planSectionLabel" class="text-xs uppercase tracking-[0.24em] text-slate-500">실행 계획</p>
-                            <p id="planSectionDescription" class="mt-2 text-sm leading-7 text-slate-400">코드 자동 변경이나 배포가 아니라 적용 전 검토를 위한 실행 준비 계획입니다.</p>
+                            <p id="planSectionDescription" class="mt-2 text-sm leading-7 text-slate-400">적용 전 검토할 실행 준비 항목입니다.</p>
                         </div>
                         <span data-collapsible-badge class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-cyan-500/10 group-open:text-cyan-200">펼치기</span>
                     </summary>
@@ -159,7 +186,7 @@
                     <summary class="flex cursor-pointer items-center justify-between gap-4">
                         <div>
                             <p class="text-xs uppercase tracking-[0.24em] text-slate-500">선택지별 실행 전략</p>
-                            <p class="mt-2 text-sm text-slate-400">기본은 접힌 상태로 두고, 우선 전략과 대안의 착수 조건을 비교할 때 펼쳐 확인합니다.</p>
+                            <p class="mt-2 text-sm text-slate-400">우선 전략과 대안의 착수 조건입니다.</p>
                         </div>
                         <span data-collapsible-badge class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-cyan-500/10 group-open:text-cyan-200">펼치기</span>
                     </summary>
@@ -169,7 +196,7 @@
                     <summary class="flex cursor-pointer items-center justify-between gap-4">
                         <div>
                             <p class="text-xs uppercase tracking-[0.24em] text-slate-500">실행 순서 / 의존 관계</p>
-                            <p class="mt-2 text-sm text-slate-400">※ 실제 일정표가 아니라 실행 순서/의존 설명입니다.</p>
+                            <p class="mt-2 text-sm text-slate-400">단계별 순서와 의존 관계입니다. <span class="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-slate-300" title="실제 일정표가 아니라 실행 순서와 의존 관계를 설명합니다.">ⓘ</span></p>
                         </div>
                         <span data-collapsible-badge class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-cyan-500/10 group-open:text-cyan-200">펼치기</span>
                     </summary>
@@ -223,7 +250,7 @@
                     <summary class="flex cursor-pointer items-center justify-between gap-4">
                         <div>
                             <p class="text-xs uppercase tracking-[0.24em] text-slate-500">리스크</p>
-                            <p class="mt-2 text-sm text-slate-400">기본은 접힌 상태로 두고, 위험과 확인 필요 항목을 검토할 때 펼쳐 확인합니다.</p>
+                            <p class="mt-2 text-sm text-slate-400">위험과 확인 필요 항목입니다.</p>
                         </div>
                         <span data-collapsible-badge class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-cyan-500/10 group-open:text-cyan-200">펼치기</span>
                     </summary>
@@ -237,7 +264,7 @@
                     <summary class="flex cursor-pointer items-center justify-between gap-4">
                         <div>
                             <p class="text-xs uppercase tracking-[0.24em] text-indigo-200">판단 상세 참고</p>
-                            <p class="mt-2 text-sm leading-7 text-slate-300">본문 판단을 뒷받침하는 차단 사유와 근거 상세를 모아 둔 참고 레이어입니다. 실제 코드 패치가 아니라, 판단 흐름을 더 깊게 확인할 때만 펼쳐 봅니다.</p>
+                            <p class="mt-2 text-sm leading-7 text-slate-300">차단 사유와 근거 상세입니다.</p>
                         </div>
                         <span data-collapsible-badge class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-cyan-500/10 group-open:text-cyan-200">펼치기</span>
                     </summary>
@@ -263,7 +290,7 @@
                     <summary class="flex cursor-pointer items-center justify-between gap-4">
                         <div>
                             <p class="text-xs uppercase tracking-[0.24em] text-slate-500">부록</p>
-                            <p class="mt-2 text-sm text-slate-400">provenance, 입력 자산, 범위 안내, 보조 메모를 필요할 때 펼쳐 확인합니다.</p>
+                            <p class="mt-2 text-sm text-slate-400">provenance, 입력 자산, 범위 안내, 보조 메모입니다.</p>
                         </div>
                         <span data-collapsible-badge class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-cyan-500/10 group-open:text-cyan-200">펼치기</span>
                     </summary>
@@ -273,35 +300,91 @@
             </div>
 
             <div id="externalSurface" class="hidden space-y-6">
+                <section class="print-card rounded-[2rem] border border-cyan-300/20 bg-cyan-500/5 p-6">
+                    <div class="flex flex-wrap items-start justify-between gap-4">
+                        <div>
+                            <p class="text-xs uppercase tracking-[0.24em] text-cyan-200">공유용 판단</p>
+                            <h3 class="mt-3 text-2xl font-semibold text-slate-100">무엇을 해야 하는가?</h3>
+                            <p id="externalProjectMetaMini" class="mt-2 text-sm leading-7 text-slate-400">-</p>
+                        </div>
+                        <div class="no-print flex flex-wrap gap-2 text-sm">
+                            <details class="group relative">
+                                <summary class="inline-flex cursor-pointer items-center rounded-full border border-cyan-300/20 bg-cyan-500/10 px-4 py-2 text-cyan-100 hover:bg-cyan-500/20">결과 내보내기</summary>
+                                <div class="absolute right-0 z-20 mt-2 w-56 rounded-2xl border border-white/10 bg-slate-950 px-3 py-3 text-xs shadow-2xl">
+                                    <button id="externalDownloadMdBtn" type="button" class="block w-full rounded-xl px-3 py-2 text-left text-slate-200 hover:bg-white/5">마크다운</button>
+                                    <button id="externalDownloadDocxBtn" type="button" class="block w-full rounded-xl px-3 py-2 text-left text-slate-200 hover:bg-white/5">DOCX</button>
+                                    <button id="externalDownloadPptxBtn" type="button" class="block w-full rounded-xl px-3 py-2 text-left text-slate-200 hover:bg-white/5">PPTX</button>
+                                    <button id="externalPrintBtn" type="button" class="block w-full rounded-xl px-3 py-2 text-left text-slate-200 hover:bg-white/5">PDF 저장</button>
+                                </div>
+                            </details>
+                            <a id="externalWorkspaceLink" href="#" class="rounded-full border border-white/10 px-4 py-2 text-slate-200 hover:bg-white/5">워크스페이스로 이동</a>
+                            <button id="externalInternalReviewBtn" type="button" class="rounded-full border border-white/10 px-4 py-2 text-slate-200 hover:bg-white/5">내부 검토로 전환</button>
+                        </div>
+                    </div>
+                    <div id="externalShareStatusStrip" class="mt-5"></div>
+                    <div id="externalSummaryCardsBox" class="mt-5 space-y-4"></div>
+                    <details class="group mt-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                        <summary class="flex cursor-pointer items-center justify-between gap-4">
+                            <div>
+                                <div class="text-xs uppercase tracking-[0.2em] text-slate-500">실행 상태 상세</div>
+                                <div class="mt-2 text-sm text-slate-400">조건, 검증, 첫 단계가 필요할 때 확인합니다.</div>
+                            </div>
+                            <span data-collapsible-badge class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-cyan-500/10 group-open:text-cyan-200">펼치기</span>
+                        </summary>
+                        <div id="externalPlannerSummaryBox" class="mt-4"></div>
+                    </details>
+                </section>
                 <section class="print-card rounded-[2rem] border border-cyan-300/20 bg-slate-900/70 p-4 sm:p-6">
-                    <p class="text-xs uppercase tracking-[0.24em] text-cyan-200">공유용 판단판</p>
-                    <h3 class="mt-3 text-2xl font-semibold text-slate-100">결정에 필요한 정보만 재배치</h3>
-                    <p class="mt-2 text-sm leading-7 text-slate-300">원문 문서 대신 상황, 문제, 선택지, 기준, 결론, 리스크를 한 화면에서 확인합니다.</p>
-                    <div id="externalJudgmentBoardBox" class="mt-6 space-y-5"></div>
+                    <details id="externalJudgmentBoardDetails" class="group">
+                        <summary class="flex cursor-pointer items-center justify-between gap-4">
+                            <div>
+                                <p class="text-xs uppercase tracking-[0.24em] text-cyan-200">공유용 판단판 전체 흐름</p>
+                                <h3 class="mt-3 text-xl font-semibold text-slate-100">상세 판단 흐름</h3>
+                                <p class="mt-2 text-sm leading-7 text-slate-400">상황, 문제, 선택지, 기준, 결론, 리스크를 필요할 때 확인합니다.</p>
+                            </div>
+                            <span data-collapsible-badge class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-cyan-500/10 group-open:text-cyan-200">펼치기</span>
+                        </summary>
+                        <div id="externalJudgmentBoardBox" class="mt-6 space-y-5"></div>
+                    </details>
                 </section>
                 <div id="externalLegacySurface" class="hidden">
-                <section class="print-card rounded-[2rem] border border-cyan-300/20 bg-cyan-500/5 p-6">
-                    <p class="text-xs uppercase tracking-[0.24em] text-cyan-200">외부 공유 화면</p>
-                    <h3 class="mt-3 text-2xl font-semibold text-slate-100">이번 결정 패키지</h3>
-                    <p class="mt-2 text-sm leading-7 text-slate-300">한 줄 결론, 왜 이 방향인지, 다음 단계만 먼저 보여주고 내부 제어 정보는 제외합니다.</p>
-                    <div id="externalSummaryCardsBox" class="mt-5 grid gap-4 xl:grid-cols-3"></div>
-                </section>
-
                 <section id="externalCustomerIntentSection" class="print-card hidden rounded-[2rem] border border-amber-300/20 bg-amber-500/5 p-6">
-                    <p class="text-xs uppercase tracking-[0.24em] text-amber-200">고객이 원하는 방향</p>
-                    <p class="mt-2 text-sm leading-7 text-slate-300">고객 요구는 구조 판단의 제약 조건이므로, 권장 전략과 다음 단계를 줄일 때 함께 확인해야 합니다.</p>
-                    <div id="externalCustomerIntentBox" class="mt-5"></div>
+                    <details class="group">
+                        <summary class="flex cursor-pointer items-center justify-between gap-4">
+                            <div>
+                                <p class="text-xs uppercase tracking-[0.24em] text-amber-200">고객이 원하는 방향</p>
+                                <p class="mt-2 text-sm leading-7 text-slate-300">권장 전략과 다음 단계에 반영된 고객 제약입니다.</p>
+                            </div>
+                            <span data-collapsible-badge class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-amber-500/10 group-open:text-amber-200">펼치기</span>
+                        </summary>
+                        <div id="externalCustomerIntentBox" class="mt-5"></div>
+                    </details>
                 </section>
 
                 <section id="externalComparisonSection" class="print-card hidden rounded-[2rem] border border-emerald-300/20 bg-emerald-500/5 p-6">
-                    <p class="text-xs uppercase tracking-[0.24em] text-emerald-200">구조 비교</p>
-                    <p class="mt-2 text-sm leading-7 text-slate-300">변경 전, 변경 후, 근거 순으로 비교해 설명 범위를 줄이는 영역입니다. 익명화된 실제 패턴 위에서 개선 방향을 다시 쓰며, 원문은 이 화면에서 직접 열지 않습니다.</p>
-                    <div id="externalComparisonBox" class="mt-5 space-y-4"></div>
+                    <details class="group">
+                        <summary class="flex cursor-pointer items-center justify-between gap-4">
+                            <div>
+                                <p class="text-xs uppercase tracking-[0.24em] text-emerald-200">구조 비교</p>
+                                <p class="mt-2 text-sm leading-7 text-slate-300">변경 전, 변경 후, 근거를 나란히 비교합니다.</p>
+                            </div>
+                            <span data-collapsible-badge class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-emerald-500/10 group-open:text-emerald-200">펼치기</span>
+                        </summary>
+                        <div id="externalComparisonBox" class="mt-5 space-y-4"></div>
+                    </details>
                 </section>
 
                 <section class="print-card rounded-[2rem] border border-white/10 bg-slate-900/60 p-6">
-                    <p class="text-xs uppercase tracking-[0.24em] text-slate-500">추가 설명</p>
-                    <div id="externalSectionsBox" class="mt-4 space-y-4"></div>
+                    <details class="group">
+                        <summary class="flex cursor-pointer items-center justify-between gap-4">
+                            <div>
+                                <p class="text-xs uppercase tracking-[0.24em] text-slate-500">추가 설명</p>
+                                <p class="mt-2 text-sm text-slate-400">보조 설명과 근거는 필요할 때 펼쳐 확인합니다.</p>
+                            </div>
+                            <span data-collapsible-badge class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-cyan-500/10 group-open:text-cyan-200">펼치기</span>
+                        </summary>
+                        <div id="externalSectionsBox" class="mt-4 space-y-4"></div>
+                    </details>
                 </section>
                 </div>
             </div>
@@ -413,9 +496,9 @@
         function surfaceModeConfig(mode) {
             if (mode === 'external') {
                 return {
-                    badge: '외부 공유',
+                    badge: 'MellowLink Senseframe · 외부 공유',
                     pageTitle: '공유용 판단판',
-                    pageDescription: '외부 공유용 화면입니다. 상황, 문제, 선택지, 기준, 결론, 리스크를 한 화면에서 판단 순서대로 보여줍니다.',
+                    pageDescription: '결론, 권장 조치, 기대 효과, 주의점을 중심으로 공유합니다.',
                     exportTitle: '설명용 내보내기',
                     exportHint: '참고 구조 비교와 판단 제어 추적을 제외한 설명 중심 산출물을 내보냅니다.',
                     exportBoxClass: 'rounded-[1.5rem] border border-cyan-300/20 bg-cyan-500/5 px-4 py-3',
@@ -439,9 +522,9 @@
                 };
             }
             return {
-                badge: '내부 검토',
+                badge: 'MellowLink Senseframe · 내부 검토',
                 pageTitle: '판단판',
-                pageDescription: '문서 묶음 대신 상황, 문제, 판단 질문, 선택지 비교, 기준, 결론, 리스크를 한 화면에서 검토합니다.',
+                pageDescription: '최종 판단, 상태, 근거, 리스크를 기준으로 실행 가능 여부를 검토합니다.',
                 exportTitle: '검토용 내보내기',
                 exportHint: '참고 구조 비교와 판단 제어 추적을 포함한 내부 검토용 산출물을 내보냅니다.',
                 exportBoxClass: 'rounded-[1.5rem] border border-white/10 bg-slate-950/60 px-4 py-3',
@@ -477,17 +560,66 @@
             }
             applySurfaceCopy();
             setExportButtons();
+            renderResultHelp();
+        }
+
+        function resultHelpCopy() {
+            if (currentSurfaceMode === 'external') {
+                return {
+                    title: '외부 공유 화면',
+                    items: [
+                        '결론을 먼저 확인합니다.',
+                        '권장 조치와 기대 효과를 봅니다.',
+                        '주의점이 있으면 실행 전에 확인합니다.',
+                        '상세 근거는 접힌 항목에서 확인합니다.'
+                    ]
+                };
+            }
+            return {
+                title: '내부 검토 화면',
+                items: [
+                    '최종 판단과 상태를 먼저 확인합니다.',
+                    '차단/검증 필요 항목이 있으면 실행하지 않습니다.',
+                    '근거와 리스크를 확인합니다.',
+                    '상세 근거는 부록에서 확인합니다.'
+                ]
+            };
+        }
+
+        function renderResultHelp() {
+            const title = document.getElementById('resultHelpTitle');
+            const list = document.getElementById('resultHelpList');
+            if (!title || !list) return;
+            const copy = resultHelpCopy();
+            title.textContent = copy.title;
+            list.innerHTML = copy.items.map(function (item) {
+                return '<li>' + escapeHtml(item) + '</li>';
+            }).join('');
+        }
+
+        function setResultHelpOpen(isOpen) {
+            const panel = document.getElementById('resultHelpPanel');
+            const button = document.getElementById('resultHelpToggle');
+            if (!panel || !button) return;
+            panel.classList.toggle('hidden', !isOpen);
+            button.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
         }
 
         function toggleSurfaceContainers() {
             const internalSurface = document.getElementById('internalSurface');
             const externalSurface = document.getElementById('externalSurface');
+            const projectHeaderSection = document.getElementById('projectHeaderSection');
+            const exportBox = document.getElementById('exportPolicyBox');
             if (currentAccessPolicy.surfaceVariant === 'external_presentation') {
                 internalSurface.classList.add('hidden');
                 externalSurface.classList.remove('hidden');
+                if (projectHeaderSection) projectHeaderSection.classList.add('hidden');
+                if (exportBox) exportBox.classList.add('hidden');
             } else {
                 internalSurface.classList.remove('hidden');
                 externalSurface.classList.add('hidden');
+                if (projectHeaderSection) projectHeaderSection.classList.add('hidden');
+                if (exportBox) exportBox.classList.add('hidden');
             }
         }
 
@@ -529,6 +661,9 @@
             document.getElementById('surfaceBadge').textContent = config.badge;
             document.getElementById('pageTitle').textContent = config.pageTitle;
             document.getElementById('pageDescription').textContent = config.pageDescription;
+            document.getElementById('resultHelpToggle').textContent = currentSurfaceMode === 'external'
+                ? 'ⓘ 공유 화면 사용법'
+                : 'ⓘ 판단판 사용법';
         }
 
         function resultDownloadUrl(format) {
@@ -669,33 +804,33 @@
             }
             if (optionsDescription) {
                 optionsDescription.textContent = role === 'diagnosis'
-                    ? '추천안이 아니라 전표/GL 불일치 가능성과 영향만 확인합니다.'
+                    ? '전표/GL 불일치 가능성과 영향입니다.'
                     : role === 'decision'
-                    ? '계산 기준 선택지와 추천 근거만 확인합니다.'
+                    ? '계산 기준 선택지와 추천 근거입니다.'
                     : role === 'structure'
-                    ? '추천안이 아니라 처리 흐름을 이해한 뒤 필요한 경우 다른 문서를 참조합니다.'
+                    ? '처리 흐름과 참조 대상입니다.'
                     : analysisFirst
-                    ? '현행 분석 이후에 비교할 개선 후보를 접어서 확인합니다.'
-                    : '기본은 접힌 상태로 두고, 비교가 필요할 때 펼쳐 확인합니다.';
+                    ? '현행 분석 이후 비교할 개선 후보입니다.'
+                    : '권장안과 대안의 차이를 비교합니다.';
             }
             if (planLabel) {
                 planLabel.textContent = sectionTitle(pkg, 'execution_plan', '실행 계획');
             }
             if (planDescription) {
                 planDescription.textContent = role === 'diagnosis'
-                    ? '구조 설명이 아니라 전표/GL 기준 불일치 가능성을 확인하는 진단 단계입니다.'
+                    ? '전표/GL 기준 불일치 가능성 진단입니다.'
                     : role === 'decision'
-                    ? '흐름 설명이 아니라 선택 기준과 추천안 적용 검증을 정리하는 단계입니다.'
+                    ? '선택 기준과 추천안 적용 검증입니다.'
                     : role === 'structure'
-                    ? '판단이나 해결 방향이 아니라 객체와 처리 순서를 확인하는 단계입니다.'
+                    ? '객체와 처리 순서입니다.'
                     : analysisFirst
-                    ? '코드 자동 변경이나 배포가 아니라 객체와 처리 순서를 확인하는 검토 단계입니다.'
-                    : '코드 자동 변경이나 배포가 아니라 적용 전 검토를 위한 실행 준비 계획입니다.';
+                    ? '객체와 처리 순서를 확인하는 검토 단계입니다.'
+                    : '적용 전 검토할 실행 준비 항목입니다.';
             }
             if (pageDescription && analysisFirst) {
                 pageDescription.textContent = currentSurfaceMode === 'external'
-                    ? '공유 가능한 판단 항목만 추려 상황, 문제, 선택지, 기준, 결론, 리스크 순서로 제공합니다.'
-                    : '운영 분석 결과를 상황, 문제, 판단 질문, 선택지 비교, 기준, 결론, 리스크 순서로 재배치합니다.';
+                    ? '공유 가능한 판단 항목만 추려 결론과 조치 중심으로 제공합니다.'
+                    : '운영 분석 결과를 판단, 상태, 근거, 리스크 중심으로 재배치합니다.';
             }
         }
 
@@ -704,6 +839,13 @@
                 '<div class="text-xs uppercase tracking-[0.2em] ' + (accentClass || 'text-slate-500') + '">' + escapeHtml(label || '-') + '</div>' +
                 '<div class="mt-2 text-sm leading-7 text-slate-100">' + escapeHtml(body || '-') + '</div>' +
                 '</div>';
+        }
+
+        function renderInfoPill(label, body) {
+            return '<details class="group relative inline-block">' +
+                '<summary class="inline-flex cursor-pointer list-none items-center rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[11px] text-slate-300 hover:text-cyan-100">' + escapeHtml(label || 'ⓘ 안내') + '</summary>' +
+                '<div class="absolute right-0 z-20 mt-2 w-72 rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-xs leading-6 text-slate-300 shadow-2xl">' + escapeHtml(body || '') + '</div>' +
+                '</details>';
         }
 
         function plannerDisplayState(pkg) {
@@ -751,6 +893,18 @@
                 return '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">실행 상태 요약 정보가 없습니다.</div>';
             }
             const state = plannerDisplayState(pkg);
+            const hero = (((pkg || {}).display || {}).hero || {});
+            const nextAction = hero.priority_action || planner.first_stage_title || state.guidance || '-';
+            const gateLabel = state.key === 'blocked'
+                ? '차단 필요'
+                : state.key === 'review_required'
+                    ? '검증 필요'
+                    : state.key === 'conditional'
+                        ? '조건 확인 필요'
+                        : '실행 가능';
+            const priorityPhase = [planner.first_stage_priority, planner.first_stage_phase].filter(function (item) {
+                return String(item || '').trim();
+            }).join(' / ') || '-';
             return '<div class="rounded-3xl border ' + state.tone + ' px-5 py-5">' +
                 '<div class="flex flex-wrap items-center justify-between gap-3">' +
                     '<div class="text-xs uppercase tracking-[0.2em]">실행 상태 요약</div>' +
@@ -759,9 +913,94 @@
                 '<div class="mt-3 text-sm leading-7">' + escapeHtml(state.guidance) + '</div>' +
                 '<div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">' +
                     renderDecisionMetric('첫 단계', planner.first_stage_title || '-', 'text-cyan-200') +
-                    renderDecisionMetric('우선순위', planner.first_stage_priority || '-', 'text-fuchsia-200') +
-                    renderDecisionMetric('시점', planner.first_stage_phase || '-', 'text-amber-200') +
-                    renderDecisionMetric('실행 모드', schedule.schedule_mode || '-', 'text-emerald-200') +
+                    renderDecisionMetric('다음 행동', nextAction, 'text-emerald-200') +
+                    renderDecisionMetric('차단 / 검증 여부', gateLabel, state.key === 'blocked' ? 'text-rose-200' : state.key === 'review_required' ? 'text-sky-200' : 'text-amber-200') +
+                    renderDecisionMetric('우선순위 / 시점', priorityPhase, 'text-fuchsia-200') +
+                '</div>' +
+                '<div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-300">' +
+                    '<span class="rounded-full border border-white/10 bg-black/20 px-3 py-1">실행 모드: ' + escapeHtml(schedule.schedule_mode || '-') + '</span>' +
+                    renderInfoPill('ⓘ 실행 모드란?', '실제 일정표가 아니라 실행 순서, 선행 조건, 차단 여부를 요약한 표시입니다.') +
+                '</div>' +
+                '</div>';
+        }
+
+        function renderInternalReviewStatusStrip(pkg) {
+            const governance = decisionGovernance(pkg);
+            const planner = governance.planner_summary || {};
+            const state = plannerDisplayState(pkg);
+            const hero = (((pkg || {}).display || {}).hero || {});
+            const reviewDiff = (((pkg || {}).extensions || {}).review_diff) || null;
+            const blockedItems = reviewDiff ? reviewDiffDecisionItems(reviewDiff).blocked : [];
+            const hasBlocked = state.key === 'blocked' || Boolean(blockedItems && blockedItems.length);
+            const stateLabelMap = {
+                blocked: '차단',
+                review_required: '검증',
+                conditional: '조건',
+                assertive: '실행'
+            };
+            const stateToneMap = {
+                blocked: 'border-rose-300/20 bg-rose-500/10 text-rose-100',
+                review_required: 'border-sky-300/20 bg-sky-500/10 text-sky-100',
+                conditional: 'border-amber-300/20 bg-amber-500/10 text-amber-100',
+                assertive: 'border-emerald-300/20 bg-emerald-500/10 text-emerald-100'
+            };
+            const firstStage = planner.first_stage_title || hero.priority_action || state.guidance || '-';
+            const conclusion = hero.headline || humanizeDecisionType((pkg || {}).structural_judgment || '') || '-';
+            return '<div class="grid gap-3 xl:grid-cols-[minmax(0,2fr)_repeat(4,minmax(0,1fr))]">' +
+                '<div class="rounded-3xl border border-cyan-300/20 bg-black/20 px-4 py-4">' +
+                    '<div class="text-xs uppercase tracking-[0.2em] text-cyan-200">최종 판단</div>' +
+                    '<div class="mt-3 text-base leading-7 text-slate-100">' + escapeHtml(conclusion) + '</div>' +
+                '</div>' +
+                '<div class="rounded-3xl border ' + (stateToneMap[state.key] || stateToneMap.assertive) + ' px-4 py-4">' +
+                    '<div class="text-xs uppercase tracking-[0.2em]">실행 상태</div>' +
+                    '<div class="mt-3 text-lg font-semibold">' + escapeHtml(stateLabelMap[state.key] || '실행') + '</div>' +
+                '</div>' +
+                '<div class="rounded-3xl border ' + (hasBlocked ? 'border-rose-300/20 bg-rose-500/10 text-rose-100' : 'border-emerald-300/20 bg-emerald-500/10 text-emerald-100') + ' px-4 py-4">' +
+                    '<div class="text-xs uppercase tracking-[0.2em]">차단 여부</div>' +
+                    '<div class="mt-3 text-lg font-semibold">' + escapeHtml(hasBlocked ? '있음' : '없음') + '</div>' +
+                '</div>' +
+                '<div class="rounded-3xl border border-white/10 bg-black/20 px-4 py-4">' +
+                    '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">신뢰도 <span title="근거와 검증 상태를 기준으로 한 판단 안정성입니다.">ⓘ</span></div>' +
+                    '<div class="mt-3 text-lg font-semibold text-slate-100">' + escapeHtml(reviewDiffConfidenceLabel(pkg)) + '</div>' +
+                '</div>' +
+                '<div class="rounded-3xl border border-white/10 bg-black/20 px-4 py-4">' +
+                    '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">첫 단계</div>' +
+                    '<div class="mt-3 text-sm leading-6 text-slate-100">' + escapeHtml(firstStage) + '</div>' +
+                '</div>' +
+                '</div>';
+        }
+
+        function renderExternalShareStatusStrip(pkg) {
+            const governance = decisionGovernance(pkg);
+            const planner = governance.planner_summary || {};
+            const state = plannerDisplayState(pkg);
+            const hero = (((pkg || {}).display || {}).hero || {});
+            const conclusion = hero.headline || humanizeDecisionType((pkg || {}).structural_judgment || '') || '-';
+            const recommendedAction = hero.priority_action || planner.first_stage_title || state.guidance || '-';
+            const expectedEffect = hero.impact || '-';
+            const caution = state.key === 'blocked'
+                ? '차단 사유 해소 전 실행하지 않습니다.'
+                : state.key === 'review_required'
+                    ? '검증 필요 항목을 확인한 뒤 적용합니다.'
+                    : state.key === 'conditional'
+                        ? '선행 조건을 확인한 뒤 실행합니다.'
+                        : '바로 실행 후보로 검토할 수 있습니다.';
+            return '<div class="grid gap-3 xl:grid-cols-[minmax(0,2fr)_repeat(3,minmax(0,1fr))]">' +
+                '<div class="rounded-3xl border border-cyan-300/20 bg-black/20 px-4 py-4">' +
+                    '<div class="text-xs uppercase tracking-[0.2em] text-cyan-200">결론</div>' +
+                    '<div class="mt-3 text-base leading-7 text-slate-100">' + escapeHtml(conclusion) + '</div>' +
+                '</div>' +
+                '<div class="rounded-3xl border border-emerald-300/20 bg-emerald-500/10 px-4 py-4">' +
+                    '<div class="text-xs uppercase tracking-[0.2em] text-emerald-200">권장 조치</div>' +
+                    '<div class="mt-3 text-sm leading-6 text-emerald-50">' + escapeHtml(recommendedAction) + '</div>' +
+                '</div>' +
+                '<div class="rounded-3xl border border-white/10 bg-black/20 px-4 py-4">' +
+                    '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">기대 효과</div>' +
+                    '<div class="mt-3 text-sm leading-6 text-slate-100">' + escapeHtml(expectedEffect) + '</div>' +
+                '</div>' +
+                '<div class="rounded-3xl border border-amber-300/20 bg-amber-500/10 px-4 py-4">' +
+                    '<div class="text-xs uppercase tracking-[0.2em] text-amber-200">주의점</div>' +
+                    '<div class="mt-3 text-sm leading-6 text-amber-50">' + escapeHtml(caution) + '</div>' +
                 '</div>' +
                 '</div>';
         }
@@ -1474,7 +1713,7 @@
                     '<div class="mt-2 text-base font-semibold text-rose-50">✖ ' + escapeHtml(humanizeDecisionType((topBlocked || {}).decision_type || '')) + '</div>' +
                 '</div>' +
                 '<div class="rounded-2xl border border-cyan-300/20 bg-cyan-500/10 px-4 py-3">' +
-                    '<div class="text-[11px] uppercase tracking-[0.2em] text-cyan-200">신뢰도</div>' +
+                    '<div class="text-[11px] uppercase tracking-[0.2em] text-cyan-200">신뢰도 <span title="근거와 검증 상태를 기준으로 한 판단 안정성입니다.">ⓘ</span></div>' +
                     '<div class="mt-2 text-base font-semibold text-cyan-50">' + escapeHtml(reviewDiffConfidenceLabel(pkg)) + '</div>' +
                 '</div>' +
                 '<div class="flex flex-wrap gap-2">' + badges.join('') + '</div>' +
@@ -1864,8 +2103,21 @@
         function renderProjectHeader(pkg) {
             document.getElementById('resultView').classList.remove('hidden');
             document.getElementById('workspaceLink').href = '/projects/' + encodeURIComponent(projectId);
+            const internalWorkspaceLink = document.getElementById('internalWorkspaceLink');
+            if (internalWorkspaceLink) internalWorkspaceLink.href = '/projects/' + encodeURIComponent(projectId);
+            const externalWorkspaceLink = document.getElementById('externalWorkspaceLink');
+            if (externalWorkspaceLink) externalWorkspaceLink.href = '/projects/' + encodeURIComponent(projectId);
             document.getElementById('projectTitle').textContent = pkg.project.project_name || '프로젝트';
-            document.getElementById('projectMeta').textContent = (pkg.project.client_name || '-') + ' · 상태 ' + (pkg.project.status || '-') + ' · 템플릿 ' + (pkg.project.template_key || '-');
+            const projectMetaText = (pkg.project.client_name || '-') + ' · 상태 ' + (pkg.project.status || '-') + ' · 템플릿 ' + (pkg.project.template_key || '-');
+            document.getElementById('projectMeta').textContent = projectMetaText;
+            const internalProjectMetaMini = document.getElementById('internalProjectMetaMini');
+            if (internalProjectMetaMini) {
+                internalProjectMetaMini.textContent = (pkg.project.project_name || '프로젝트') + ' · ' + projectMetaText;
+            }
+            const externalProjectMetaMini = document.getElementById('externalProjectMetaMini');
+            if (externalProjectMetaMini) {
+                externalProjectMetaMini.textContent = (pkg.project.project_name || '프로젝트') + ' · ' + projectMetaText;
+            }
             document.getElementById('anonymizationDisplayNote').textContent = displayNoticeText();
             setSurfaceModeButtons();
             toggleSurfaceContainers();
@@ -1924,14 +2176,30 @@
             if (!orderedCards.length) {
                 return heroCard || '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">외부 요약 카드가 없습니다.</div>';
             }
-            const renderedCards = orderedCards.map(function (card) {
+            const renderSummaryCard = function (card) {
                 return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
                     '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">' + escapeHtml(card.title || '-') + '</div>' +
                     '<div class="mt-3 text-sm leading-7 text-slate-100">' + escapeHtml(card.body || '-') + '</div>' +
                     renderExternalEvidenceHint(card.citations || []) +
                     '</div>';
-            }).join('');
-            return heroCard ? heroCard + renderedCards : renderedCards;
+            };
+            const primaryFallbackCard = !heroCard && orderedCards.length ? renderSummaryCard(orderedCards[0]) : '';
+            const secondaryItems = heroCard ? orderedCards : orderedCards.slice(1);
+            const renderedCards = secondaryItems.map(renderSummaryCard).join('');
+            if (!renderedCards) {
+                return heroCard || primaryFallbackCard || '<div class="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-slate-500">외부 요약 카드가 없습니다.</div>';
+            }
+            const secondaryCards = '<details class="group rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
+                '<summary class="flex cursor-pointer items-center justify-between gap-4">' +
+                    '<div>' +
+                        '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">보조 요약 카드</div>' +
+                        '<div class="mt-2 text-sm text-slate-400">판단 이유, 전략, 실행 설명입니다.</div>' +
+                    '</div>' +
+                    '<span data-collapsible-badge class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-cyan-500/10 group-open:text-cyan-200">펼치기</span>' +
+                '</summary>' +
+                '<div class="mt-4 grid gap-4 xl:grid-cols-3">' + renderedCards + '</div>' +
+                '</details>';
+            return (heroCard || primaryFallbackCard) + secondaryCards;
         }
 
         function renderCustomerIntentBox(customerIntent) {
@@ -2329,6 +2597,7 @@
             renderProjectHeader(pkg);
             applyOperationalSurfaceCopy(pkg);
             document.getElementById('externalJudgmentBoardBox').innerHTML = renderJudgmentBoard(pkg || {}, { mode: 'external' });
+            document.getElementById('externalShareStatusStrip').innerHTML = renderExternalShareStatusStrip(pkg || {});
             const specializedFamily = usesSpecializedFamilySurface(pkg);
             const comparisonSection = document.getElementById('externalComparisonSection');
             const comparisonBox = document.getElementById('externalComparisonBox');
@@ -2337,6 +2606,7 @@
             const customerIntent = (pkg || {}).customer_intent || {};
             const structureComparison = (pkg || {}).structure_comparison || {};
             document.getElementById('externalSummaryCardsBox').innerHTML = renderExternalSummaryCards(explanation || {});
+            document.getElementById('externalPlannerSummaryBox').innerHTML = renderPlannerSummaryCard(pkg || {});
             if (customerIntent.available && (customerIntent.items || []).length) {
                 customerIntentSection.classList.remove('hidden');
                 customerIntentBox.innerHTML = renderCustomerIntentBox(customerIntent);
@@ -2352,7 +2622,7 @@
                 comparisonBox.innerHTML = '';
             }
             document.getElementById('externalSectionsBox').innerHTML = renderExternalSections(explanation || {});
-            bindCollapsibleDetails(document.getElementById('externalSectionsBox'));
+            bindCollapsibleDetails(document.getElementById('externalSurface'));
             applyDisplayMarkers(document.getElementById('resultView'));
         }
 
@@ -2426,10 +2696,19 @@
                         renderDecisionMetric('우선 조치', hero.priority_action || '-', 'text-emerald-200') +
                     '</div>' +
                 '</div>' +
-                '<div class="mt-4 grid gap-4 xl:grid-cols-2">' +
-                    renderBulletGroup(reasonLabel, executive.impact_lines || [], 'text-slate-500') +
-                    renderBulletGroup(actionLabel, executive.action_lines || [], 'text-emerald-200') +
-                '</div>' +
+                '<details class="group rounded-3xl border border-white/10 bg-slate-900/60 px-4 py-4">' +
+                    '<summary class="flex cursor-pointer items-center justify-between gap-4">' +
+                        '<div>' +
+                            '<div class="text-xs uppercase tracking-[0.2em] text-slate-500">보조 판단 정보</div>' +
+                            '<div class="mt-2 text-sm text-slate-400">핵심 이유와 실행 조치입니다.</div>' +
+                        '</div>' +
+                        '<span data-collapsible-badge class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition group-open:bg-cyan-500/10 group-open:text-cyan-200">펼치기</span>' +
+                    '</summary>' +
+                    '<div class="mt-4 grid gap-4 xl:grid-cols-2">' +
+                        renderBulletGroup(reasonLabel, executive.impact_lines || [], 'text-slate-500') +
+                        renderBulletGroup(actionLabel, executive.action_lines || [], 'text-emerald-200') +
+                    '</div>' +
+                '</details>' +
                 '</div>';
         }
 
@@ -2439,6 +2718,7 @@
             renderProjectHeader(pkg);
             applyOperationalSurfaceCopy(pkg);
             document.getElementById('judgmentBoardBox').innerHTML = renderJudgmentBoard(pkg || {}, { mode: 'internal' });
+            document.getElementById('internalReviewStatusStrip').innerHTML = renderInternalReviewStatusStrip(pkg || {});
             document.getElementById('executiveSummaryBox').innerHTML = renderExecutiveSummary(pkg || {});
             document.getElementById('plannerSummaryBox').innerHTML = renderPlannerSummaryCard(pkg || {});
             const display = (pkg || {}).display || {};
@@ -2639,6 +2919,43 @@
         document.getElementById('surfaceModeExternalBtn').addEventListener('click', function () {
             setSurfaceMode('external');
         });
+        document.getElementById('internalDownloadMdBtn').addEventListener('click', function () {
+            document.getElementById('downloadMdBtn').click();
+        });
+        document.getElementById('internalDownloadDocxBtn').addEventListener('click', function () {
+            document.getElementById('downloadDocxBtn').click();
+        });
+        document.getElementById('internalDownloadPptxBtn').addEventListener('click', function () {
+            document.getElementById('downloadPptxBtn').click();
+        });
+        document.getElementById('internalPrintBtn').addEventListener('click', function () {
+            document.getElementById('printBtn').click();
+        });
+        document.getElementById('internalExternalShareBtn').addEventListener('click', function () {
+            setSurfaceMode('external');
+        });
+        document.getElementById('externalDownloadMdBtn').addEventListener('click', function () {
+            document.getElementById('downloadMdBtn').click();
+        });
+        document.getElementById('externalDownloadDocxBtn').addEventListener('click', function () {
+            document.getElementById('downloadDocxBtn').click();
+        });
+        document.getElementById('externalDownloadPptxBtn').addEventListener('click', function () {
+            document.getElementById('downloadPptxBtn').click();
+        });
+        document.getElementById('externalPrintBtn').addEventListener('click', function () {
+            document.getElementById('printBtn').click();
+        });
+        document.getElementById('externalInternalReviewBtn').addEventListener('click', function () {
+            setSurfaceMode('internal');
+        });
+        document.getElementById('resultHelpToggle').addEventListener('click', function () {
+            const isOpen = document.getElementById('resultHelpToggle').getAttribute('aria-expanded') === 'true';
+            setResultHelpOpen(!isOpen);
+        });
+        document.getElementById('resultHelpClose').addEventListener('click', function () {
+            setResultHelpOpen(false);
+        });
         document.addEventListener('click', async function (event) {
             const button = event.target.closest('.asset-download-btn');
             if (!button) return;
@@ -2652,6 +2969,7 @@
         });
         applySurfaceAccessPolicy(currentSurfaceMode);
         setSurfaceModeButtons();
+        renderResultHelp();
         toggleSurfaceContainers();
         bootstrap();
     </script>

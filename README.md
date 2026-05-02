@@ -1,11 +1,11 @@
 # AI_Project
 
 AI_Project는 여러 코드베이스, 운영 자산, 실험, 보관 자료를 함께 두는 작업 루트다.  
-현재 대표 제품은 [`core/mellow_link`](core/mellow_link)이며, 이 문서는 이상적 목표 구조가 아니라 현재 디스크 상태를 기준으로 정리한다.
+현재 대표 제품은 멜로우 링크 판맥([`core/mellow_link`](core/mellow_link))이며, 이 문서는 이상적 목표 구조가 아니라 현재 디스크 상태를 기준으로 정리한다.
 
 ## 한눈에 보기
 
-- 대표 제품: [`core/mellow_link`](core/mellow_link)
+- 대표 제품: 멜로우 링크 판맥 ([`core/mellow_link`](core/mellow_link))
 - 보조 런타임: [`core/mellow_chat_runtime`](core/mellow_chat_runtime)
 - 내부 자동화 계층: [`core/autonomous_agent`](core/autonomous_agent)
 - 루트 비코드 상태: [`data`](data), [`outputs`](outputs)
@@ -83,7 +83,7 @@ AI_Project/
 
 | 경로 | 상태 | 설명 |
 | --- | --- | --- |
-| [`core/mellow_link`](core/mellow_link) | 활성 | 현재 대표 제품 본체. 프로젝트 생성, 분석 워크스페이스, 결과 패키지 흐름 담당 |
+| [`core/mellow_link`](core/mellow_link) | 활성 | 멜로우 링크 판맥 본체. 프로젝트 생성, 분석 워크스페이스, 결과 패키지 흐름 담당 |
 | [`core/mellow_chat_runtime`](core/mellow_chat_runtime) | 활성 | 분리 운영 가능한 경량 runtime API |
 | [`core/autonomous_agent`](core/autonomous_agent) | 활성 | 후속 내부 자동화 계층. 직접 사용자 제품 동선과는 분리 |
 | [`experiments/redteam_outside_root`](experiments/redteam_outside_root) | 실험 | 경계 검증용 실험 자산 |
@@ -92,7 +92,7 @@ AI_Project/
 
 ## 현재 대표 파이프라인
 
-현재 실사용 분석 흐름은 [`core/mellow_link`](core/mellow_link) 기준으로 아래 경로를 따른다.
+현재 실사용 분석 흐름은 멜로우 링크 판맥([`core/mellow_link`](core/mellow_link)) 기준으로 아래 경로를 따른다.
 
 ```text
 PPT/PPTX 업로드
@@ -202,7 +202,7 @@ PPT/PPTX 업로드
 
 ## 현재 제품 진입점
 
-현재 대표 제품은 [`core/mellow_link`](core/mellow_link)이며 기본 사용자 진입점은 다음과 같다.
+현재 대표 제품은 멜로우 링크 판맥([`core/mellow_link`](core/mellow_link))이며 기본 사용자 진입점은 다음과 같다.
 
 - `/`
 - `/ui`
