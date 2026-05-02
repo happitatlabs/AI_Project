@@ -1441,11 +1441,12 @@ class ExplanationPresenter:
         if preferred:
             source_lines = [line.strip() for line in str(preferred).splitlines() if line.strip()]
         else:
+            assumption_lines = self._contract_lines(result_package, "assumptions")[:1]
             source_lines = [
                 str(risk).strip()
                 for risk in (((result_package.get("diagnosis") or {}).get("risks") or []) if isinstance(result_package, dict) else [])
                 if str(risk).strip()
-            ]
+            ] + assumption_lines
         normalized = [self._compress_external_sentence(item) for item in source_lines]
         normalized = [item for item in normalized if item]
         return "\n".join(f"- {item}" for item in normalized[:2])
@@ -1769,11 +1770,15 @@ class ExplanationPresenter:
         return lines or ["- 핵심 문제: 분석 대상 구조를 먼저 확인합니다"]
 
     def _technical_impact_lines(self, result_package: dict[str, Any]) -> list[str]:
+        risks = self._contract_lines(result_package, "risks")[:2]
+        assumptions = self._contract_lines(result_package, "assumptions")[:1]
+        impact_items = [*risks, *assumptions] if risks or assumptions else (
+            self._contract_lines(result_package, "gap")[:2]
+            or self._contract_lines(result_package, "evidence")[:2]
+        )
         lines = self._prefixed_external_lines(
             "영향",
-            self._contract_lines(result_package, "risks")[:2]
-            or self._contract_lines(result_package, "gap")[:2]
-            or self._contract_lines(result_package, "evidence")[:2],
+            impact_items,
         )
         return lines or ["- 영향: 구조 변경 영향 범위를 먼저 확인합니다"]
 

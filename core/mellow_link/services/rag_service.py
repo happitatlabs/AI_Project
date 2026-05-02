@@ -88,6 +88,13 @@ class RAGSearchResult:
 # Text Extraction
 # =============================================================================
 
+def _has_path_traversal_segment(file_path: Path) -> bool:
+    return any(
+        segment == ".."
+        for segment in str(file_path).replace("\\", "/").split("/")
+    )
+
+
 def extract_text_from_file(file_path: Path, content_bytes: bytes = None) -> str:
     """
     Extract text from various file formats.
@@ -97,6 +104,9 @@ def extract_text_from_file(file_path: Path, content_bytes: bytes = None) -> str:
     PPT/PPTX is normalized into SML, a canonical text representation used for
     anonymization and analysis pre-processing rather than a final output format.
     """
+    if content_bytes is None and _has_path_traversal_segment(file_path):
+        return ""
+
     suffix = file_path.suffix.lower()
 
     try:

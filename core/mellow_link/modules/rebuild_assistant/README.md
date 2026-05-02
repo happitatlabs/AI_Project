@@ -1,6 +1,6 @@
 # rebuild_assistant
 
-`rebuild_assistant`는 JSP/Java/SQL 계열 레거시 기능을 단일 기능 또는 단일 페이지 단위로 분석하고, 현대화 방향과 실행 가능한 조치를 제안하는 모듈입니다.
+`rebuild_assistant`는 멜로우 링크 판맥의 대표 분석 시나리오인 `레거시 현대화 분석`을 담당하는 내부 모듈입니다. JSP/Java/SQL 계열 레거시 기능을 단일 기능 또는 단일 페이지 단위로 분석하고, 판단 근거, 설계 선택지, 실행 준비 후보를 결과 패키지로 정리합니다.
 
 현재 엔진 구조와 authoritative payload 기준 문서는
 [`refactoring_support_engine.md`](/C:/Users/Hyein/ClaudeAI/AI_Project/refactoring_support_engine.md)다.

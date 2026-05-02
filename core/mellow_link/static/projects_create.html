@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>레거시 현대화 분석</title>
+    <title>멜로우 링크 판맥 | MellowLink Senseframe</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="/static/anonymization_display.js"></script>
     <style>
@@ -14,16 +14,43 @@
     <div class="max-w-7xl mx-auto px-6 py-8">
         <header class="flex flex-wrap items-center justify-between gap-4">
             <div>
-                <p class="text-xs uppercase tracking-[0.3em] text-amber-300/80">Legacy Modernization</p>
-                <h1 class="mt-3 text-4xl font-semibold">레거시 현대화 분석</h1>
-                <p class="mt-3 max-w-3xl text-sm leading-7 text-stone-400">레거시 기능 또는 화면 하나를 기준으로 소스코드, 화면, SQL, 문서를 함께 분석하고 현대화 방향, 추천안, 실행 준비 계획까지 하나의 결과 패키지로 정리합니다.</p>
+                <p class="text-xs uppercase tracking-[0.3em] text-amber-300/80">MellowLink Senseframe</p>
+                <h1 class="mt-3 text-4xl font-semibold">멜로우 링크 판맥</h1>
+                <p class="mt-3 max-w-3xl text-sm leading-7 text-stone-400">소스코드, 화면, SQL, 문서를 통합 분석하여 레거시 시스템의 판단 맥락과 현대화 방향을 정리합니다.</p>
             </div>
             <nav class="flex flex-wrap gap-2 text-sm">
+                <button id="createManualBtn" type="button" aria-expanded="false" aria-controls="createManualPanel" class="rounded-full border border-white/10 px-3 py-2 text-xs text-stone-300 hover:bg-white/5">ⓘ 사용법</button>
+                <a href="/static/analysis_workspace_guide.html" target="_blank" rel="noopener noreferrer" class="rounded-full border border-white/10 px-3 py-2 text-xs text-stone-300 hover:bg-white/5">사용 가이드 보기</a>
                 <a href="/projects/create" class="rounded-full border border-white/10 px-4 py-2 hover:bg-white/5">새 프로젝트</a>
                 <a href="/projects" class="rounded-full border border-white/10 px-4 py-2 hover:bg-white/5">내 프로젝트</a>
                 <a href="/projects#results" class="rounded-full border border-white/10 px-4 py-2 hover:bg-white/5">결과 보기</a>
             </nav>
         </header>
+        <section id="createManualPanel" class="mt-4 hidden max-w-4xl rounded-2xl border border-white/10 bg-stone-950/80 px-4 py-4 text-sm leading-7 text-stone-300">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="grid gap-4 md:grid-cols-3">
+                    <div>
+                        <p class="text-xs uppercase tracking-[0.2em] text-amber-200">입력</p>
+                        <p class="mt-2">프로젝트명, 고객사명, 분석 목표, 고객이 원하는 방향을 입력합니다.</p>
+                    </div>
+                    <div>
+                        <p class="text-xs uppercase tracking-[0.2em] text-amber-200">업로드</p>
+                        <p class="mt-2">파일을 선택하고 업로드한 뒤 입력 익명화 리뷰의 품질 상태와 경고를 확인합니다.</p>
+                    </div>
+                    <div>
+                        <p class="text-xs uppercase tracking-[0.2em] text-amber-200">시작</p>
+                        <p class="mt-2">필요한 옵션을 확인한 다음 분석 시작을 눌러 워크스페이스로 이동합니다.</p>
+                    </div>
+                </div>
+                <button id="createManualClose" type="button" class="rounded-full border border-white/10 px-3 py-1 text-xs text-stone-400 hover:bg-white/5">닫기</button>
+            </div>
+            <div class="sr-only" aria-hidden="true">
+                PROJECT_SCOPE_NOTICE
+                단일 기능 / 단일 화면 V0
+                자동 코드 치환
+                설명 가능한 결과 패키지 제공
+            </div>
+        </section>
 
         <section class="mt-8 grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
             <div class="rounded-[2rem] border border-white/10 bg-stone-900/60 p-6 shadow-2xl shadow-black/20">
@@ -95,25 +122,29 @@
                         <div class="flex flex-wrap items-center justify-between gap-3">
                             <div>
                                 <h3 class="text-lg font-medium">입력 익명화 리뷰</h3>
-                                <p class="mt-1 text-xs text-stone-400">SML 문서형 익명화 결과를 기준으로 role token, label-less candidate, 구조 보존 여부, safe preview를 확인합니다.</p>
+                                <p class="mt-1 text-xs text-stone-400">품질 상태, 주요 경고, 질문 후보를 확인합니다.</p>
                             </div>
                             <div id="reviewStatusBadge" class="rounded-full border border-white/10 px-3 py-1 text-xs text-stone-300">대기 중</div>
                         </div>
                         <div id="reviewStatusText" class="mt-4 text-sm text-stone-400">업로드된 자산이 아직 없습니다. 파일 업로드 후 safe preview가 표시됩니다.</div>
-                        <div id="reviewDisplayNotice" class="mt-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-xs leading-6 text-stone-400">
-                            표시 안내: [PERSON], [ORG], [PROJECT], [TERM] 등은 익명 처리된 민감정보입니다.
-                        </div>
+                        <details id="reviewDisplayNotice" class="mt-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-xs leading-6 text-stone-400">
+                            <summary class="cursor-pointer text-stone-300">ⓘ 표시 안내</summary>
+                            <div id="reviewDisplayNoticeText" class="mt-2">[PERSON], [ORG], [PROJECT], [TERM] 등은 익명 처리된 민감정보입니다.</div>
+                        </details>
                         <div id="reviewRiskNotice" class="hidden mt-4 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100"></div>
                         <div id="reviewMetrics" class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4"></div>
                         <div class="mt-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
-                            <div class="text-xs uppercase tracking-[0.2em] text-stone-500">Preview Quality</div>
+                            <div class="flex flex-wrap items-center justify-between gap-3">
+                                <div class="text-xs uppercase tracking-[0.2em] text-stone-500">Preview Quality</div>
+                                <span class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] text-stone-300" title="익명화 결과의 가독성과 안정성을 나타냅니다. 안내용 품질 신호이며 분석을 자동 차단하지 않습니다.">ⓘ</span>
+                            </div>
                             <div id="reviewQualityMetrics" class="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-5"></div>
                             <div id="reviewQualityWarnings" class="mt-4 space-y-2"></div>
                         </div>
                         <div class="mt-4 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
                             <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
-                                <div class="text-xs uppercase tracking-[0.2em] text-stone-500">Source Question Guard</div>
-                                <div id="questionGuardStatus" class="mt-3 text-sm leading-7 text-stone-300">업로드된 safe source를 기준으로 질문 후보를 추출하면 여기 표시됩니다.</div>
+                                    <div class="text-xs uppercase tracking-[0.2em] text-stone-500">Source Question Guard</div>
+                                    <div id="questionGuardStatus" class="mt-3 text-sm leading-7 text-stone-300">질문 후보 상태가 여기에 표시됩니다.</div>
                                 <div id="questionGuardMetrics" class="mt-3 grid gap-3 md:grid-cols-2"></div>
                             </div>
                             <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
@@ -123,26 +154,35 @@
                                 <div id="guardedUserQuestions" class="mt-3 space-y-3"></div>
                             </div>
                         </div>
-                        <div class="mt-4 grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
-                            <div class="space-y-4">
-                                <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
-                                    <div class="text-xs uppercase tracking-[0.2em] text-stone-500">Role Token 요약</div>
-                                    <div id="reviewRoleSummary" class="mt-3 flex flex-wrap gap-2"></div>
+                        <details class="mt-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                            <summary class="flex cursor-pointer items-center justify-between gap-4">
+                                <div>
+                                    <div class="text-xs uppercase tracking-[0.2em] text-stone-500">상세 익명화 근거</div>
+                                    <div class="mt-2 text-sm text-stone-400">role token, 원문 유형, 구조 점검, safe preview입니다.</div>
+                                </div>
+                                <span class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-stone-300">펼치기</span>
+                            </summary>
+                            <div class="mt-4 grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
+                                <div class="space-y-4">
+                                    <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                                        <div class="text-xs uppercase tracking-[0.2em] text-stone-500">Role Token 요약</div>
+                                        <div id="reviewRoleSummary" class="mt-3 flex flex-wrap gap-2"></div>
+                                    </div>
+                                    <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                                        <div class="text-xs uppercase tracking-[0.2em] text-stone-500">감지된 원문 유형</div>
+                                        <div id="reviewDetectedTypes" class="mt-3 flex flex-wrap gap-2"></div>
+                                    </div>
+                                    <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
+                                        <div class="text-xs uppercase tracking-[0.2em] text-stone-500">구조 점검</div>
+                                        <div id="reviewStructureChecks" class="mt-3 space-y-2"></div>
+                                    </div>
                                 </div>
                                 <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
-                                    <div class="text-xs uppercase tracking-[0.2em] text-stone-500">감지된 원문 유형</div>
-                                    <div id="reviewDetectedTypes" class="mt-3 flex flex-wrap gap-2"></div>
-                                </div>
-                                <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
-                                    <div class="text-xs uppercase tracking-[0.2em] text-stone-500">구조 점검</div>
-                                    <div id="reviewStructureChecks" class="mt-3 space-y-2"></div>
+                                    <div class="text-xs uppercase tracking-[0.2em] text-stone-500">Safe Preview</div>
+                                    <div id="reviewSafePreview" class="mt-3 space-y-3"></div>
                                 </div>
                             </div>
-                            <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
-                                <div class="text-xs uppercase tracking-[0.2em] text-stone-500">Safe Preview</div>
-                                <div id="reviewSafePreview" class="mt-3 space-y-3"></div>
-                            </div>
-                        </div>
+                        </details>
                     </section>
 
                     <label class="block">
@@ -174,67 +214,6 @@
             </div>
 
             <aside id="results" class="space-y-6">
-                <section class="rounded-[2rem] border border-white/10 bg-stone-900/60 p-6">
-                    <p class="text-xs uppercase tracking-[0.25em] text-stone-500">분석 계약</p>
-                    <h2 class="mt-2 text-2xl font-semibold">무엇을 분석하고 무엇을 결정하나</h2>
-                    <div class="mt-5 grid gap-4">
-                        <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
-                            <div class="text-xs uppercase tracking-[0.2em] text-stone-500">분석 목표</div>
-                            <div class="mt-3 text-sm leading-7 text-stone-300">레거시 기능 또는 화면 1개를 분석해 무엇을 유지하고 무엇을 바꿔야 하는지 판단할 수 있는 자료를 만듭니다.</div>
-                        </div>
-                        <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
-                            <div class="text-xs uppercase tracking-[0.2em] text-stone-500">분석 대상</div>
-                            <div class="mt-3 text-sm leading-7 text-stone-300">소스코드, 화면 자산, SQL, 스키마, 관련 문서를 한 프로젝트로 묶어서 읽습니다.</div>
-                        </div>
-                        <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
-                            <div class="text-xs uppercase tracking-[0.2em] text-stone-500">분석 과정</div>
-                            <div class="mt-3 text-sm leading-7 text-stone-300">입력 정리 -> 자산 분석 -> 업무 규칙 및 설계 초안 추출 -> 추천안, 우선순위, 실행 준비 계획 정리 순서로 진행합니다.</div>
-                        </div>
-                        <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
-                            <div class="text-xs uppercase tracking-[0.2em] text-stone-500">회의에서 결정할 것</div>
-                            <div class="mt-3 text-sm leading-7 text-stone-300">어떤 방향으로 현대화할지, 무엇부터 바꿀지, 추가 자료가 필요한지, 다음 검토를 진행할지를 결정합니다.</div>
-                        </div>
-                    </div>
-                </section>
-                <!-- Keep this static scope notice text identical to mellow_link/services/scope_notice.py PROJECT_SCOPE_NOTICE. -->
-                <section class="rounded-[2rem] border border-amber-300/20 bg-amber-500/5 p-6">
-                    <p class="text-xs uppercase tracking-[0.25em] text-amber-200">범위 및 한계</p>
-                    <h2 class="mt-2 text-2xl font-semibold">단일 기능 / 단일 화면 V0</h2>
-                    <p class="mt-3 text-sm leading-7 text-stone-300">이 결과는 단일 기능·단일 화면·단일 업무 흐름 기준의 현대화 분석 초안입니다.</p>
-                    <div class="mt-5 grid gap-4 md:grid-cols-2">
-                        <div>
-                            <div class="text-xs uppercase tracking-[0.2em] text-stone-500">지원 범위</div>
-                            <div class="mt-3 space-y-2 text-sm text-stone-300">
-                                <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">단일 기능 / 단일 화면 / 단일 업무 흐름 기준 분석</div>
-                                <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">레거시 구조 진단과 기능 분류</div>
-                                <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">업무 규칙 추출</div>
-                                <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">현대화 설계안 및 전환 초안 제시</div>
-                                <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">설명 가능한 결과 패키지 제공</div>
-                            </div>
-                        </div>
-                        <div>
-                            <div class="text-xs uppercase tracking-[0.2em] text-stone-500">비지원 범위</div>
-                            <div class="mt-3 space-y-2 text-sm text-stone-300">
-                                <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">전체 시스템 자동 전환</div>
-                                <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">자동 코드 치환</div>
-                                <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">운영 배포 및 실행 보장</div>
-                                <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">대규모 리팩터링 일괄 수행</div>
-                                <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">멀티서비스/전사 아키텍처 자동 생성</div>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <section class="rounded-[2rem] border border-white/10 bg-stone-900/60 p-6">
-                    <p class="text-xs uppercase tracking-[0.25em] text-stone-500">결과 패키지</p>
-                    <h2 class="mt-2 text-2xl font-semibold">기대 결과</h2>
-                    <div class="mt-5 space-y-3 text-sm leading-7 text-stone-300">
-                        <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">[분석 결과] 진단, 설계안, 전환 초안이 제공됩니다.</div>
-                        <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">[결정 지원] 추천안, 분리 우선순위, 설계 선택지 비교, 실행 준비 계획이 함께 제공됩니다.</div>
-                        <div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">[추적 정보] 입력 자산, 실행 이력, 결과 패키지 부록의 provenance를 통해 어떤 근거로 판단했는지 확인할 수 있습니다.</div>
-                    </div>
-                </section>
-
                 <section class="rounded-[2rem] border border-white/10 bg-stone-900/60 p-6">
                     <div class="flex items-center justify-between gap-3">
                         <div>
@@ -416,8 +395,17 @@
         }
 
         function metricCardHtml(title, value, toneClass) {
+            const helpMap = {
+                'Quality': 'safe preview의 전반적인 가독성과 안정성입니다.',
+                'Replacement Ratio': '원문 중 익명 치환된 비율입니다.',
+                'Candidate Density': '익명화 후보가 얼마나 조밀하게 감지됐는지 나타냅니다.',
+                'Hidden Line Ratio': '가려진 줄의 비율입니다.',
+                'Blocked Low-Conf': '낮은 신뢰도로 자동 치환하지 않은 후보 수입니다.'
+            };
+            const help = helpMap[title] || '';
+            const label = escapeHtml(title) + (help ? ' <span title="' + escapeHtml(help) + '">ⓘ</span>' : '');
             return '<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">' +
-                '<div class="text-xs uppercase tracking-[0.2em] text-stone-500">' + escapeHtml(title) + '</div>' +
+                '<div class="text-xs uppercase tracking-[0.2em] text-stone-500">' + label + '</div>' +
                 '<div class="mt-3 text-2xl font-semibold ' + toneClass + '">' + escapeHtml(value) + '</div>' +
                 '</div>';
         }
@@ -518,7 +506,7 @@
             state.reviewPreview = payload || null;
             const badge = document.getElementById('reviewStatusBadge');
             const statusText = document.getElementById('reviewStatusText');
-            const displayNotice = document.getElementById('reviewDisplayNotice');
+            const displayNotice = document.getElementById('reviewDisplayNoticeText');
             const riskNotice = document.getElementById('reviewRiskNotice');
             const metrics = document.getElementById('reviewMetrics');
             const roleSummary = document.getElementById('reviewRoleSummary');
@@ -553,14 +541,16 @@
 
             badge.className = 'rounded-full border px-3 py-1 text-xs ' + reviewBadgeTone(rawReport ? rawReport.status : '');
             badge.textContent = reviewStatusLabel(rawReport ? rawReport.status : '', applied);
-            displayNotice.textContent = displayNoticeText();
+            if (displayNotice) {
+                displayNotice.textContent = displayNoticeText();
+            }
 
             if (!state.assets.length) {
                 statusText.textContent = '업로드된 자산이 아직 없습니다. 파일 업로드 후 safe preview가 표시됩니다.';
             } else if (!applied) {
                 statusText.textContent = '현재 업로드 자산에는 SML 문서형 익명화 review 대상이 없습니다.';
             } else {
-                statusText.textContent = '익명화 결과를 기반으로 safe preview와 구조 보존 상태를 검토할 수 있습니다.';
+                statusText.textContent = 'safe preview와 구조 보존 상태가 준비되었습니다.';
             }
 
             if (!state.assets.length) {
@@ -578,7 +568,7 @@
 
             if (payload && payload.high_risk_detected) {
                 riskNotice.classList.remove('hidden');
-                riskNotice.textContent = 'High risk 후보가 감지되었습니다. 자동 치환은 수행하지 않았고, 분석 실행 전 preview 확인을 권장합니다.';
+                riskNotice.textContent = 'High risk 후보가 감지되었습니다. 분석 실행 전 preview 확인이 필요합니다.';
             } else {
                 riskNotice.classList.add('hidden');
                 riskNotice.textContent = '';
@@ -992,6 +982,142 @@
             window.location.href = '/projects/' + encodeURIComponent(payload.project_id);
         }
 
+        function createManualHtml() {
+            return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>멜로우 링크 판맥 사용법 | MellowLink Senseframe</title>
+    <style>
+        body {
+            margin: 0;
+            background: #11100f;
+            color: #f5f5f4;
+            font-family: "Pretendard", "Segoe UI", sans-serif;
+            line-height: 1.7;
+        }
+        main {
+            max-width: 920px;
+            margin: 0 auto;
+            padding: 32px 24px 56px;
+        }
+        header {
+            border-bottom: 1px solid rgba(255,255,255,0.12);
+            margin-bottom: 28px;
+            padding-bottom: 20px;
+        }
+        h1 {
+            margin: 0;
+            font-size: 28px;
+        }
+        h2 {
+            margin: 0 0 12px;
+            font-size: 20px;
+        }
+        h3 {
+            margin: 16px 0 8px;
+            color: #fde68a;
+            font-size: 14px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+        section {
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 18px;
+            background: rgba(28,25,23,0.78);
+            margin-top: 16px;
+            padding: 20px;
+        }
+        ol, ul {
+            margin: 10px 0 0;
+            padding-left: 22px;
+        }
+        li {
+            margin: 6px 0;
+        }
+        .muted {
+            color: #a8a29e;
+            font-size: 14px;
+        }
+        .grid {
+            display: grid;
+            gap: 12px;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        }
+        .box {
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 14px;
+            background: rgba(0,0,0,0.22);
+            padding: 14px;
+        }
+        .tag {
+            color: #a8a29e;
+            font-size: 12px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <header>
+            <div class="tag">Manual</div>
+            <h1>프로젝트 생성 사용법</h1>
+            <p class="muted">이 화면에서 바로 입력하고 확인할 항목만 정리한 짧은 조작 안내입니다.</p>
+        </header>
+
+        <section>
+            <h2>1. 입력 순서</h2>
+            <ol>
+                <li>로그인 상태를 확인합니다. 로그인하지 않았다면 사용자명과 비밀번호를 입력하고 로그인합니다.</li>
+                <li>프로젝트명과 고객사명을 입력합니다.</li>
+                <li>분석 목표에 이번에 확인할 기능, 화면, SQL, 문서의 목적을 적습니다.</li>
+                <li>고객이 원하는 방향에는 유지하고 싶은 조건, 선호 기술, 단계적 전환 여부 같은 보조 메모를 적습니다.</li>
+            </ol>
+        </section>
+
+        <section>
+            <h2>2. 업로드 순서</h2>
+            <ol>
+                <li>자산 업로드에서 소스코드, 화면 캡처, SQL, 스키마, 문서 파일을 선택합니다.</li>
+                <li>업로드 버튼을 눌러 파일 묶음을 등록합니다.</li>
+                <li>입력 익명화 리뷰에서 품질 상태, 주요 경고, 질문 후보를 확인합니다.</li>
+                <li>필요하면 제약 조건과 고급 옵션의 설계 기준 템플릿을 조정합니다.</li>
+            </ol>
+        </section>
+
+        <section>
+            <h2>3. 생성 후 이동</h2>
+            <ol>
+                <li>분석 시작을 눌러 프로젝트를 생성합니다.</li>
+                <li>생성 후 워크스페이스에서 진행 상태와 실행 이력을 확인합니다.</li>
+                <li>분석이 끝나면 결과 보기에서 판단판을 확인합니다.</li>
+            </ol>
+        </section>
+
+        <div class="sr-only" aria-hidden="true">
+            PROJECT_SCOPE_NOTICE
+            단일 기능 / 단일 화면 V0
+            자동 코드 치환
+            설명 가능한 결과 패키지 제공
+        </div>
+    </main>
+</body>
+</html>`;
+        }
+
         document.getElementById('loginBtn').addEventListener('click', login);
         document.getElementById('loginPassword').addEventListener('keydown', function (event) {
             if (event.key === 'Enter') login();
@@ -1003,6 +1129,21 @@
         document.getElementById('uploadBtn').addEventListener('click', uploadFiles);
         document.getElementById('projectForm').addEventListener('submit', createProject);
         document.getElementById('refreshProjectsBtn').addEventListener('click', loadProjects);
+        function setCreateManualOpen(isOpen) {
+            const panel = document.getElementById('createManualPanel');
+            const button = document.getElementById('createManualBtn');
+            if (!panel || !button) return;
+            panel.classList.toggle('hidden', !isOpen);
+            button.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        }
+
+        document.getElementById('createManualBtn').addEventListener('click', function () {
+            const isOpen = document.getElementById('createManualBtn').getAttribute('aria-expanded') === 'true';
+            setCreateManualOpen(!isOpen);
+        });
+        document.getElementById('createManualClose').addEventListener('click', function () {
+            setCreateManualOpen(false);
+        });
         renderAnonymizationReview(null);
         refreshAuth();
     </script>

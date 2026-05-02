@@ -1,6 +1,9 @@
 # System Architecture Guidebook
 ## Aventurin AI Assistant Platform
 
+> 문서 상태: 역사/내부 플랫폼 아키텍처 참고 문서.
+> 현재 사용자 대상 제품명은 `멜로우 링크 판맥(MellowLink Senseframe)`이며, 이 문서의 Mellow-Link/Aventurin 표기는 과거 내부 플랫폼 계층 설명으로 해석한다.
+
 **Version:** 2.0
 **Created:** 2026-01-22
 **Updated:** 2026-02-24

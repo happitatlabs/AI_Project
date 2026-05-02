@@ -472,6 +472,16 @@ class ResultPackager:
     def _guarded_report_questions(self, prepared: Any, fallback_questions: list[str]) -> list[str]:
         summary = getattr(prepared, "question_guard_summary", None)
         selected = list(getattr(summary, "selected_questions", []) or [])
+        applied_source = str(getattr(summary, "applied_question_source", "") or "")
+        if applied_source == "generic_fallback" and fallback_questions:
+            return list(fallback_questions or [])
+        candidate_questions = {
+            str(getattr(item, "question", "") or "")
+            for item in list(getattr(prepared, "source_question_candidates", []) or [])
+            if str(getattr(item, "question", "") or "").strip()
+        }
+        if candidate_questions:
+            selected = [question for question in selected if question in candidate_questions]
         if selected:
             return selected[:4]
         return list(fallback_questions or [])

@@ -638,6 +638,24 @@ def test_operational_source_markdown_export_top_paragraph_drops_support_prefix()
     assert not _first_section_paragraph(markdown).startswith("보조 판단:")
 
 
+def test_operational_source_external_markdown_export_uses_technical_style_without_role_label():
+    _, _, result_package = _build_fx_fifo_operational_result_package()
+    markdown = _result_package_markdown(result_package, surface_mode="external")
+
+    assert "Role:" not in markdown
+    assert "흐름 중심 문서" not in markdown
+    assert _markdown_headings(markdown, level=2) == [
+        "## 핵심 문제",
+        "## 영향",
+        "## 권장 조치",
+        "## 검증 포인트",
+    ]
+    assert "## 현행 분석 요약" not in markdown
+    assert "## 자산 정체" not in markdown
+    assert "## 핵심 객체" not in markdown
+    assert "## 검토 순서" not in markdown
+
+
 @pytest.mark.parametrize(
     ("state", "planner_summary_patch", "schedule_summary_patch", "expected_label"),
     [

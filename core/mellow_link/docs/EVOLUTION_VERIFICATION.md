@@ -1,5 +1,8 @@
 # 🏛️ Mellow-Link 삼권분립 자가발전 검증 체크리스트
 
+> 문서 상태: 내부 자가발전 검증 참고 문서.
+> 현재 사용자 대상 제품명은 `멜로우 링크 판맥(MellowLink Senseframe)`이며, 이 문서의 `Mellow-Link`는 내부 진화/검증 계층을 가리킨다.
+
 **Mellow_Link_Spec.md 및 지시서 기준 구현 상태**
 
 ## 1. Backend: 핵심 로직 및 보안
