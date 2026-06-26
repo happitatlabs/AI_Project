@@ -1,0 +1,5 @@
+dist
+node_modules
+*.local
+happitat-labs-homepage-dist.zip
+happitat-labs-homepage-fullpage.png
