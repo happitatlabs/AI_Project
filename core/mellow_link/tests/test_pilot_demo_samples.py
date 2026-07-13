@@ -11,9 +11,9 @@ SAMPLE_A_DIR = PILOT_DIR / "sample_a_legacy_order_review"
 SAMPLE_B_DIR = PILOT_DIR / "sample_b_consulting_ppt_review"
 
 EXPECTED_OUTLINE_SECTIONS = [
-    "## 1. 한 줄 결론",
-    "## 2. 입력 자료 요약",
-    "## 3. 현행 구조 / 업무 흐름",
+    "## 1. 1페이지 요약",
+    "## 2. 분석 범위와 입력 자료",
+    "## 3. 현행 구조/업무 흐름 요약",
     "## 4. 핵심 문제",
     "## 5. 개선 선택지",
     "## 6. 권장안",

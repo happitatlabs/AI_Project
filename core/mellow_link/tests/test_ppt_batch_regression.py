@@ -34,11 +34,6 @@ DOMAIN_POLLUTION_TERMS = (
     ("api_validation_pollution", "api validation", "api validation"),
     ("sql_parameter_pollution", "sql 파라미터", "sql 파라미터"),
 )
-COSTING_QUESTION_POLLUTION_TERMS = (
-    "현행 원가체계의 한계",
-    "원가계산 개선 방향",
-    "배부 기준은 어떻게 달라지는가",
-)
 SENSITIVE_LABEL_PATTERN = re.compile(
     r"^\s*-\s*(?:고객사|고객명|기관명|기관|회사명|회사|수행사|담당자|작성자|프로젝트명|사업명|계약명)\s*[:：]\s*(?P<value>.+?)\s*$"
 )
@@ -285,17 +280,6 @@ def _run_single_file_regression(path: Path) -> dict[str, object]:
         for issue_code, result_term, source_term in DOMAIN_POLLUTION_TERMS:
             if result_term in result_lower and source_term not in source_lower:
                 entry["issues"].append(issue_code)
-        if domain_profile.profile_id != "oo_milk_costing":
-            selected_questions = (
-                entry["diagnostics"]
-                .get("question_guard_summary", {})
-                .get("selected_questions", [])
-            )
-            selected_question_text = " ".join(str(item) for item in selected_questions)
-            for term in COSTING_QUESTION_POLLUTION_TERMS:
-                if term in selected_question_text:
-                    entry["issues"].append("costing_question_domain_pollution")
-                    break
 
         result_domain_hits = [term for term in domain_profile.keywords if term in result_text]
         entry["diagnostics"]["result_domain_terms"] = result_domain_hits

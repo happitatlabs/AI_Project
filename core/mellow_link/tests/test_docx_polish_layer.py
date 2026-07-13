@@ -1,3 +1,4 @@
+import os
 from copy import deepcopy
 from pathlib import Path
 
@@ -195,6 +196,9 @@ def test_external_polish_excludes_internal_provenance_and_source_details():
         }
     )
     pkg["internal_canonical"] = {"raw_content": "private source content"}
+    pkg["project"]["goal"] = "Review C:/private/customer/mapping.json"
+    pkg["core_conclusion"] = "private source content must not leave run-polish-001."
+    pkg["risks"].append("OrderService.java contains asset-private-002.")
 
     external = build_docx_polish_report(pkg, surface_mode="external")
 
@@ -205,10 +209,52 @@ def test_external_polish_excludes_internal_provenance_and_source_details():
         "C:/private/customer/mapping.json",
         "private source content",
         "OrderService.java",
+        "asset-private-002",
     ):
         assert internal_value not in external
     assert "## 9. 산출물 기준" in external
     assert "## 9. 분석 근거와 provenance" not in external
+
+
+@pytest.mark.asyncio
+async def test_external_pilot_report_generates_reopenable_docx(tmp_path: Path):
+    service = DocumentService(output_dir=tmp_path)
+    await service.initialize()
+    request = DocumentRequest(
+        content=build_docx_polish_report(_sample_pkg(), surface_mode="external"),
+        output_type=DocumentType.DOCX,
+        title="현대화 판단 보고서",
+        filename="pilot-external-review.docx",
+    )
+
+    result = await service.generate(request)
+
+    from docx import Document
+
+    doc = Document(str(result.output_path))
+    document_text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
+    expected_sections = [
+        "1. 1페이지 요약",
+        "2. 분석 범위와 입력 자료",
+        "3. 현행 구조/업무 흐름 요약",
+        "4. 핵심 문제",
+        "5. 개선 선택지",
+        "6. 권장안",
+        "7. 리스크와 검토 필요 사항",
+        "8. 단계별 실행 준비 계획",
+        "9. 산출물 기준",
+    ]
+    assert all(section in document_text for section in expected_sections)
+    assert len(doc.tables) == 4
+    assert "run-polish-001" not in document_text
+    assert "OrderService.java" not in document_text
+
+    artifact_dir = os.environ.get("PILOT_DOCX_ARTIFACT_DIR")
+    if artifact_dir:
+        destination = Path(artifact_dir) / "pilot-external-review.docx"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(Path(result.output_path).read_bytes())
+    await service.shutdown()
 
 
 @pytest.mark.asyncio

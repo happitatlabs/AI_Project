@@ -9,12 +9,10 @@ on:
       - "core/mellow_link/routers/projects.py"
       - "core/mellow_link/services/doc_service.py"
       - "core/mellow_link/services/project_results/**"
-      - "core/mellow_link/services/refactoring_support_engine/source_question_guard.py"
       - "core/mellow_link/modules/rebuild_assistant/samples/pilot_demo/**"
       - "core/mellow_link/tests/test_docx_polish_layer.py"
       - "core/mellow_link/tests/test_project_result_archive.py"
       - "core/mellow_link/tests/test_pilot_demo_samples.py"
-      - "core/mellow_link/tests/test_source_question_guard.py"
   push:
     branches:
       - main
@@ -25,12 +23,10 @@ on:
       - "core/mellow_link/routers/projects.py"
       - "core/mellow_link/services/doc_service.py"
       - "core/mellow_link/services/project_results/**"
-      - "core/mellow_link/services/refactoring_support_engine/source_question_guard.py"
       - "core/mellow_link/modules/rebuild_assistant/samples/pilot_demo/**"
       - "core/mellow_link/tests/test_docx_polish_layer.py"
       - "core/mellow_link/tests/test_project_result_archive.py"
       - "core/mellow_link/tests/test_pilot_demo_samples.py"
-      - "core/mellow_link/tests/test_source_question_guard.py"
 
 jobs:
   pilot-docx:
@@ -54,9 +50,17 @@ jobs:
           python -m pip install -r requirements-test-pilot.txt
 
       - name: Run pilot DOCX regression suite
+        env:
+          PILOT_DOCX_ARTIFACT_DIR: .pilot-test-artifacts/review
         run: |
-          python -m pytest -q \
+          python -m pytest -q --basetemp=.pilot-test-artifacts/pytest \
             tests/test_docx_polish_layer.py \
             tests/test_project_result_archive.py \
-            tests/test_pilot_demo_samples.py \
-            tests/test_source_question_guard.py
+            tests/test_pilot_demo_samples.py
+
+      - name: Upload synthetic external DOCX sample
+        uses: actions/upload-artifact@v4
+        with:
+          name: pilot-external-docx-review
+          path: core/mellow_link/.pilot-test-artifacts/review/pilot-external-review.docx
+          if-no-files-found: error

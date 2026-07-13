@@ -22,18 +22,23 @@ Clean virtual environment:
 
 ```powershell
 python -m pip install -r requirements-test-pilot.txt
-python -m pytest -q tests/test_docx_polish_layer.py tests/test_project_result_archive.py tests/test_pilot_demo_samples.py tests/test_source_question_guard.py
+python -m pytest -q --basetemp=.pilot-test-artifacts/pytest tests/test_docx_polish_layer.py tests/test_project_result_archive.py tests/test_pilot_demo_samples.py
 ```
 
-Result: `22 passed`.
+Result: `16 passed` in a clean virtual environment. This is the same command
+used by the dedicated `pilot-docx` workflow.
 
 Expanded pilot regression selection:
 
 ```powershell
-python -m pytest -q tests/test_docx_polish_layer.py tests/test_project_result_archive.py tests/test_pilot_demo_samples.py tests/test_source_question_guard.py tests/test_ppt_batch_regression.py tests/test_phase1_run_flow.py::test_project_result_docx_download tests/test_phase1_run_flow.py::test_project_result_docx_download_external_surface tests/test_phase3_explanation_and_qa.py::test_export_surfaces_follow_guard_precedence_like_explanation_surface
+python -m pytest -q tests/test_docx_polish_layer.py tests/test_project_result_archive.py tests/test_pilot_demo_samples.py tests/test_phase1_run_flow.py::test_project_result_docx_download tests/test_phase1_run_flow.py::test_project_result_docx_download_external_surface tests/test_phase1_run_flow.py::test_project_result_json_persists_md_and_docx_archive tests/test_phase3_explanation_and_qa.py::test_export_surfaces_follow_guard_precedence_like_explanation_surface
 ```
 
-Result: `26 passed`.
+Result: `20 passed`.
+
+The focused test run also emits a synthetic external report named
+`pilot-external-review.docx`. CI uploads it as the
+`pilot-external-docx-review` artifact for reviewer inspection.
 
 ## Full-suite comparison
 
@@ -43,7 +48,7 @@ Current branch:
 python -m pytest -q
 ```
 
-Result: `14 failed, 920 passed, 4 skipped`.
+Result: `14 failed, 920 passed, 4 skipped` in `108.85s`.
 
 Baseline comparison in a detached worktree at `origin/main`:
 
