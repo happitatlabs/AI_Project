@@ -207,6 +207,42 @@ class DailyUsage(Base):
     __table_args__ = (UniqueConstraint('user_id', 'date', name='uq_user_date'),)
     user = relationship("User", back_populates="daily_usages")
 
+
+class DailyState(Base):
+    __tablename__ = "daily_states"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    date = Column(Date, nullable=False, index=True)
+    sleep_hours = Column(Float, nullable=False)
+    wake_count = Column(Integer, nullable=False)
+    pain_wrist = Column(Integer, nullable=False)
+    pain_elbow = Column(Integer, nullable=False)
+    pain_back = Column(Integer, nullable=False)
+    pain_foot = Column(Integer, nullable=False)
+    mood_anxiety = Column(Integer, nullable=False)
+    mood_depression = Column(Integer, nullable=False)
+    mood_irritation = Column(Integer, nullable=False)
+    self_harm_urge = Column(Integer, nullable=False)
+    meal_breakfast = Column(Boolean, nullable=False, default=False)
+    meal_lunch = Column(Boolean, nullable=False, default=False)
+    meal_dinner = Column(Boolean, nullable=False, default=False)
+    hydration = Column(Float, nullable=False)
+    medication_morning = Column(Boolean, nullable=False, default=False)
+    medication_evening = Column(Boolean, nullable=False, default=False)
+    energy = Column(Integer, nullable=False)
+    daily_brick = Column(String(300), nullable=False, default="")
+    daily_brick_completed = Column(Boolean, nullable=False, default=False)
+    notes = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    user = relationship("User")
+    __table_args__ = (
+        UniqueConstraint("user_id", "date", name="uq_daily_states_user_date"),
+    )
+
+
 class GuestUsage(Base):
     __tablename__ = "guest_usages"
     id = Column(Integer, primary_key=True, index=True)
@@ -375,6 +411,8 @@ def init_db():
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_analysis_contexts_project ON analysis_contexts(project_id)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_analysis_contexts_input_fingerprint ON analysis_contexts(input_fingerprint)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_analysis_contexts_safe_bundle ON analysis_contexts(safe_bundle_id)"))
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_daily_states_user_date ON daily_states(user_id, date)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_daily_states_user_date ON daily_states(user_id, date)"))
             conn.commit()
     except Exception:
         pass  # index already exists
