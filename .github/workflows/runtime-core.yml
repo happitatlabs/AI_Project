@@ -22,7 +22,7 @@ jobs:
       - name: Install runtime-core test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install fastapi==0.118.0 pydantic==2.12.5 httpx==0.28.1 pytest==8.3.4 pytest-asyncio==0.24.0
+          python -m pip install -r core/mellow_chat_runtime/requirements-test.txt
 
       - name: Run runtime-core regression suite
         run: |

@@ -1,0 +1,13 @@
+fastapi==0.118.0
+pydantic==2.12.5
+httpx==0.28.1
+pytest==8.3.4
+pytest-asyncio==0.24.0
+
+# Required when the runtime memory bridge imports mellow_link.infra.
+sqlalchemy==2.0.45
+bcrypt==5.0.0
+passlib==1.7.4
+python-jose==3.5.0
+python-dotenv==1.2.1
+psutil==7.2.1
