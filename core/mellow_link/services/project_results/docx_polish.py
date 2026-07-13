@@ -139,6 +139,9 @@ class _ReportContext:
             else {}
         )
         self.assets = _as_list(self.provenance.get("input_assets") or pkg.get("assets"))
+        self.external_sensitive_values = (
+            _external_sensitive_values(pkg, self.assets) if is_external else ()
+        )
         self.raw_text = _flatten_text(pkg)
         self.has_costing_anchor = bool(
             re.search(
@@ -193,6 +196,8 @@ class _ReportContext:
         text = str(value or "").strip()
         if not text:
             return ""
+        if self.is_external:
+            text = _redact_external_text(text, self.external_sensitive_values)
         text = _display_name(text)
         if self.has_order_anchor:
             text = text.replace("청구 조정 기능", "상태 보정 로직").replace(
@@ -559,6 +564,56 @@ def _external_asset_description(asset_type: str) -> str:
         "PPT": "업무/현대화 검토용 컨설팅 자료",
         "문서": "업무 구조와 판단 기준 확인 자료",
     }.get(asset_type, "현행 구조와 업무 흐름 확인 자료")
+
+
+def _external_sensitive_values(
+    pkg: dict[str, Any], assets: list[Any]
+) -> tuple[str, ...]:
+    values = set(_collect_internal_values(pkg))
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        for key in ("name", "original_filename", "filename", "path"):
+            value = str(asset.get(key) or "").strip()
+            if value:
+                values.add(value)
+    return tuple(
+        sorted((value for value in values if len(value) >= 3), key=len, reverse=True)
+    )
+
+
+def _collect_internal_values(value: Any, *, key: str = "") -> list[str]:
+    if isinstance(value, dict):
+        collected: list[str] = []
+        for child_key, child_value in value.items():
+            collected.extend(
+                _collect_internal_values(child_value, key=str(child_key).lower())
+            )
+        return collected
+    if isinstance(value, (list, tuple)):
+        collected = []
+        for item in value:
+            collected.extend(_collect_internal_values(item, key=key))
+        return collected
+    sensitive_key = (
+        key == "id"
+        or key.endswith("_id")
+        or any(token in key for token in ("path", "filename", "raw_content"))
+    )
+    text = str(value or "").strip()
+    return [text] if sensitive_key and text else []
+
+
+def _redact_external_text(text: str, sensitive_values: tuple[str, ...]) -> str:
+    redacted = text
+    for value in sensitive_values:
+        redacted = redacted.replace(value, "내부 정보 제거")
+    return re.sub(
+        r"\b(?:run|proj|asset|safe[_-]?bundle|temp(?:_file)?)[_-][A-Za-z0-9][A-Za-z0-9_.-]*\b",
+        "내부 정보 제거",
+        redacted,
+        flags=re.IGNORECASE,
+    )
 
 
 def _join_short(value: Any, ctx: _ReportContext, *, fallback: str) -> str:
