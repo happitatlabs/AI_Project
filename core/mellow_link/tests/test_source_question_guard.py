@@ -5,8 +5,12 @@ from mellow_link.services.anonymization import (
     AnonymizationRunRequest,
     AnonymizationService,
 )
-from mellow_link.services.refactoring_support_engine.analysis_context_builder import AnalysisContextBuilder
-from mellow_link.services.refactoring_support_engine.source_question_guard import SourceQuestionGuardService
+from mellow_link.services.refactoring_support_engine.analysis_context_builder import (
+    AnalysisContextBuilder,
+)
+from mellow_link.services.refactoring_support_engine.source_question_guard import (
+    SourceQuestionGuardService,
+)
 
 
 def _cost_safe_bundle():
@@ -33,24 +37,30 @@ def _cost_safe_bundle():
             "- 제조경비 배부 기준",
         ]
     )
-    return AnonymizationService().run_anonymization_pipeline(
-        AnonymizationRunRequest(
-            project_id="proj_question_guard_cost",
-            assets=[
-                AnonymizationAsset(
-                    asset_id="asset_cost_001",
-                    name="cost_consulting_deck.pptx",
-                    temp_file_id="temp_cost_001",
-                    kind_hint="presentation",
-                    content_text=sml,
-                    original_bytes=b"pptx-binary",
-                )
-            ],
+    return (
+        AnonymizationService()
+        .run_anonymization_pipeline(
+            AnonymizationRunRequest(
+                project_id="proj_question_guard_cost",
+                assets=[
+                    AnonymizationAsset(
+                        asset_id="asset_cost_001",
+                        name="cost_consulting_deck.pptx",
+                        temp_file_id="temp_cost_001",
+                        kind_hint="presentation",
+                        content_text=sml,
+                        original_bytes=b"pptx-binary",
+                    )
+                ],
+            )
         )
-    ).safe_bundle
+        .safe_bundle
+    )
 
 
-def _build_context(*, safe_bundle, goal: str = "", constraints: list[str] | None = None):
+def _build_context(
+    *, safe_bundle, goal: str = "", constraints: list[str] | None = None
+):
     return AnalysisContextBuilder().build(
         project_id="proj_question_guard_cost",
         run_id="run_question_guard",
@@ -96,7 +106,9 @@ def test_question_guard_blocks_product_validation_domain_mismatch():
         raw_constraints=context.intent.constraints,
     )
 
-    blocked = {(item.question, item.blocked_reason) for item in result.blocked_user_questions}
+    blocked = {
+        (item.question, item.blocked_reason) for item in result.blocked_user_questions
+    }
 
     assert (
         "제품 저장 전 검증 로직을 어떻게 강화할 것인가?",
@@ -123,7 +135,9 @@ def test_question_guard_marks_forced_rebuild_as_review():
         raw_constraints=context.intent.constraints,
     )
 
-    review = {(item.question, item.blocked_reason) for item in result.review_user_questions}
+    review = {
+        (item.question, item.blocked_reason) for item in result.review_user_questions
+    }
     assert ("전면 재구축해야 하는가?", "conclusion_forcing") in review
     assert ("무조건 TO-BE 시스템으로 전환해야 하는가?", "conclusion_forcing") in review
     assert result.question_guard_summary.needs_review is True
@@ -146,21 +160,25 @@ def test_question_guard_evidence_snippet_stays_safe():
 
 
 def test_question_guard_reports_shortage_when_source_is_too_thin():
-    safe_bundle = AnonymizationService().run_anonymization_pipeline(
-        AnonymizationRunRequest(
-            project_id="proj_question_guard_short",
-            assets=[
-                AnonymizationAsset(
-                    asset_id="asset_short_001",
-                    name="short.txt",
-                    temp_file_id="temp_short_001",
-                    kind_hint="doc",
-                    content_text="짧은 메모",
-                    original_bytes=b"memo",
-                )
-            ],
+    safe_bundle = (
+        AnonymizationService()
+        .run_anonymization_pipeline(
+            AnonymizationRunRequest(
+                project_id="proj_question_guard_short",
+                assets=[
+                    AnonymizationAsset(
+                        asset_id="asset_short_001",
+                        name="short.txt",
+                        temp_file_id="temp_short_001",
+                        kind_hint="doc",
+                        content_text="짧은 메모",
+                        original_bytes=b"memo",
+                    )
+                ],
+            )
         )
-    ).safe_bundle
+        .safe_bundle
+    )
     context = AnalysisContextBuilder().build(
         project_id="proj_question_guard_short",
         run_id="run_question_guard_short",
@@ -179,39 +197,45 @@ def test_question_guard_reports_shortage_when_source_is_too_thin():
     assert result.question_guard_summary.needs_review is True
     assert result.question_guard_summary.source_question_shortage is True
     assert result.question_guard_summary.guard_input_source_count == 1
-    assert "insufficient_source_text" in result.question_guard_summary.no_candidate_reasons
+    assert (
+        "insufficient_source_text" in result.question_guard_summary.no_candidate_reasons
+    )
 
 
 def test_question_guard_builds_generic_fallback_for_non_domain_document():
-    safe_bundle = AnonymizationService().run_anonymization_pipeline(
-        AnonymizationRunRequest(
-            project_id="proj_question_guard_generic",
-            assets=[
-                AnonymizationAsset(
-                    asset_id="asset_generic_001",
-                    name="generic_doc.txt",
-                    temp_file_id="temp_generic_001",
-                    kind_hint="doc",
-                    content_text="\n".join(
-                        [
-                            "[SML v1]",
-                            "presentation_file: generic_strategy_deck.pptx",
-                            "slide_count: 1",
-                            "",
-                            "[SLIDE 1]",
-                            "title: 개선 전략 검토",
-                            "texts:",
-                            "- 현행 프로세스의 한계",
-                            "- 개선 방향 검토",
-                            "- 추가 확인이 필요한 항목",
-                            "- 판단 기준 정리",
-                        ]
-                    ),
-                    original_bytes=b"generic",
-                )
-            ],
+    safe_bundle = (
+        AnonymizationService()
+        .run_anonymization_pipeline(
+            AnonymizationRunRequest(
+                project_id="proj_question_guard_generic",
+                assets=[
+                    AnonymizationAsset(
+                        asset_id="asset_generic_001",
+                        name="generic_doc.txt",
+                        temp_file_id="temp_generic_001",
+                        kind_hint="doc",
+                        content_text="\n".join(
+                            [
+                                "[SML v1]",
+                                "presentation_file: generic_strategy_deck.pptx",
+                                "slide_count: 1",
+                                "",
+                                "[SLIDE 1]",
+                                "title: 개선 전략 검토",
+                                "texts:",
+                                "- 현행 프로세스의 한계",
+                                "- 개선 방향 검토",
+                                "- 추가 확인이 필요한 항목",
+                                "- 판단 기준 정리",
+                            ]
+                        ),
+                        original_bytes=b"generic",
+                    )
+                ],
+            )
         )
-    ).safe_bundle
+        .safe_bundle
+    )
     context = AnalysisContextBuilder().build(
         project_id="proj_question_guard_generic",
         run_id="run_question_guard_generic",
@@ -230,4 +254,63 @@ def test_question_guard_builds_generic_fallback_for_non_domain_document():
     assert "이 문서는 어떤 문제를 해결하려는가?" in questions
     assert "현행 구조의 한계는 무엇인가?" in questions
     assert result.question_guard_summary.guard_input_total_chars >= 120
-    assert "no_domain_terms_detected" in result.question_guard_summary.no_candidate_reasons
+    assert (
+        "no_domain_terms_detected" in result.question_guard_summary.no_candidate_reasons
+    )
+
+
+def test_question_guard_does_not_use_costing_questions_for_stray_cost_terms():
+    safe_bundle = (
+        AnonymizationService()
+        .run_anonymization_pipeline(
+            AnonymizationRunRequest(
+                project_id="proj_question_guard_stray_cost",
+                assets=[
+                    AnonymizationAsset(
+                        asset_id="asset_stray_cost_001",
+                        name="maritime_strategy_deck.pptx",
+                        temp_file_id="temp_stray_cost_001",
+                        kind_hint="presentation",
+                        content_text="\n".join(
+                            [
+                                "[SML v1]",
+                                "presentation_file: maritime_strategy_deck.pptx",
+                                "slide_count: 1",
+                                "",
+                                "[SLIDE 1]",
+                                "title: 해운 업무 개선 검토",
+                                "texts:",
+                                "- 선박 운항과 영업 업무의 현행 흐름",
+                                "- 협력업체 정산과 손익 검토 항목",
+                                "- 원가 영향은 참고 지표로만 언급",
+                                "- 개선 방향과 판단 기준 정리",
+                            ]
+                        ),
+                        original_bytes=b"generic",
+                    )
+                ],
+            )
+        )
+        .safe_bundle
+    )
+    context = AnalysisContextBuilder().build(
+        project_id="proj_question_guard_stray_cost",
+        run_id="run_question_guard_stray_cost",
+        safe_bundle=safe_bundle,
+        goal="",
+        constraints=[],
+    )
+
+    result = SourceQuestionGuardService().evaluate(
+        analysis_context=context,
+        raw_goal="",
+        raw_constraints=[],
+    )
+
+    questions = " ".join(item.question for item in result.source_question_candidates)
+    assert "원가체계" not in questions
+    assert "원가계산" not in questions
+    assert "배부 기준" not in questions
+    assert (
+        "no_domain_terms_detected" in result.question_guard_summary.no_candidate_reasons
+    )
