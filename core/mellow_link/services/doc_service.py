@@ -329,6 +329,16 @@ class DocumentService:
                 if block["kind"] == "heading":
                     doc.add_heading(block["text"], level=min(block["level"], 4))
                     continue
+                if block["kind"] == "table":
+                    table = doc.add_table(rows=1, cols=len(block["headers"]))
+                    table.style = "Table Grid"
+                    for cell, value in zip(table.rows[0].cells, block["headers"]):
+                        cell.text = value
+                    for row_values in block["rows"]:
+                        row = table.add_row().cells
+                        for cell, value in zip(row, row_values):
+                            cell.text = value
+                    continue
                 if block["kind"] == "paragraph":
                     p = doc.add_paragraph(block["text"])
                     p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
@@ -634,10 +644,11 @@ class DocumentService:
         return self.output_dir / f"{safe_name}_{timestamp}.{doc_type.value}"
 
     def _parse_markdown_outline(self, content: str) -> List[Dict[str, Any]]:
-        """Parse simple markdown headings and bullet groups into outline blocks."""
+        """Parse simple markdown headings, bullet groups, and pipe tables into outline blocks."""
         blocks: List[Dict[str, Any]] = []
         paragraph_lines: List[str] = []
         bullet_lines: List[str] = []
+        table_lines: List[str] = []
 
         def flush_paragraph() -> None:
             nonlocal paragraph_lines
@@ -651,12 +662,28 @@ class DocumentService:
                 blocks.append({"kind": "bullets", "items": bullet_lines[:]})
                 bullet_lines = []
 
+        def flush_table() -> None:
+            nonlocal table_lines
+            table = self._parse_markdown_table(table_lines)
+            if table:
+                blocks.append(table)
+            elif table_lines:
+                blocks.append({"kind": "paragraph", "text": " ".join(table_lines).strip()})
+            table_lines = []
+
         for raw_line in content.splitlines():
             line = raw_line.strip()
             if not line:
+                flush_table()
                 flush_paragraph()
                 flush_bullets()
                 continue
+            if self._is_markdown_table_line(line):
+                flush_paragraph()
+                flush_bullets()
+                table_lines.append(line)
+                continue
+            flush_table()
             if line.startswith("#"):
                 flush_paragraph()
                 flush_bullets()
@@ -674,9 +701,39 @@ class DocumentService:
                 continue
             paragraph_lines.append(line)
 
+        flush_table()
         flush_paragraph()
         flush_bullets()
         return blocks
+
+    def _is_markdown_table_line(self, line: str) -> bool:
+        return line.startswith("|") and line.endswith("|") and line.count("|") >= 2
+
+    def _parse_markdown_table(self, lines: List[str]) -> Optional[Dict[str, Any]]:
+        if len(lines) < 2:
+            return None
+        headers = self._split_markdown_table_row(lines[0])
+        separator = self._split_markdown_table_row(lines[1])
+        if not headers or not separator:
+            return None
+        if not all(cell.replace(":", "").replace("-", "").strip() == "" for cell in separator):
+            return None
+        rows: List[List[str]] = []
+        for line in lines[2:]:
+            values = self._split_markdown_table_row(line)
+            if not values:
+                continue
+            padded = values[: len(headers)] + [""] * max(0, len(headers) - len(values))
+            rows.append(padded)
+        return {"kind": "table", "headers": headers, "rows": rows}
+
+    def _split_markdown_table_row(self, line: str) -> List[str]:
+        stripped = line.strip()
+        if stripped.startswith("|"):
+            stripped = stripped[1:]
+        if stripped.endswith("|"):
+            stripped = stripped[:-1]
+        return [cell.strip() for cell in stripped.split("|")]
 
     def _strip_duplicate_title_heading(self, content: str, title: str) -> str:
         """Remove the first H1 when it duplicates the explicit document title."""
