@@ -1809,10 +1809,14 @@ def test_project_result_docx_download(client, monkeypatch, tmp_path):
         async def generate(self, request):
             assert request.output_type.value == "docx"
             assert request.filename == "DOCX_결과_패키지_result.docx"
-            assert request.content.startswith("# 컨설팅 결과 - DOCX 결과 패키지")
-            assert "## 컨설팅 개요" in request.content
-            assert "## 컨설팅 설계" in request.content
-            assert "## 참고 구조 비교" not in request.content
+            assert request.content.startswith("# 현대화 판단 보고서")
+            assert "프로젝트: DOCX 결과 패키지" in request.content
+            assert "## 1. 1페이지 요약" in request.content
+            assert "## 8. 단계별 실행 준비 계획" in request.content
+            assert "## 9. 분석 근거와 provenance" in request.content
+            assert "| 유형 | 파일명 | 크기 |" in request.content
+            assert "| 선택지 | 설명 | 장점 | 단점 |" in request.content
+            assert "자동 코드 치환" in request.content
             return SimpleNamespace(output_path=output_path)
 
     monkeypatch.setattr(app_state, "doc_service", FakeDocService(), raising=False)
@@ -1850,9 +1854,13 @@ def test_project_result_docx_download_external_surface(client, monkeypatch, tmp_
         async def generate(self, request):
             assert request.output_type.value == "docx"
             assert request.filename == "DOCX_외부_설명_패키지_external_result.docx"
-            assert request.content.startswith("# 컨설팅 결과 - DOCX 외부 설명 패키지")
-            assert "## 컨설팅 개요" in request.content
-            assert "## 컨설팅 비전" in request.content
+            assert request.content.startswith("# 현대화 판단 보고서")
+            assert "프로젝트: DOCX 외부 설명 패키지" in request.content
+            assert "## 1. 1페이지 요약" in request.content
+            assert "## 7. 리스크와 검토 필요 사항" in request.content
+            assert "## 파일럿 범위와 제외 항목" in request.content
+            assert "| 유형 | 설명 |" in request.content
+            assert "상세 추적 정보와 입력 파일명은 내부 검토본에서 확인합니다." in request.content
             assert "Review Diff" not in request.content
             assert "synthetic_signal_detected" not in request.content
             return SimpleNamespace(output_path=output_path)

@@ -1,0 +1,5 @@
+-r ../mellow_chat_runtime/requirements-test.txt
+
+# Focused dependencies for the customer-deliverable DOCX pilot flow.
+pydantic-settings==2.12.0
+python-docx==1.2.0
