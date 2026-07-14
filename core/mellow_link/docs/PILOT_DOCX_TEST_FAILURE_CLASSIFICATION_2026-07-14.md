@@ -22,7 +22,7 @@ Clean virtual environment:
 
 ```powershell
 python -m pip install -r requirements-test-pilot.txt
-python -m pytest -q --basetemp=.pilot-test-artifacts/pytest tests/test_docx_polish_layer.py tests/test_project_result_archive.py tests/test_pilot_demo_samples.py
+python -m pytest -q --basetemp=.pilot-pytest tests/test_docx_polish_layer.py tests/test_project_result_archive.py tests/test_pilot_demo_samples.py
 ```
 
 Result: `16 passed` in a clean virtual environment. This is the same command

@@ -53,7 +53,7 @@ jobs:
         env:
           PILOT_DOCX_ARTIFACT_DIR: .pilot-test-artifacts/review
         run: |
-          python -m pytest -q --basetemp=.pilot-test-artifacts/pytest \
+          python -m pytest -q --basetemp=.pilot-pytest \
             tests/test_docx_polish_layer.py \
             tests/test_project_result_archive.py \
             tests/test_pilot_demo_samples.py
