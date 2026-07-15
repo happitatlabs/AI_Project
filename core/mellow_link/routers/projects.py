@@ -91,7 +91,10 @@ from mellow_link.services.project_results.archive import (
     build_project_result_archive_paths as _build_project_result_archive_paths_impl,
     persist_project_result_archive as _persist_project_result_archive_impl,
 )
-from mellow_link.services.project_results.docx_polish import build_docx_polish_report
+from mellow_link.services.project_results.docx_polish import (
+    append_internal_review_appendix,
+    build_docx_polish_report,
+)
 from mellow_link.services.project_results.presentation import (
     answer_project_result_question as _answer_project_result_question_impl,
     present_project_result as _present_project_result_impl,
@@ -4442,10 +4445,12 @@ async def _generate_result_package_docx(
             full_internal_markdown,
             "## 참고 구조 비교",
         )
-        if internal_appendix:
-            markdown_content = (
-                markdown_content.rstrip() + "\n\n" + internal_appendix + "\n"
-            )
+        markdown_content = append_internal_review_appendix(
+            markdown_content,
+            internal_appendix,
+            surface_mode=normalized_surface_mode,
+            internal_export_mode=internal_export_mode,
+        )
     result = await app_state.doc_service.generate(
         DocumentRequest(
             content=markdown_content,

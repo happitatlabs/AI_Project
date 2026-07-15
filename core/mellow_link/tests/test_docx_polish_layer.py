@@ -9,7 +9,10 @@ from mellow_link.services.doc_service import (
     DocumentService,
     DocumentType,
 )
-from mellow_link.services.project_results.docx_polish import build_docx_polish_report
+from mellow_link.services.project_results.docx_polish import (
+    append_internal_review_appendix,
+    build_docx_polish_report,
+)
 
 
 def _sample_pkg() -> dict:
@@ -274,68 +277,33 @@ async def test_external_pilot_report_generates_reopenable_docx(tmp_path: Path):
     await service.shutdown()
 
 
-@pytest.mark.asyncio
-async def test_internal_full_docx_export_keeps_review_appendix(
-    monkeypatch, tmp_path: Path
-):
-    from types import SimpleNamespace
+def test_internal_full_docx_export_keeps_review_appendix():
+    report = "# 현대화 판단 보고서\n"
+    appendix = "## 참고 구조 비교\n\n- synthetic-review-sentinel\n"
 
-    from mellow_link import app_state
-    from mellow_link.routers.projects import _generate_result_package_docx
-
-    pkg = _sample_pkg()
-    pkg["appendix"] = {"asset_manifest": []}
-    pkg["extensions"] = {
-        "review_diff": {"markdown": "### 변경 전후 비교\n\n- synthetic-review-sentinel"}
-    }
-
-    class RecordingDocService:
-        def __init__(self) -> None:
-            self.content = ""
-
-        def is_available(self) -> bool:
-            return True
-
-        async def generate(self, request):
-            self.content = request.content
-            output_path = tmp_path / request.filename
-            output_path.write_bytes(b"synthetic-docx")
-            return SimpleNamespace(output_path=str(output_path))
-
-    service = RecordingDocService()
-    monkeypatch.setattr(app_state, "doc_service", service, raising=False)
-    project = SimpleNamespace(project_name="합성 파일럿 프로젝트")
-
-    await _generate_result_package_docx(
-        project,
-        pkg,
+    full_content = append_internal_review_appendix(
+        report,
+        appendix,
         surface_mode="internal",
         internal_export_mode="full",
     )
-    full_content = service.content
-
-    await _generate_result_package_docx(
-        project,
-        pkg,
+    deck_only_content = append_internal_review_appendix(
+        report,
+        appendix,
         surface_mode="internal",
         internal_export_mode="deck-only",
     )
-    deck_only_content = service.content
-
-    await _generate_result_package_docx(
-        project,
-        pkg,
+    external_content = append_internal_review_appendix(
+        report,
+        appendix,
         surface_mode="external",
         internal_export_mode="full",
     )
-    external_content = service.content
 
     assert "## 참고 구조 비교" in full_content
     assert "synthetic-review-sentinel" in full_content
-    assert "## 참고 구조 비교" not in deck_only_content
-    assert "synthetic-review-sentinel" not in deck_only_content
-    assert "## 참고 구조 비교" not in external_content
-    assert "synthetic-review-sentinel" not in external_content
+    assert deck_only_content == report
+    assert external_content == report
 
 
 @pytest.mark.asyncio
