@@ -583,7 +583,9 @@ async def test_export_surfaces_follow_guard_precedence_like_explanation_surface(
         patched_package,
     )
 
-    assert "## 컨설팅 개요" in fake_doc_service.docx_content
+    assert "## 1. 1페이지 요약" in fake_doc_service.docx_content
+    assert "## 5. 개선 선택지" in fake_doc_service.docx_content
+    assert "## 9. 분석 근거와 provenance" in fake_doc_service.docx_content
     assert "guard report purpose wins" not in fake_doc_service.docx_content
     assert "guard conclusion wins" not in fake_doc_service.docx_content
     assert "guard recommended option wins" not in fake_doc_service.docx_content
@@ -607,6 +609,13 @@ async def test_export_surfaces_follow_guard_precedence_like_explanation_surface(
         if isinstance(slide, dict) and str(slide.get("slide_type") or "").strip() == "as_is_gap"
     )
     assert str(docx_path).endswith(".docx")
+
+    await _generate_result_package_docx(
+        project,
+        patched_package,
+        internal_export_mode="full",
+    )
+    assert "## 참고 구조 비교" in fake_doc_service.docx_content
 
 
 def test_operational_source_markdown_export_uses_analysis_first_headings():

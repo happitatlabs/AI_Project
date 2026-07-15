@@ -91,6 +91,10 @@ from mellow_link.services.project_results.archive import (
     build_project_result_archive_paths as _build_project_result_archive_paths_impl,
     persist_project_result_archive as _persist_project_result_archive_impl,
 )
+from mellow_link.services.project_results.docx_polish import (
+    append_internal_review_appendix,
+    build_docx_polish_report,
+)
 from mellow_link.services.project_results.presentation import (
     answer_project_result_question as _answer_project_result_question_impl,
     present_project_result as _present_project_result_impl,
@@ -4423,12 +4427,30 @@ async def _generate_result_package_docx(
     export_review_artifacts = can_export_review_artifacts(policy_for_surface_mode(normalized_surface_mode).access_profile)
     suffix_name = "result.docx" if export_review_artifacts else "external_result.docx"
     download_name = _safe_download_name(project.project_name, suffix_name)
-    title = f"{'결과 패키지' if export_review_artifacts else '구조 판단'} - {project.project_name}"
-    markdown_content = _result_package_markdown(
+    title = "현대화 판단 보고서"
+    markdown_content = build_docx_polish_report(
         pkg,
         surface_mode=normalized_surface_mode,
-        internal_export_mode=internal_export_mode,
     )
+    if (
+        export_review_artifacts
+        and _normalize_internal_export_mode(internal_export_mode) == "full"
+    ):
+        full_internal_markdown = _result_package_markdown(
+            pkg,
+            surface_mode=normalized_surface_mode,
+            internal_export_mode="full",
+        )
+        internal_appendix = _extract_markdown_tail(
+            full_internal_markdown,
+            "## 참고 구조 비교",
+        )
+        markdown_content = append_internal_review_appendix(
+            markdown_content,
+            internal_appendix,
+            surface_mode=normalized_surface_mode,
+            internal_export_mode=internal_export_mode,
+        )
     result = await app_state.doc_service.generate(
         DocumentRequest(
             content=markdown_content,
