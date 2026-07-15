@@ -272,6 +272,7 @@ def _option_table_lines(ctx: _ReportContext) -> list[str]:
         )
         description = ctx.clean(
             option.get("description")
+            or option.get("structure_summary")
             or option.get("summary")
             or option.get("approach")
             or "개선 선택지",
