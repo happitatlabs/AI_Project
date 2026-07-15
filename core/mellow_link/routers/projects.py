@@ -4429,6 +4429,23 @@ async def _generate_result_package_docx(
         pkg,
         surface_mode=normalized_surface_mode,
     )
+    if (
+        export_review_artifacts
+        and _normalize_internal_export_mode(internal_export_mode) == "full"
+    ):
+        full_internal_markdown = _result_package_markdown(
+            pkg,
+            surface_mode=normalized_surface_mode,
+            internal_export_mode="full",
+        )
+        internal_appendix = _extract_markdown_tail(
+            full_internal_markdown,
+            "## 참고 구조 비교",
+        )
+        if internal_appendix:
+            markdown_content = (
+                markdown_content.rstrip() + "\n\n" + internal_appendix + "\n"
+            )
     result = await app_state.doc_service.generate(
         DocumentRequest(
             content=markdown_content,

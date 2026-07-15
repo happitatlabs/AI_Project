@@ -134,6 +134,23 @@ def test_polish_includes_report_tables():
     assert "| 단계 | 작업 | 비고 |" in markdown
 
 
+def test_polish_uses_normal_result_package_structure_summary():
+    pkg = _sample_pkg()
+    pkg["design_options"] = [
+        {
+            "name": "A",
+            "structure_summary": "주문 상태 변경 책임을 서비스 경계로 분리",
+            "advantages": ["변경 영향 범위가 명확함"],
+            "risks": ["전환 순서 합의 필요"],
+        }
+    ]
+
+    markdown = build_docx_polish_report(pkg)
+
+    assert "주문 상태 변경 책임을 서비스 경계로 분리" in markdown
+    assert "| A | 개선 선택지 |" not in markdown
+
+
 def test_polish_separates_internal_and_external_docx_surface():
     internal = build_docx_polish_report(_sample_pkg(), surface_mode="internal")
     external = build_docx_polish_report(_sample_pkg(), surface_mode="external")
@@ -255,6 +272,70 @@ async def test_external_pilot_report_generates_reopenable_docx(tmp_path: Path):
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(Path(result.output_path).read_bytes())
     await service.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_internal_full_docx_export_keeps_review_appendix(
+    monkeypatch, tmp_path: Path
+):
+    from types import SimpleNamespace
+
+    from mellow_link import app_state
+    from mellow_link.routers.projects import _generate_result_package_docx
+
+    pkg = _sample_pkg()
+    pkg["appendix"] = {"asset_manifest": []}
+    pkg["extensions"] = {
+        "review_diff": {"markdown": "### 변경 전후 비교\n\n- synthetic-review-sentinel"}
+    }
+
+    class RecordingDocService:
+        def __init__(self) -> None:
+            self.content = ""
+
+        def is_available(self) -> bool:
+            return True
+
+        async def generate(self, request):
+            self.content = request.content
+            output_path = tmp_path / request.filename
+            output_path.write_bytes(b"synthetic-docx")
+            return SimpleNamespace(output_path=str(output_path))
+
+    service = RecordingDocService()
+    monkeypatch.setattr(app_state, "doc_service", service, raising=False)
+    project = SimpleNamespace(project_name="합성 파일럿 프로젝트")
+
+    await _generate_result_package_docx(
+        project,
+        pkg,
+        surface_mode="internal",
+        internal_export_mode="full",
+    )
+    full_content = service.content
+
+    await _generate_result_package_docx(
+        project,
+        pkg,
+        surface_mode="internal",
+        internal_export_mode="deck-only",
+    )
+    deck_only_content = service.content
+
+    await _generate_result_package_docx(
+        project,
+        pkg,
+        surface_mode="external",
+        internal_export_mode="full",
+    )
+    external_content = service.content
+
+    assert "## 참고 구조 비교" in full_content
+    assert "synthetic-review-sentinel" in full_content
+    assert "## 참고 구조 비교" not in deck_only_content
+    assert "synthetic-review-sentinel" not in deck_only_content
+    assert "## 참고 구조 비교" not in external_content
+    assert "synthetic-review-sentinel" not in external_content
 
 
 @pytest.mark.asyncio
