@@ -610,6 +610,13 @@ async def test_export_surfaces_follow_guard_precedence_like_explanation_surface(
     )
     assert str(docx_path).endswith(".docx")
 
+    await _generate_result_package_docx(
+        project,
+        patched_package,
+        internal_export_mode="full",
+    )
+    assert "## 참고 구조 비교" in fake_doc_service.docx_content
+
 
 def test_operational_source_markdown_export_uses_analysis_first_headings():
     _, _, result_package = _build_fx_fifo_operational_result_package()

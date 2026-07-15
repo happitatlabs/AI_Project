@@ -111,6 +111,25 @@ def build_docx_polish_report(
     return "\n".join(lines).strip() + "\n"
 
 
+def append_internal_review_appendix(
+    markdown: str,
+    appendix_markdown: str,
+    *,
+    surface_mode: str,
+    internal_export_mode: str,
+) -> str:
+    """Append internal review material only for an explicit full internal export."""
+    if (
+        surface_mode != "internal"
+        or str(internal_export_mode).strip().lower() != "full"
+    ):
+        return markdown
+    appendix = str(appendix_markdown or "").strip()
+    if not appendix:
+        return markdown
+    return markdown.rstrip() + "\n\n" + appendix + "\n"
+
+
 class _ReportContext:
     def __init__(self, *, pkg: dict[str, Any], is_external: bool) -> None:
         self.pkg = pkg
