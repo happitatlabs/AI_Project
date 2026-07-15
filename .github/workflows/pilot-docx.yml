@@ -1,0 +1,66 @@
+name: pilot-docx
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/pilot-docx.yml"
+      - "core/mellow_chat_runtime/requirements-test.txt"
+      - "core/mellow_link/requirements-test-pilot.txt"
+      - "core/mellow_link/routers/projects.py"
+      - "core/mellow_link/services/doc_service.py"
+      - "core/mellow_link/services/project_results/**"
+      - "core/mellow_link/modules/rebuild_assistant/samples/pilot_demo/**"
+      - "core/mellow_link/tests/test_docx_polish_layer.py"
+      - "core/mellow_link/tests/test_project_result_archive.py"
+      - "core/mellow_link/tests/test_pilot_demo_samples.py"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/pilot-docx.yml"
+      - "core/mellow_chat_runtime/requirements-test.txt"
+      - "core/mellow_link/requirements-test-pilot.txt"
+      - "core/mellow_link/routers/projects.py"
+      - "core/mellow_link/services/doc_service.py"
+      - "core/mellow_link/services/project_results/**"
+      - "core/mellow_link/modules/rebuild_assistant/samples/pilot_demo/**"
+      - "core/mellow_link/tests/test_docx_polish_layer.py"
+      - "core/mellow_link/tests/test_project_result_archive.py"
+      - "core/mellow_link/tests/test_pilot_demo_samples.py"
+
+jobs:
+  pilot-docx:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core/mellow_link
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pilot DOCX test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-test-pilot.txt
+
+      - name: Run pilot DOCX regression suite
+        env:
+          PILOT_DOCX_ARTIFACT_DIR: .pilot-test-artifacts/review
+        run: |
+          python -m pytest -q --basetemp=.pilot-pytest \
+            tests/test_docx_polish_layer.py \
+            tests/test_project_result_archive.py \
+            tests/test_pilot_demo_samples.py
+
+      - name: Upload synthetic external DOCX sample
+        uses: actions/upload-artifact@v4
+        with:
+          name: pilot-external-docx-review
+          path: core/mellow_link/.pilot-test-artifacts/review/pilot-external-review.docx
+          if-no-files-found: error
