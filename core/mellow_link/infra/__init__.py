@@ -55,6 +55,9 @@ from .database import (
     ProjectAsset,
     ProjectRunHistory,
     AnalysisContext,
+    PilotStateRecord,
+    PilotAuditEvent,
+    PilotCommandResult,
     # Helper Functions
     create_default_folders_for_user,
     ensure_user_has_folders,
@@ -142,6 +145,9 @@ __all__ = [
     "ProjectAsset",
     "ProjectRunHistory",
     "AnalysisContext",
+    "PilotStateRecord",
+    "PilotAuditEvent",
+    "PilotCommandResult",
     # Run Events
     "create_run",
     "emit_event",
