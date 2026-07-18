@@ -5,6 +5,7 @@ on:
     paths:
       - ".github/workflows/pilot-state.yml"
       - "core/mellow_chat_runtime/requirements-test.txt"
+      - "core/mellow_link/requirements-test-pilot.txt"
       - "core/mellow_link/infra/database.py"
       - "core/mellow_link/infra/__init__.py"
       - "core/mellow_link/main.py"
@@ -17,6 +18,7 @@ on:
     paths:
       - ".github/workflows/pilot-state.yml"
       - "core/mellow_chat_runtime/requirements-test.txt"
+      - "core/mellow_link/requirements-test-pilot.txt"
       - "core/mellow_link/infra/database.py"
       - "core/mellow_link/infra/__init__.py"
       - "core/mellow_link/main.py"
@@ -43,7 +45,7 @@ jobs:
       - name: Install focused test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r ../mellow_chat_runtime/requirements-test.txt
+          python -m pip install -r requirements-test-pilot.txt
 
       - name: Run persistent Pilot state contract tests
         run: |
