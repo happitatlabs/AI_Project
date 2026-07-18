@@ -72,7 +72,7 @@ draft -> ready_for_review -> under_review -> approved -> delivered
 - `GET /pilot-states/queue/delivered`
 - `GET /pilot-states/{pilot_id}/audit`
 
-Queue와 감사 응답은 보고서 원문, 원본 파일명, 내부 파일 경로, bundle ID를 포함하지 않는다. 검토용 DOCX는 존재 여부만 제공한다.
+Queue와 감사 응답은 보고서 원문, 원본 파일명, 내부 파일 경로, bundle ID를 포함하지 않는다. 검토용 DOCX는 존재 여부만 제공한다. `deliver`는 기존 프로젝트/run 보관 경로에 DOCX가 실제로 존재할 때만 허용하며 경로 자체는 응답하지 않는다.
 
 새 테이블은 기존 migration 방식과 동일하게 앱 시작 또는 `init_db()` 호출 시 생성된다.
 

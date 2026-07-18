@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from threading import Barrier
 
 import pytest
 from fastapi import FastAPI
@@ -15,6 +17,7 @@ from mellow_link.infra.database import (
     Base,
     ModernizationProject,
     PilotAuditEvent,
+    PilotCommandResult,
     PilotStateRecord,
     User,
     UserRole,
@@ -28,6 +31,7 @@ from mellow_link.services.pilot_state import (
     IdempotencyKeyReusedError,
     MarkDeliveredRequest,
     PilotAccessDeniedError,
+    PilotEvent,
     PilotNotFoundError,
     PilotResultNotReadyError,
     PilotStateService,
@@ -38,6 +42,7 @@ from mellow_link.services.pilot_state import (
     ProjectRunNotFoundError,
     RequestChangesRequest,
     TransitionPilotRequest,
+    resolve_transition,
 )
 from mellow_link.services.project_results.archive import (
     build_project_result_archive_paths,
@@ -184,6 +189,16 @@ def transition_request(version: int, key: str) -> TransitionPilotRequest:
     return TransitionPilotRequest(expected_version=version, idempotency_key=key)
 
 
+def write_delivery_docx(service, pilot) -> None:
+    docx_path = build_project_result_archive_paths(
+        archive_root=service.archive_root,
+        project_id=pilot.project_id,
+        run_id=pilot.run_id,
+    )["docx"]
+    docx_path.parent.mkdir(parents=True, exist_ok=True)
+    docx_path.write_bytes(b"synthetic-docx-presence-sentinel")
+
+
 def advance_to_under_review(service, owner, reviewer, project):
     pilot = create_pilot(service, owner, project)
     pilot = service.submit(
@@ -257,6 +272,7 @@ def test_happy_path_records_state_version_and_audit(
     pilot = service.approve(
         reviewer, pilot.pilot_id, transition_request(2, "approve-happy")
     )
+    write_delivery_docx(service, pilot)
     pilot = service.mark_delivered(
         reviewer,
         pilot.pilot_id,
@@ -362,6 +378,7 @@ def test_duplicate_approval_replays_original_result_without_new_audit(
     pilot = advance_to_under_review(service, owner, reviewer, project)
     request = transition_request(2, "approve-retry")
     approved = service.approve(reviewer, pilot.pilot_id, request)
+    write_delivery_docx(service, approved)
     delivered = service.mark_delivered(
         reviewer,
         pilot.pilot_id,
@@ -411,6 +428,7 @@ def test_create_and_delivery_retries_are_idempotent(
     pilot = service.approve(
         reviewer, pilot.pilot_id, transition_request(2, "retry-approve")
     )
+    write_delivery_docx(service, pilot)
     request = MarkDeliveredRequest(expected_version=3, idempotency_key="deliver-retry")
     delivered = service.mark_delivered(reviewer, pilot.pilot_id, request)
     assert service.mark_delivered(reviewer, pilot.pilot_id, request) == delivered
@@ -496,8 +514,71 @@ def test_permissions_and_missing_pilot_are_consistent(actors, project, service):
         service.get(guest, pilot.pilot_id)
     with pytest.raises(PilotAccessDeniedError):
         service.list_queue(owner)
+    with pytest.raises(PilotAccessDeniedError):
+        service.get_audit_history(owner, pilot.pilot_id)
     with pytest.raises(PilotNotFoundError):
         service.get(reviewer, "missing-pilot")
+
+
+def test_non_operator_cannot_review_approve_request_changes_or_deliver(
+    actors, project, service
+):
+    owner, other, reviewer, *_ = actors
+    pilot = create_pilot(service, owner, project)
+    pilot = service.submit(
+        owner, pilot.pilot_id, transition_request(0, "permission-submit")
+    )
+    with pytest.raises(PilotAccessDeniedError):
+        service.start_review(
+            other, pilot.pilot_id, transition_request(1, "permission-review")
+        )
+
+    pilot = service.start_review(
+        reviewer, pilot.pilot_id, transition_request(1, "operator-review")
+    )
+    for operation in (
+        lambda: service.approve(
+            owner, pilot.pilot_id, transition_request(2, "permission-approve")
+        ),
+        lambda: service.request_changes(
+            owner,
+            pilot.pilot_id,
+            RequestChangesRequest(
+                expected_version=2,
+                idempotency_key="permission-changes",
+                reason="Synthetic permission boundary.",
+            ),
+        ),
+        lambda: service.mark_delivered(
+            owner,
+            pilot.pilot_id,
+            MarkDeliveredRequest(
+                expected_version=2, idempotency_key="permission-deliver"
+            ),
+        ),
+    ):
+        with pytest.raises(PilotAccessDeniedError):
+            operation()
+
+
+def test_change_reason_is_not_written_to_application_logs(
+    actors, project, service, caplog
+):
+    owner, _, reviewer, *_ = actors
+    pilot = advance_to_under_review(service, owner, reviewer, project)
+    sentinel = "synthetic-sensitive-review-reason"
+
+    service.request_changes(
+        reviewer,
+        pilot.pilot_id,
+        RequestChangesRequest(
+            expected_version=2,
+            idempotency_key="log-boundary-changes",
+            reason=sentinel,
+        ),
+    )
+
+    assert sentinel not in caplog.text
 
 
 def test_queue_classification_pagination_and_privacy(
@@ -516,13 +597,7 @@ def test_queue_classification_pagination_and_privacy(
     service.start_review(
         reviewer, second.pilot_id, transition_request(1, "queue-start-two")
     )
-    docx_path = build_project_result_archive_paths(
-        archive_root=service.archive_root,
-        project_id=project.id,
-        run_id=project.run_id,
-    )["docx"]
-    docx_path.parent.mkdir(parents=True, exist_ok=True)
-    docx_path.write_bytes(b"synthetic-docx-presence-sentinel")
+    write_delivery_docx(service, first)
 
     first_page = service.list_queue(reviewer, limit=1)
     second_page = service.list_queue(reviewer, limit=1, cursor=first_page.next_cursor)
@@ -571,6 +646,7 @@ def test_changes_approved_and_delivered_queue_membership(actors, project, servic
     approved = service.list_queue(reviewer, statuses=[PilotStatus.APPROVED])
     assert [item.pilot_id for item in approved.items] == [pilot.pilot_id]
 
+    write_delivery_docx(service, pilot)
     pilot = service.mark_delivered(
         reviewer,
         pilot.pilot_id,
@@ -637,6 +713,345 @@ def test_state_and_audit_are_atomic_when_audit_insert_fails(
         .count()
         == 0
     )
+
+
+def test_authoritative_transition_matrix_has_no_extra_states_or_events():
+    expected = {
+        PilotEvent.SUBMIT: (PilotStatus.DRAFT, PilotStatus.READY_FOR_REVIEW),
+        PilotEvent.START_REVIEW: (
+            PilotStatus.READY_FOR_REVIEW,
+            PilotStatus.UNDER_REVIEW,
+        ),
+        PilotEvent.APPROVE: (PilotStatus.UNDER_REVIEW, PilotStatus.APPROVED),
+        PilotEvent.REQUEST_CHANGES: (
+            PilotStatus.UNDER_REVIEW,
+            PilotStatus.CHANGES_REQUESTED,
+        ),
+        PilotEvent.RESUBMIT: (
+            PilotStatus.CHANGES_REQUESTED,
+            PilotStatus.READY_FOR_REVIEW,
+        ),
+        PilotEvent.DELIVER: (PilotStatus.APPROVED, PilotStatus.DELIVERED),
+    }
+
+    assert {status.value for status in PilotStatus} == {
+        "draft",
+        "ready_for_review",
+        "under_review",
+        "changes_requested",
+        "approved",
+        "delivered",
+    }
+    assert set(PilotEvent) == set(expected)
+    for event_name, (from_status, to_status) in expected.items():
+        spec = resolve_transition(from_status, event_name)
+        assert (spec.from_status, spec.to_status) == (from_status, to_status)
+        for other_status in PilotStatus:
+            if other_status == from_status:
+                continue
+            with pytest.raises(PilotTransitionNotAllowedError):
+                resolve_transition(other_status, event_name)
+
+
+def test_delivered_is_terminal_for_every_command(actors, project, service, db_session):
+    owner, _, reviewer, *_ = actors
+    pilot = advance_to_under_review(service, owner, reviewer, project)
+    pilot = service.approve(
+        reviewer, pilot.pilot_id, transition_request(2, "terminal-approve")
+    )
+    write_delivery_docx(service, pilot)
+    delivered = service.mark_delivered(
+        reviewer,
+        pilot.pilot_id,
+        MarkDeliveredRequest(expected_version=3, idempotency_key="terminal-deliver"),
+    )
+
+    calls = [
+        lambda: service.submit(
+            reviewer, delivered.pilot_id, transition_request(4, "terminal-submit")
+        ),
+        lambda: service.start_review(
+            reviewer, delivered.pilot_id, transition_request(4, "terminal-review")
+        ),
+        lambda: service.approve(
+            reviewer, delivered.pilot_id, transition_request(4, "terminal-approve-2")
+        ),
+        lambda: service.request_changes(
+            reviewer,
+            delivered.pilot_id,
+            RequestChangesRequest(
+                expected_version=4,
+                idempotency_key="terminal-changes",
+                reason="Synthetic terminal-state check.",
+            ),
+        ),
+        lambda: service.resubmit(
+            reviewer, delivered.pilot_id, transition_request(4, "terminal-resubmit")
+        ),
+        lambda: service.mark_delivered(
+            reviewer,
+            delivered.pilot_id,
+            MarkDeliveredRequest(
+                expected_version=4, idempotency_key="terminal-deliver-2"
+            ),
+        ),
+    ]
+    for call in calls:
+        with pytest.raises(PilotTransitionNotAllowedError):
+            call()
+
+    stored = service.get(owner, delivered.pilot_id)
+    assert stored.status == PilotStatus.DELIVERED
+    assert stored.version == 4
+    assert (
+        db_session.query(PilotAuditEvent)
+        .filter(PilotAuditEvent.pilot_id == delivered.pilot_id)
+        .count()
+        == 5
+    )
+
+
+def test_delivery_requires_existing_docx_without_state_change(
+    actors, project, service, db_session
+):
+    owner, _, reviewer, *_ = actors
+    pilot = advance_to_under_review(service, owner, reviewer, project)
+    pilot = service.approve(
+        reviewer, pilot.pilot_id, transition_request(2, "missing-docx-approve")
+    )
+
+    with pytest.raises(PilotResultNotReadyError):
+        service.mark_delivered(
+            reviewer,
+            pilot.pilot_id,
+            MarkDeliveredRequest(
+                expected_version=3, idempotency_key="missing-docx-deliver"
+            ),
+        )
+
+    stored = service.get(owner, pilot.pilot_id)
+    assert stored.status == PilotStatus.APPROVED
+    assert stored.version == 3
+    assert (
+        db_session.query(PilotAuditEvent)
+        .filter(PilotAuditEvent.pilot_id == pilot.pilot_id)
+        .count()
+        == 4
+    )
+    assert (
+        db_session.query(PilotCommandResult)
+        .filter(PilotCommandResult.idempotency_key == "missing-docx-deliver")
+        .count()
+        == 0
+    )
+
+
+def test_idempotent_approval_replays_after_new_session(
+    database, db_session, actors, project, service, tmp_path
+):
+    owner, _, reviewer, *_ = actors
+    pilot = advance_to_under_review(service, owner, reviewer, project)
+    request = transition_request(2, "restart-approval")
+    approved = service.approve(reviewer, pilot.pilot_id, request)
+    reviewer_id = reviewer.id
+
+    _, session_factory = database
+    restarted_session = session_factory()
+    try:
+        restarted_reviewer = restarted_session.get(User, reviewer_id)
+        restarted_service = PilotStateService(
+            restarted_session, archive_root=tmp_path / "project-results"
+        )
+        assert (
+            restarted_service.approve(restarted_reviewer, pilot.pilot_id, request)
+            == approved
+        )
+        assert (
+            restarted_session.query(PilotAuditEvent)
+            .filter(
+                PilotAuditEvent.pilot_id == pilot.pilot_id,
+                PilotAuditEvent.event_type == "pilot_approved",
+            )
+            .count()
+            == 1
+        )
+    finally:
+        restarted_session.close()
+
+
+def test_competing_approval_and_change_request_have_one_winner(
+    database, actors, project, service, tmp_path
+):
+    owner, _, reviewer, *_ = actors
+    pilot = advance_to_under_review(service, owner, reviewer, project)
+    reviewer_id = reviewer.id
+    pilot_id = pilot.pilot_id
+    _, session_factory = database
+    barrier = Barrier(2)
+
+    def run(command: str):
+        session = session_factory()
+        try:
+            actor = session.get(User, reviewer_id)
+            contender = PilotStateService(
+                session, archive_root=tmp_path / "project-results"
+            )
+            contender.get(actor, pilot_id)
+            barrier.wait()
+            if command == "approve":
+                return contender.approve(
+                    actor, pilot_id, transition_request(2, "race-approve")
+                )
+            return contender.request_changes(
+                actor,
+                pilot_id,
+                RequestChangesRequest(
+                    expected_version=2,
+                    idempotency_key="race-changes",
+                    reason="Synthetic concurrent review decision.",
+                ),
+            )
+        except PilotVersionConflictError as exc:
+            return exc
+        finally:
+            session.close()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(run, ("approve", "changes")))
+
+    successes = [result for result in results if not isinstance(result, Exception)]
+    conflicts = [
+        result for result in results if isinstance(result, PilotVersionConflictError)
+    ]
+    assert len(successes) == 1
+    assert len(conflicts) == 1
+
+    db_session = session_factory()
+    try:
+        stored = db_session.get(PilotStateRecord, pilot_id)
+        assert stored.status in {
+            PilotStatus.APPROVED.value,
+            PilotStatus.CHANGES_REQUESTED.value,
+        }
+        assert stored.version == 3
+        decision_events = (
+            db_session.query(PilotAuditEvent)
+            .filter(
+                PilotAuditEvent.pilot_id == pilot_id,
+                PilotAuditEvent.event_type.in_(
+                    ["pilot_approved", "pilot_changes_requested"]
+                ),
+            )
+            .all()
+        )
+        assert len(decision_events) == 1
+        assert decision_events[0].to_status == stored.status
+    finally:
+        db_session.close()
+
+
+def test_idempotent_concurrent_approval_creates_one_result(
+    database, actors, project, service, tmp_path
+):
+    owner, _, reviewer, *_ = actors
+    pilot = advance_to_under_review(service, owner, reviewer, project)
+    reviewer_id = reviewer.id
+    pilot_id = pilot.pilot_id
+    _, session_factory = database
+    barrier = Barrier(2)
+
+    def approve_once():
+        session = session_factory()
+        try:
+            actor = session.get(User, reviewer_id)
+            contender = PilotStateService(
+                session, archive_root=tmp_path / "project-results"
+            )
+            contender.get(actor, pilot_id)
+            barrier.wait()
+            return contender.approve(
+                actor, pilot_id, transition_request(2, "same-race-approval")
+            )
+        finally:
+            session.close()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _index: approve_once(), range(2)))
+
+    assert results[0] == results[1]
+    session = session_factory()
+    try:
+        assert (
+            session.query(PilotAuditEvent)
+            .filter(
+                PilotAuditEvent.pilot_id == pilot_id,
+                PilotAuditEvent.event_type == "pilot_approved",
+            )
+            .count()
+            == 1
+        )
+        assert (
+            session.query(PilotCommandResult)
+            .filter(
+                PilotCommandResult.actor_id == reviewer_id,
+                PilotCommandResult.idempotency_key == "same-race-approval",
+            )
+            .count()
+            == 1
+        )
+    finally:
+        session.close()
+
+
+def test_state_and_audit_roll_back_when_idempotency_result_insert_fails(
+    db_session, actors, project, service
+):
+    owner, _, reviewer, *_ = actors
+    pilot = advance_to_under_review(service, owner, reviewer, project)
+    db_session.execute(text("""
+            CREATE TRIGGER reject_pilot_command_result
+            BEFORE INSERT ON pilot_command_results
+            WHEN NEW.idempotency_key = 'reject-command-result'
+            BEGIN
+                SELECT RAISE(ABORT, 'synthetic command result failure');
+            END;
+            """))
+    db_session.commit()
+
+    with pytest.raises(PilotStorageError):
+        service.approve(
+            reviewer,
+            pilot.pilot_id,
+            transition_request(2, "reject-command-result"),
+        )
+
+    db_session.expire_all()
+    stored = db_session.get(PilotStateRecord, pilot.pilot_id)
+    assert stored.status == PilotStatus.UNDER_REVIEW.value
+    assert stored.version == 2
+    assert (
+        db_session.query(PilotAuditEvent)
+        .filter(
+            PilotAuditEvent.pilot_id == pilot.pilot_id,
+            PilotAuditEvent.event_type == "pilot_approved",
+        )
+        .count()
+        == 0
+    )
+
+
+def test_safe_operator_and_actor_references_do_not_expose_database_ids(
+    actors, project, service
+):
+    owner, _, reviewer, *_ = actors
+    pilot = advance_to_under_review(service, owner, reviewer, project)
+    queue_item = service.list_queue(reviewer).items[0]
+    audit_event = service.get_audit_history(reviewer, pilot.pilot_id).items[-1]
+
+    assert queue_item.reviewer_display.startswith("operator-")
+    assert queue_item.reviewer_display != f"operator-{reviewer.id}"
+    assert audit_event.actor_ref.startswith("actor-")
+    assert audit_event.actor_ref != f"actor-{reviewer.id}"
 
 
 def test_schema_contains_persistent_pilot_tables(database):
@@ -711,6 +1126,8 @@ def test_router_exposes_create_transition_queue_and_safe_errors(
     )
     assert conflict_response.status_code == 409
     assert conflict_response.json()["detail"]["code"] == "pilot_transition_not_allowed"
+    assert "traceback" not in conflict_response.text.lower()
+    assert "sqlalchemy" not in conflict_response.text.lower()
 
     invalid_status_response = client.get("/pilot-states/queue?status=rejected")
     assert invalid_status_response.status_code == 422
