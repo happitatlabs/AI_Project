@@ -486,6 +486,8 @@ class PilotStateService:
     ) -> AuditPage:
         self._require_operator(actor)
         pilot = self._get_pilot(pilot_id)
+        project = self._get_project(pilot.project_id)
+        self._require_project_access(actor, project)
         limit = _validated_limit(limit)
         query = self.db.query(PilotAuditEvent).filter(
             PilotAuditEvent.pilot_id == pilot.pilot_id
@@ -558,6 +560,8 @@ class PilotStateService:
                 raise PilotAccessDeniedError("Only the assigned reviewer may decide")
         if event in {PilotEvent.SUBMIT, PilotEvent.RESUBMIT}:
             self._require_result_ready(pilot.run_id)
+        if event == PilotEvent.DELIVER and not self._delivery_docx_available(pilot):
+            raise PilotResultNotReadyError("Pilot delivery document is not available")
 
         now = self._now()
         event_id = uuid.uuid4().hex
@@ -811,13 +815,10 @@ class PilotStateService:
     def _queue_item(
         self, pilot: PilotStateRecord, project: ModernizationProject
     ) -> QueueItem:
-        archive_paths = build_project_result_archive_paths(
-            archive_root=self.archive_root,
-            project_id=pilot.project_id,
-            run_id=pilot.run_id,
-        )
         reviewer_display = (
-            f"operator-{pilot.reviewer_id}" if pilot.reviewer_id is not None else None
+            _safe_ref("operator", str(pilot.reviewer_id))
+            if pilot.reviewer_id is not None
+            else None
         )
         return QueueItem(
             pilot_id=pilot.pilot_id,
@@ -833,8 +834,16 @@ class PilotStateService:
             review_started_at=_optional_utc(pilot.review_started_at),
             approved_at=_optional_utc(pilot.approved_at),
             delivered_at=_optional_utc(pilot.delivered_at),
-            docx_available=archive_paths["docx"].is_file(),
+            docx_available=self._delivery_docx_available(pilot),
         )
+
+    def _delivery_docx_available(self, pilot: PilotStateRecord) -> bool:
+        archive_paths = build_project_result_archive_paths(
+            archive_root=self.archive_root,
+            project_id=pilot.project_id,
+            run_id=pilot.run_id,
+        )
+        return archive_paths["docx"].is_file()
 
     def _now(self) -> datetime:
         value = self.now_provider()
@@ -870,7 +879,7 @@ def _audit_view(event: PilotAuditEvent) -> AuditEventView:
         event_type=event.event_type,
         from_status=PilotStatus(event.from_status) if event.from_status else None,
         to_status=PilotStatus(event.to_status),
-        actor_ref=f"actor-{event.actor_id}",
+        actor_ref=_safe_ref("actor", str(event.actor_id)),
         occurred_at=_as_utc(event.occurred_at),
         reason=event.reason,
         result_version=event.result_version,
