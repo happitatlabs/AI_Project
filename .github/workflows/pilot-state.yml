@@ -1,0 +1,51 @@
+name: pilot-state
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/pilot-state.yml"
+      - "core/mellow_chat_runtime/requirements-test.txt"
+      - "core/mellow_link/infra/database.py"
+      - "core/mellow_link/infra/__init__.py"
+      - "core/mellow_link/main.py"
+      - "core/mellow_link/routers/pilot_state.py"
+      - "core/mellow_link/services/pilot_state.py"
+      - "core/mellow_link/tests/test_pilot_state_and_approval_queue.py"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/pilot-state.yml"
+      - "core/mellow_chat_runtime/requirements-test.txt"
+      - "core/mellow_link/infra/database.py"
+      - "core/mellow_link/infra/__init__.py"
+      - "core/mellow_link/main.py"
+      - "core/mellow_link/routers/pilot_state.py"
+      - "core/mellow_link/services/pilot_state.py"
+      - "core/mellow_link/tests/test_pilot_state_and_approval_queue.py"
+
+jobs:
+  pilot-state:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core/mellow_link
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install focused test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r ../mellow_chat_runtime/requirements-test.txt
+
+      - name: Run persistent Pilot state contract tests
+        run: |
+          python -m pytest -q --basetemp=.pilot-state-pytest \
+            tests/test_pilot_state_and_approval_queue.py
