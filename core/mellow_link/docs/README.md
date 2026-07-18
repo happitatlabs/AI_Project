@@ -153,6 +153,13 @@
 
 ### 제품 운영 / 계획
 
+- 파일럿 상태 및 운영자 승인 큐 설계 패키지
+  - [Pilot State Machine](pilot-state-machine.md): 상태, 이벤트, 허용·금지 전이의 단일 기준
+  - [Pilot State Model](pilot-state-model.md): Pilot aggregate와 감사 이벤트의 논리 모델
+  - [Approval Queue Design](approval-queue-design.md): 운영자 큐, 권한 경계, UX 계약
+  - [Pilot API and Service Contract](pilot-api-contract.md): transport-neutral service 계약과 오류 분류
+  - [Pilot State and Approval Queue Test Contract](pilot-test-contract.md): 구현 PR의 acceptance 기준
+  - [ADR: Persistent Pilot State and Approval Queue](ADR-persistent-pilot-state.md): 영속 상태와 파생 큐를 선택한 결정 기록
 - [PILOT_CONTRACT_READINESS_PLAN.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/PILOT_CONTRACT_READINESS_PLAN.md)
   - 파일럿 계약 준비 상태와 남은 작업
 - [PYTEST_REPRODUCE.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/PYTEST_REPRODUCE.md)
