@@ -160,6 +160,15 @@
   - [Pilot API and Service Contract](pilot-api-contract.md): transport-neutral service 계약과 오류 분류
   - [Pilot State and Approval Queue Test Contract](pilot-test-contract.md): 구현 PR의 acceptance 기준
   - [ADR: Persistent Pilot State and Approval Queue](ADR-persistent-pilot-state.md): 영속 상태와 파생 큐를 선택한 결정 기록
+- 납품 준비물 체크리스트 및 패키지 조립 설계 패키지
+  - [Delivery Preparedness Checklist Model](delivery-checklist-model.md): template, instance, item 상태와 waiver 계약
+  - [Delivery Readiness Contract](delivery-readiness-contract.md): Pilot/checklist/artifact 기반 파생 readiness 규칙
+  - [Delivery Package Manifest Contract](delivery-package-manifest.md): 안전한 ZIP entry, manifest, checksum 계약
+  - [Delivery Package Assembly Lifecycle](delivery-package-assembly.md): assembly 상태, idempotency, 재시작 복구
+  - [Delivery Checklist and Package Service Contract](delivery-package-api-contract.md): 권한, version, 오류, service operation
+  - [Delivery Preparedness Operator UX Contract](delivery-package-operator-ux.md): 운영자 흐름, 상태, 접근성 계약
+  - [ADR: Persistent Delivery Checklist and Package Assembly](ADR-delivery-package-persistence.md): persistence와 DB/filesystem transaction 결정
+  - [Delivery Checklist and Package Acceptance Test Contract](delivery-package-test-contract.md): 구현 PR acceptance 기준
 - [PILOT_CONTRACT_READINESS_PLAN.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/PILOT_CONTRACT_READINESS_PLAN.md)
   - 파일럿 계약 준비 상태와 남은 작업
 - [PYTEST_REPRODUCE.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/PYTEST_REPRODUCE.md)
