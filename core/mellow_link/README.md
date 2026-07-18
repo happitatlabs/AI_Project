@@ -37,3 +37,53 @@ python -c "from mellow_link.infra.database import init_db; init_db()"
 cd C:\Users\Hyein\ClaudeAI\AI_Project\core\mellow_link
 python -m pytest tests/test_daily_checkin_core.py
 ```
+
+## Persistent Pilot State and Operator Approval Queue
+
+Priority 2는 프로젝트의 특정 분석 run에 대해 검토, 승인, 변경 요청, 전달 완료 상태를 SQLite에 영속 저장한다. 분석 실행 상태와 분리된 상태 축이며, 기존 메모리 기반 `run_approval`을 대체하거나 변경하지 않는다.
+
+상태 흐름:
+
+```text
+draft -> ready_for_review -> under_review -> approved -> delivered
+                              |
+                              -> changes_requested -> ready_for_review
+```
+
+모든 생성 및 상태 변경은 idempotency key를 요구한다. 상태 변경은 예상 version을 검사하며, 상태 변경·감사 이벤트·idempotency 결과는 하나의 transaction으로 저장된다. 동일 요청의 재시도는 최초 결과를 반환하고 version이나 감사 이벤트를 추가하지 않는다.
+
+권한 매핑은 기존 역할을 재사용한다.
+
+- 일반 사용자: 자신이 소유한 프로젝트/run의 Pilot 생성, 조회, 제출 및 재제출
+- 관리자: 운영자 queue 조회, 검토 시작, 승인, 변경 요청, 전달 완료 및 감사 이력 조회
+- Guest: Pilot 기능 접근 불가
+
+주요 API:
+
+- `POST /pilot-states`
+- `GET /pilot-states/{pilot_id}`
+- `POST /pilot-states/{pilot_id}/submit`
+- `POST /pilot-states/{pilot_id}/start-review`
+- `POST /pilot-states/{pilot_id}/approve`
+- `POST /pilot-states/{pilot_id}/request-changes`
+- `POST /pilot-states/{pilot_id}/resubmit`
+- `POST /pilot-states/{pilot_id}/deliver`
+- `GET /pilot-states/queue/pending`
+- `GET /pilot-states/queue/delivered`
+- `GET /pilot-states/{pilot_id}/audit`
+
+Queue와 감사 응답은 보고서 원문, 원본 파일명, 내부 파일 경로, bundle ID를 포함하지 않는다. 검토용 DOCX는 존재 여부만 제공한다. `deliver`는 기존 프로젝트/run 보관 경로에 DOCX가 실제로 존재할 때만 허용하며 경로 자체는 응답하지 않는다.
+
+새 테이블은 기존 migration 방식과 동일하게 앱 시작 또는 `init_db()` 호출 시 생성된다.
+
+```powershell
+cd core
+python -c "from mellow_link.infra.database import init_db; init_db()"
+```
+
+집중 테스트:
+
+```powershell
+cd core\mellow_link
+python -m pytest tests/test_pilot_state_and_approval_queue.py
+```

@@ -1,6 +1,6 @@
 # database.py — The "Universal Adapter" Version
-from datetime import datetime, timedelta, date
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Float, Date, UniqueConstraint
+from datetime import datetime, timedelta, date, timezone
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Float, Date, UniqueConstraint, CheckConstraint
 from sqlalchemy.orm import sessionmaker, relationship, Session, declarative_base
 from pathlib import Path
 import os
@@ -19,7 +19,7 @@ if not hasattr(bcrypt, '__about__'):
 from passlib.context import CryptContext
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
-from fastapi import Depends, HTTPException, status, Header
+from fastapi import Depends, HTTPException, Header
 
 # =========================
 # Configuration
@@ -364,6 +364,120 @@ class AnalysisContext(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class PilotStateRecord(Base):
+    """Persistent review, approval, and delivery state for one project run."""
+
+    __tablename__ = "pilot_states"
+
+    pilot_id = Column(String(40), primary_key=True, index=True)
+    project_id = Column(
+        String(40), ForeignKey("modernization_projects.id"), nullable=False, index=True
+    )
+    run_id = Column(
+        String(100), ForeignKey("agent_runs.run_id"), nullable=False, index=True
+    )
+    status = Column(String(50), nullable=False, index=True)
+    version = Column(Integer, nullable=False, default=0)
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    review_requested_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    reviewer_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    review_started_at = Column(DateTime(timezone=True), nullable=True)
+    approved_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    delivered_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    delivered_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    change_request_reason = Column(Text, nullable=True)
+    delivery_reference = Column(String(500), nullable=True)
+    last_transition_id = Column(String(40), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id", "run_id", name="uq_pilot_states_project_run"
+        ),
+        CheckConstraint(
+            "status IN ('draft', 'ready_for_review', 'under_review', "
+            "'changes_requested', 'approved', 'delivered')",
+            name="ck_pilot_states_status",
+        ),
+        CheckConstraint("version >= 0", name="ck_pilot_states_version"),
+    )
+
+
+class PilotAuditEvent(Base):
+    """Append-only audit event written atomically with a Pilot state change."""
+
+    __tablename__ = "pilot_audit_events"
+
+    event_id = Column(String(40), primary_key=True, index=True)
+    pilot_id = Column(
+        String(40), ForeignKey("pilot_states.pilot_id"), nullable=False, index=True
+    )
+    project_id = Column(
+        String(40), ForeignKey("modernization_projects.id"), nullable=False, index=True
+    )
+    run_id = Column(
+        String(100), ForeignKey("agent_runs.run_id"), nullable=False, index=True
+    )
+    event_type = Column(String(80), nullable=False, index=True)
+    from_status = Column(String(50), nullable=True)
+    to_status = Column(String(50), nullable=False)
+    actor_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    occurred_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    reason = Column(Text, nullable=True)
+    idempotency_key = Column(String(200), nullable=False)
+    result_version = Column(Integer, nullable=False)
+    metadata_json = Column(Text, nullable=False, default="{}")
+
+    __table_args__ = (
+        CheckConstraint(
+            "from_status IS NULL OR from_status IN ('draft', 'ready_for_review', "
+            "'under_review', 'changes_requested', 'approved', 'delivered')",
+            name="ck_pilot_audit_from_status",
+        ),
+        CheckConstraint(
+            "to_status IN ('draft', 'ready_for_review', 'under_review', "
+            "'changes_requested', 'approved', 'delivered')",
+            name="ck_pilot_audit_to_status",
+        ),
+        CheckConstraint("result_version >= 0", name="ck_pilot_audit_version"),
+    )
+
+
+class PilotCommandResult(Base):
+    """Stored response used to replay an idempotent Pilot command."""
+
+    __tablename__ = "pilot_command_results"
+
+    id = Column(Integer, primary_key=True, index=True)
+    actor_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    idempotency_key = Column(String(200), nullable=False)
+    operation = Column(String(80), nullable=False)
+    request_hash = Column(String(64), nullable=False)
+    pilot_id = Column(
+        String(40), ForeignKey("pilot_states.pilot_id"), nullable=False, index=True
+    )
+    result_version = Column(Integer, nullable=False)
+    response_json = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "actor_id", "idempotency_key", name="uq_pilot_commands_actor_key"
+        ),
+        CheckConstraint("result_version >= 0", name="ck_pilot_commands_version"),
+    )
+
+
 # =========================
 # Helper Functions
 # =========================
@@ -413,6 +527,8 @@ def init_db():
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_analysis_contexts_safe_bundle ON analysis_contexts(safe_bundle_id)"))
             conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_daily_states_user_date ON daily_states(user_id, date)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_daily_states_user_date ON daily_states(user_id, date)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_pilot_states_status_updated ON pilot_states(status, updated_at)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_pilot_audit_pilot_occurred ON pilot_audit_events(pilot_id, occurred_at)"))
             conn.commit()
     except Exception:
         pass  # index already exists
