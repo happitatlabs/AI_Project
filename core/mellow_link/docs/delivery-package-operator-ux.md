@@ -1,6 +1,6 @@
 # Delivery Preparedness Operator UX Contract
 
-- 문서 상태: Draft for implementation review
+- 문서 상태: Implementation contract
 - 대상 사용자: 납품 준비를 검증하고 package를 조립하는 내부 운영자
 - 비대상 범위: HTML/JavaScript 구현, 디자인 시스템 변경
 
@@ -13,7 +13,7 @@ flowchart TD
     C -->|not_ready 또는 stale| D[Blocking item 해결 또는 허용된 waiver]
     D --> B
     C -->|ready| E[Package 조립 요청]
-    E --> F[pending / assembling]
+    E --> F[pending / assembling 동기 처리]
     F -->|실패| G[안전한 오류와 재시도]
     G --> E
     F -->|성공| H[Manifest와 무결성 확인]
@@ -91,12 +91,12 @@ flowchart TD
 - assembled가 곧 delivered는 아니다. 실제 전달 후 기존 `deliver` action을 명시적으로 실행한다.
 - `delivered` 화면은 package/manifest 조회만 제공하며 mutation을 제공하지 않는다.
 
-## Open Decisions
+## 구현 결정과 비차단 후속 범위
 
-- 실제 화면 구조와 route
-- long-running assembly progress 전달 방식(polling 등)
-- internal preview 권한의 기존 정책 매핑
-- delivered 정정 UX
+- Phase 3 구현 PR은 service와 API 계약까지만 제공하며 새 HTML 화면은 만들지 않는다. 기존 운영 화면의 후속 UI는 이 상태/행동 계약을 사용한다.
+- assembly는 동기 요청이다. 브라우저 연결이 끊기면 `GetPackageAssembly`로 최종 상태를 조회하며 polling transport나 push channel은 추가하지 않는다.
+- external-safe preview는 프로젝트 소유자와 `ADMIN`이 읽을 수 있고, verify/waiver/assembly/download는 `ADMIN`만 수행한다.
+- delivered 정정 UI는 제공하지 않는다. 새 run/Pilot 생성은 기존 프로젝트 운영 흐름에서 수행하며 별도 정책 PR로 다룬다.
 
 ## 관련 문서
 

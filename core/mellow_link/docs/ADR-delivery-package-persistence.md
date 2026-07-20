@@ -1,9 +1,9 @@
 # ADR: Persistent Delivery Checklist and Package Assembly
 
-- 상태: Proposed
+- 상태: Accepted for Priority 3 implementation
 - 날짜: 2026-07-18
 - 결정 범위: checklist, readiness evidence, package assembly, manifest, audit, idempotency
-- 비결정 범위: DB/ORM, 물리 table, migration 도구, object storage, UI
+- 비결정 범위: UI 구현, 장기 파괴적 retention, delivered 정정/재납품 자동화
 
 ## Context
 
@@ -24,7 +24,7 @@ Priority 1은 결정적 project/run archive에 고객 검토용 DOCX를 만들�
 2. Pilot별 `ChecklistInstance`와 item validation snapshot
 3. checklist/package mutation의 append-only audit
 4. 영속 idempotency command result
-5. `PackageAssembly` request/attempt 상태와 worker lease
+5. `PackageAssembly` request/attempt 상태와 동기 claim/recovery 정보
 6. assembled package의 immutable manifest와 opaque artifact reference
 
 Readiness는 저장된 수동 boolean이 아니라 Pilot/checklist/artifact version에서 파생한다. Approval Queue와 Package Assembly Queue도 각 권위 상태의 read model이다.
@@ -45,7 +45,7 @@ Readiness는 저장된 수동 boolean이 아니라 Pilot/checklist/artifact vers
 - checklist/item 상태 변경 + checklist version + audit + idempotency result
 - waiver + actor/time/reason + audit + idempotency result
 - assembly request + source snapshot + audit + idempotency result
-- worker state/lease/version 변경 + audit
+- assembly state/version 변경 + audit
 - manifest metadata + final artifact reference + `assembled` + audit
 - failure code + `failed` + audit
 - 새 package 완료 + 이전 package `superseded` 표시
@@ -56,7 +56,7 @@ Readiness는 저장된 수동 boolean이 아니라 Pilot/checklist/artifact vers
 
 DB와 filesystem의 분산 transaction을 가장하지 않는다. 비공개 staging, 완성 후 재열기/검증, 동일 filesystem atomic rename, 최종 DB commit 순서로 외부 visibility를 제어한다. DB가 `assembled`가 아니면 download reference를 발급하지 않는다.
 
-재시작 recovery는 만료 lease, staging file, final file, manifest/checksum record를 비교한다. 불완전 상태를 성공으로 자동 추측하지 않으며 안전한 failure/recovery audit를 남긴다.
+재시작 recovery는 10분을 넘긴 `assembling`, staging file, final file, manifest/checksum record를 비교한다. 불완전 상태를 성공으로 자동 추측하지 않으며 안전한 failure/recovery audit를 남긴다.
 
 ## 고려한 대안
 
@@ -99,15 +99,56 @@ Priority 2 의미를 유지하고 재시작, 동시성, audit, package version�
 - template/policy version 관리가 추가된다.
 - retention 정책이 정해지기 전 storage가 증가할 수 있다.
 
-## Open Decisions
+## 구현 결정
 
-- DB, ORM, 물리 table/index 및 migration 도구
-- ID 생성 방식과 actor capability 매핑
-- worker/lease 구현과 storage backend
-- package/checklist/audit/idempotency 보존 기간
-- orphan cleanup과 package size limit 구체 값
-- delivered 정정 및 영구 취소/재납품 정책
-- 현재 Priority 2 `deliver`에 assembled package를 필수화할지 여부
+### Persistence와 additive migration
+
+- 기존 SQLAlchemy ORM, SQLite, `Base.metadata.create_all()` additive schema 방식을 사용한다. 별도 ORM/migration framework와 파괴적 `ALTER/DROP`을 도입하지 않는다.
+- opaque ID는 기존 Pilot과 같은 UUID4 hex를 사용하며 external response에는 hash 기반 safe reference만 제공한다.
+- 물리 table은 다음과 같다.
+
+| table | primary/foreign keys와 핵심 constraint |
+| --- | --- |
+| `delivery_checklist_templates` | `template_id` PK, `(template_key, template_version)` unique, immutable version metadata |
+| `delivery_checklist_template_items` | `template_item_id` PK, template FK, `(template_id, item_key)` unique |
+| `delivery_checklists` | `checklist_id` PK, Pilot/project/run/template FK, `(pilot_id, template_id, template_version)` unique, `version >= 0` |
+| `delivery_checklist_items` | `checklist_item_id` PK, checklist FK, `(checklist_id, item_key)` unique, canonical status/version constraints |
+| `delivery_package_assemblies` | `assembly_id` PK, checklist/Pilot/project/run FK, canonical fingerprint unique for non-superseded lifecycle, status/version/attempt constraints |
+| `delivery_packages` | `package_id` PK, assembly FK unique, immutable manifest JSON, opaque storage reference, byte size/checksum |
+| `delivery_audit_events` | `event_id` PK, Pilot/project/run FK, append-only safe event metadata |
+| `delivery_command_results` | integer PK, actor FK, `(actor_id, idempotency_key)` unique, operation/request hash/result JSON |
+| `delivery_download_references` | `reference_id` PK, package/actor FK, token digest unique, expiry/consumed timestamps |
+
+모든 mutable aggregate는 timezone-aware `created_at`/`updated_at`과 version을 갖는다. 기존 record는 backfill하지 않고 첫 명시적 checklist 생성 때 초기화한다. rollback은 endpoint를 비활성화하고 새 table과 binary를 inert하게 보존한다.
+
+### 권한과 API 경계
+
+- 기존 `UserRole`과 Priority 2 service 계층 project ownership 검사를 재사용한다. 소유 `USER`와 `ADMIN`은 안전한 읽기, `ADMIN`은 verify/waive/assemble/retry/download/audit를 수행하고 `GUEST`는 거부한다.
+- capability 이름과 endpoint는 [API Contract](delivery-package-api-contract.md)에 고정한다. 내부 numeric ID, path, 원본 filename은 반환하지 않는다.
+
+### 크기와 content policy
+
+- DOCX/개별 artifact 25 MiB, delivery note 64 KiB, artifact 20개, 압축 전 100 MiB, ZIP 50 MiB를 상한으로 한다.
+- 허용 입력은 구조 검증된 OOXML DOCX와 제한된 UTF-8 plain text뿐이다. 배포 설정은 상한을 낮출 수만 있다.
+
+### 실행, storage와 recovery
+
+- 현재 저장소에 durable worker가 없으므로 외부 queue 없이 동기 assembly를 사용한다. 조건부 version 갱신이 동시 claim을 보호한다.
+- 자동 retry/backoff는 없고 운영자 수동 retry만 최대 3 attempts다. `assembling` 10분 초과는 중단으로 판단하며 service 시작/assembly 진입 시 lazy recovery한다.
+- 기존 project/run result filesystem root 아래 `delivery_packages`를 사용한다. 같은 filesystem의 비공개 staging에서 작성하고 atomic rename한다. symlink와 허용 root 이탈을 거부한다.
+- download token은 256-bit opaque, DB에는 digest만 저장, 15분 single-use이며 redemption 시 권한과 checksum을 재검증한다.
+
+### Retention과 delivered 호환성
+
+- Phase 3은 checklist/item history, manifest, package binary, audit, idempotency record를 자동 삭제하지 않는다. staging/부분 파일은 24시간 뒤 정리하고 download reference는 15분 뒤 사용할 수 없다.
+- `delivered`는 terminal이다. 정정/재납품은 새 run과 새 Pilot으로 처리하며 자동화는 범위 밖이다.
+- 기존 Priority 2 `deliver`의 DOCX 존재 조건을 유지한다. assembled package를 새 필수 조건으로 추가하지 않아 기존 API/테스트/backfill에 영향이 없다.
+
+## 비차단 후속 결정
+
+- 장기 법적/운영 retention과 파괴적 삭제 정책
+- 별도 durable worker 또는 object storage 도입 기준
+- delivered 결과의 정정·재납품 UX와 운영 승인 정책
 
 ## 관련 문서
 

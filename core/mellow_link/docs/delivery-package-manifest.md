@@ -1,6 +1,6 @@
 # Delivery Package Manifest Contract
 
-- 문서 상태: Draft for implementation review
+- 문서 상태: Implementation contract
 - 출력 계약: ZIP archive와 `manifest.json`
 
 ## Package 형식
@@ -81,7 +81,7 @@ Canonical schema identifier는 `delivery-manifest-v1`이다. 알 수 없는 majo
 ## 결정성과 무결성
 
 - artifact는 `entry_name ASC`로 정렬한다.
-- timestamp와 ZIP metadata 정규화 정책을 구현 PR에서 고정해 같은 source snapshot의 구조가 안정적으로 생성되게 한다.
+- ZIP entry timestamp는 `1980-01-01T00:00:00`, 권한은 regular file `0644`, 압축은 DEFLATE level 9로 고정한다. entry는 이름순이며 manifest JSON은 UTF-8, key 정렬, compact separator, LF로 직렬화한다.
 - package record는 archive byte size와 SHA-256을 manifest 바깥에 함께 보존한다.
 - download 전에 package checksum을 검증하고 불일치하면 참조를 제공하지 않는다.
 
@@ -89,13 +89,12 @@ Canonical schema identifier는 `delivery-manifest-v1`이다. 알 수 없는 majo
 
 외부/운영자 응답은 `artifact_missing`, `artifact_stale`, `invalid_artifact`, `package_size_exceeded`, `integrity_check_failed`, `assembly_storage_error` 같은 allowlist code만 반환한다. 실제 path와 내부 exception은 보안 로그에도 원문 payload와 함께 남기지 않는다.
 
-## Open Decisions
+## 구현 결정
 
-- 개별 artifact 및 전체 package size 상한의 구체 값
-- ZIP timestamp/reproducible build 세부 정책
-- package checksum을 별도 record와 download metadata 중 어디에 노출할지
-- optional delivery note의 허용 schema
-- 안전한 download reference의 수명과 실제 인증 연동
+- 크기와 개수 상한은 [Checklist Model](delivery-checklist-model.md)의 정책을 사용하며 압축 전과 압축 후를 모두 검사한다.
+- `package_checksum`은 self-reference를 피하기 위해 manifest JSON에는 넣지 않는다. immutable package record와 manifest/download metadata 응답에서만 제공한다.
+- `delivery-note.txt`는 64 KiB 이하 UTF-8 plain text다. NUL과 CR을 포함한 제어문자를 거부하며 LF와 TAB만 허용한다. Phase 3 기본 template에는 생성 source가 없으므로 보통 생략된다.
+- download reference는 256-bit random opaque token이고 DB에는 SHA-256 digest만 저장한다. 발급 후 15분 동안 한 번만 사용할 수 있으며 사용 시 project ownership, capability, package 상태와 checksum을 다시 검증한다.
 
 ## 관련 문서
 
