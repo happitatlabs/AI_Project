@@ -1,6 +1,6 @@
 # Delivery Readiness Contract
 
-- 문서 상태: Draft for implementation review
+- 문서 상태: Implementation contract
 - 기준: checklist와 artifact 검증에서 파생되는 읽기 모델
 
 ## 결정
@@ -72,7 +72,7 @@ warning은 응답에 안정적인 code와 item key만 제공한다. waiver reaso
 - checklist 조회는 모든 기존 Pilot 상태를 바꾸지 않는다.
 - assembly 요청은 `approved`를 전제로 하지만 성공해도 Pilot을 자동으로 `delivered`로 바꾸지 않는다.
 - `delivered`는 실제 전달 확인 command로 남고 package 상태는 별도 축이다.
-- 현재 Priority 2 `deliver`는 DOCX 존재를 전제로 한다. 완성 package까지 필수로 만들지는 별도 Open Decision이며 Priority 2 계약을 조용히 강화하지 않는다.
+- Priority 3은 현재 Priority 2 `deliver`의 DOCX 존재 전제를 유지한다. 완성 package를 추가 필수 조건으로 만들지 않으며 package assembly는 독립적인 운영 기능이다.
 - 기존 project/run DOCX archive resolver를 재사용하고 물리 경로 계산을 복제하지 않는다.
 - approval queue와 package assembly queue는 별도 read model이다. Pilot 상태가 두 큐의 공통 권위 원천이다.
 
@@ -83,12 +83,13 @@ warning은 응답에 안정적인 code와 item key만 제공한다. waiver reaso
 - 값이 하나라도 달라지면 `readiness_stale` 또는 version conflict이며 assembly/idempotency 성공 record를 만들지 않는다.
 - 검사와 assembly request 저장은 동일 transaction 경계에서 재확인한다.
 
-## Open Decisions
+## 구현 결정
 
-- Priority 3 도입 후 기존 `deliver`에 assembled package를 필수 전제로 추가할지 여부
-- readiness snapshot cache 저장 여부와 TTL
-- artifact size/content policy의 구체 값
-- delivered 이후 package 재조회 외 재조립을 허용할지 여부
+- readiness는 저장하거나 TTL cache하지 않고 요청마다 현재 Pilot/checklist/artifact snapshot에서 계산한다.
+- size/content 정책은 [Checklist Model](delivery-checklist-model.md)의 고정 상한과 allowlist를 따른다.
+- 기존 `deliver`는 assembled package를 요구하지 않는다. 따라서 기존 API, 테스트, 데이터에 migration/backfill이 없다.
+- `delivered`에서는 checklist/package/manifest 조회와 기존 download reference 발급만 허용하고 재검증, waiver, 조립, 재조립을 금지한다.
+- delivered 결과의 정정·재납품은 기존 record를 되돌리지 않고 새 run과 새 Pilot을 만드는 후속 운영 정책으로 분리한다.
 
 ## 관련 문서
 

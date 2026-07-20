@@ -1,7 +1,7 @@
 # Delivery Package Assembly Lifecycle
 
-- 문서 상태: Draft for implementation review
-- 대상: 조립 request, worker 상태, idempotency, 재시작 복구
+- 문서 상태: Implementation contract
+- 대상: 조립 request, 동기 실행 상태, idempotency, 재시작 복구
 
 ## Canonical 상태
 
@@ -22,7 +22,7 @@ superseded
 | 현재 | event | 다음 | 규칙 |
 | --- | --- | --- | --- |
 | 없음 | `request_assembly` | `pending` | readiness snapshot과 idempotency를 원자적으로 저장 |
-| `pending` | `start_assembly` | `assembling` | worker lease와 expected version 필요 |
+| `pending` | `start_assembly` | `assembling` | 같은 요청을 처리하는 service가 expected version으로 claim |
 | `assembling` | `complete_assembly` | `assembled` | manifest, archive reference, checksums와 원자적 완료 |
 | `assembling` | `fail_assembly` | `failed` | 안전한 failure code만 저장 |
 | `failed` | `retry_assembly` | `pending` | retry count/policy 검사, 같은 source snapshot 유지 |
@@ -54,8 +54,8 @@ Canonical request fingerprint는 다음을 정렬·직렬화해 계산한다.
 
 - request에는 `expected_pilot_version`, `expected_checklist_version`, `artifact_set_fingerprint`가 필요하다.
 - conditional insert/unique constraint 또는 동등한 저장 계층 보호로 동일 fingerprint의 active assembly를 하나만 허용한다.
-- worker는 `expected_assembly_version`과 만료 가능한 lease를 사용한다.
-- 두 worker가 같은 pending record를 시작하면 하나만 `assembling`이 된다.
+- Phase 3은 외부 worker framework가 없는 현재 저장소에 맞춰 요청 thread가 동기적으로 assembly를 수행한다.
+- service는 `expected_assembly_version` 조건부 갱신으로 pending record를 claim한다. 동시에 두 요청이 들어와도 하나만 `assembling`이 된다.
 - 상태, version, audit, idempotency result는 동일 DB transaction이다.
 
 ## File/DB transaction 경계
@@ -63,7 +63,7 @@ Canonical request fingerprint는 다음을 정렬·직렬화해 계산한다.
 filesystem과 DB는 하나의 ACID transaction이 될 수 없으므로 다음 visibility protocol을 사용한다.
 
 1. DB에서 request를 `pending`으로 원자 저장한다.
-2. worker가 `assembling` lease를 획득한다.
+2. 요청을 처리하는 service가 조건부 갱신으로 `assembling`을 획득한다.
 3. 비공개 staging 디렉터리에 고유 임시 이름으로 archive를 작성한다.
 4. archive를 재열고 manifest/entry checksum/size를 검증한다.
 5. 같은 filesystem의 final archive root로 atomic rename한다.
@@ -74,9 +74,9 @@ filesystem과 DB는 하나의 ACID transaction이 될 수 없으므로 다음 vi
 
 ## 재시작 복구
 
-- `pending`: 다시 claim 가능.
-- `assembling` + 유효 lease: 다른 worker가 건드리지 않음.
-- `assembling` + 만료 lease: staging/final checksum과 DB record를 검사해 안전하게 재개하거나 `failed`로 전환.
+- `pending`: 요청 처리 또는 명시적 retry가 다시 claim할 수 있다.
+- `assembling`이 10분 이내면 다른 요청이 건드리지 않는다.
+- `assembling`이 10분을 넘으면 process interruption으로 간주한다. service 시작 및 assembly/retry 호출 전 recovery가 staging/final checksum과 DB record를 검사해 `failed`로 전환하고, 자동 성공으로 추측하지 않는다.
 - 완성 파일과 manifest가 검증되지만 DB 완료가 없는 경우 자동 성공으로 추측하지 않는다. recovery policy에 따라 재연결 또는 격리하며 audit를 남긴다.
 - partial/staging file은 외부 download 대상이 아니다.
 
@@ -85,7 +85,7 @@ filesystem과 DB는 하나의 ACID transaction이 될 수 없으므로 다음 vi
 - failure에는 allowlist `failure_code`, 발생 시각, attempt만 저장한다.
 - 내부 exception, path, raw content는 응답/audit/application log에 복제하지 않는다.
 - retry는 같은 source fingerprint에서만 가능하다. source가 바뀌면 새 readiness 검증과 새 request가 필요하다.
-- retry limit과 backoff 값은 구현 PR 결정으로 남기되 무한 자동 retry는 금지한다.
+- 자동 retry와 background backoff는 없다. 운영자의 명시적 retry만 허용하며 최초 attempt를 포함해 최대 3회다.
 
 ## Priority 2 연결
 
@@ -106,13 +106,14 @@ package_assembly_retried
 package_superseded
 ```
 
-## Open Decisions
+## 구현 결정
 
-- worker lease 기간과 recovery 주기
-- retry 횟수, backoff, manual-only 실패 code
-- orphan/staging retention 기간
-- delivered 이후 정정·재납품 시 새 package 허용 정책
-- 물리 archive storage와 안전한 download reference 구현
+- 별도 durable worker, lease, heartbeat, periodic recovery scheduler를 도입하지 않는다. 동기 service와 조건부 상태/version 갱신을 사용한다.
+- stale `assembling` 기준은 10분이며 recovery는 service 시작과 assembly/retry 진입 시 수행한다. recovery event는 append-only audit로 남긴다.
+- retry는 운영자 수동 방식, 최대 3 attempts, 자동 backoff 없음이다. `invalid_artifact`, `readiness_stale`, `package_size_exceeded`는 source를 수정하고 새 request를 만들어야 하므로 같은 record에서 retry할 수 없다.
+- staging/부분 파일은 24시간 뒤 recovery에서 삭제한다. 최종 위치의 미참조 orphan은 외부에 노출하지 않고 격리하며 자동 삭제하지 않는다.
+- archive는 기존 project/run result root 아래 전용 `delivery_packages` 디렉터리에 저장한다. staging은 같은 filesystem의 sibling 비공개 디렉터리를 사용해 atomic rename을 보장한다.
+- delivered 이후 정정·재납품은 Phase 3 범위 밖이다. 새 run과 새 Pilot을 만들며 terminal Pilot과 기존 package를 변경하지 않는다.
 
 ## 관련 문서
 

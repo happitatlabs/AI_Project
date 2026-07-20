@@ -1,6 +1,6 @@
 # Delivery Checklist and Package Acceptance Test Contract
 
-- 문서 상태: Draft for implementation review
+- 문서 상태: Implementation contract
 - 목적: Priority 3 구현 전에 domain, persistence, security, recovery acceptance 고정
 
 ## 테스트 원칙
@@ -49,11 +49,11 @@
 | PA-002 | 같은 key/payload 재시도 | 최초 result replay, 중복 package/audit 없음 |
 | PA-003 | 같은 key/다른 payload | idempotency conflict, 기존 결과 불변 |
 | PA-004 | 다른 key/같은 fingerprint 동시 요청 | active/assembled package 1개 |
-| PA-005 | 두 worker 동시 claim | 하나만 assembling lease 획득 |
+| PA-005 | 두 동기 요청의 동시 claim | 조건부 version 갱신으로 하나만 assembling 획득 |
 | PA-006 | required artifact 누락 | request 차단, archive/idempotency 성공 없음 |
 | PA-007 | checksum/manifest | entry 및 package checksum 재계산 일치 |
 | PA-008 | 안전한 entry 이름 | 고정 allowlist path만 존재 |
-| PA-009 | process restart during assembling | lease/recovery 계약에 따라 재개 또는 failed, 중복 package 없음 |
+| PA-009 | process restart during assembling | 10분 stale recovery로 failed, 중복 package 없음 |
 | PA-010 | partial write/rename 실패 | 외부 참조 없음, safe failure code, staging 격리 |
 | PA-011 | failed retry | source current일 때 pending, attempt/audit 증가 |
 | PA-012 | source 변경 후 retry | stale conflict, 새 readiness/request 필요 |
@@ -88,6 +88,7 @@
 | SE-009 | checksum 불일치 download | reference 미발급, integrity failure |
 | SE-010 | fixture scan | 실제 개인정보, 이메일, 전화번호 없음 |
 | SE-011 | package size limit | 개별/총 size 초과 차단 |
+| SE-012 | download reference expiry/replay | 15분 만료와 single-use 재사용 차단, 매 사용 권한 재검증 |
 
 ## Operator UX contract
 
@@ -114,6 +115,7 @@
 
 | Operation | Acceptance IDs |
 | --- | --- |
+| `CreateDeliveryChecklist` | CL-001~002/011, TX-001~002, SE-007~008 |
 | `GetDeliveryChecklist` / `GetDeliveryChecklistItem` | CL-001~006, SE-004/007~008 |
 | `VerifyChecklistItem` | CL-005~006/010/012, TX-001~002, SE-003/006 |
 | `WaiveChecklistItem` | CL-007~010, TX-001~002, SE-006~008 |
@@ -125,13 +127,14 @@
 | `ListDeliveryPackages` | PA-013, SE-004/007~008 |
 | `GetDeliveryAuditHistory` | TX-001~006, SE-004/006~008 |
 
-## Open Decisions
+## 구현 acceptance 결정
 
-- 실제 storage에 맞는 process restart/lease fixture
-- exact size limits와 allowed MIME/magic signatures
-- download reference integration test 방식
-- delivered 이후 correction/reassembly acceptance
-- retention/cleanup 장기 test 범위
+- restart fixture는 SQLite 파일 DB와 동일 project result filesystem을 새 service instance에서 다시 열어 stale `assembling` 복구를 검증한다.
+- 크기 경계는 DOCX/개별 25 MiB, note 64 KiB, artifact 20개, 압축 전 100 MiB, ZIP 50 MiB의 바로 아래/같음/초과를 검사한다. DOCX MIME과 OOXML magic/structure가 모두 필요하다.
+- download test는 token 원문이 DB에 없는지, 15분 전 1회 성공, 재사용·만료·다른 project actor를 거부하는지 검증한다.
+- delivered에서는 조회/download만 가능하고 correction/reassembly mutation은 `delivery_state_conflict`다. 정정은 새 run/Pilot에서만 수행한다.
+- destructive retention은 테스트하지 않는다. 24시간 staging cleanup과 expired download rejection만 time-controlled test로 검증한다.
+- 기존 Priority 2 deliver는 package 없이도 기존 DOCX 조건으로 성공하는 하위 호환성 test를 유지한다.
 
 ## 관련 문서
 

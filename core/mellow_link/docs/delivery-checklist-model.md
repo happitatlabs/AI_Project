@@ -1,6 +1,6 @@
 # Delivery Preparedness Checklist Model
 
-- 문서 상태: Draft for implementation review
+- 문서 상태: Implementation contract
 - 대상 범위: Pilot 납품 준비물의 논리 모델과 상태 규칙
 - 비대상 범위: DB/ORM 선택, migration, API/UI 구현, 패키지 조립 코드
 
@@ -126,13 +126,14 @@ checklist_rebased
 
 성공한 mutation만 append하며 actor, 이전/다음 item 상태, result version, 안전한 artifact fingerprint reference를 기록한다. artifact bytes, 내부 경로, 원본 파일명, waiver 원문 전체는 audit metadata에 넣지 않는다.
 
-## Open Decisions
+## 구현 결정
 
-- 실제 template 배포·version 부여 방식
-- `external_report_docx` 외 required item의 waiver 허용 목록
-- 검증 정책별 정확한 size/content 제한
-- template rebase의 물리 저장 모델과 기존 instance 보존 기간
-- 실제 역할과 `delivery.waive` capability 매핑
+- 초기 immutable template은 `delivery-v1`, version `1`로 코드와 함께 배포하고 최초 checklist 생성 transaction에서 DB에 저장한다. Phase 3에는 template 편집 API를 제공하지 않는다.
+- 초기 template의 `external_report_docx`, `one_page_summary`, `provenance_summary`는 모두 `waiver_allowed=false`다. 미래 template에서만 별도 검토를 거쳐 required waiver를 허용할 수 있다.
+- `external_docx`는 DOCX MIME과 ZIP/OOXML 구조를 모두 확인하며 25 MiB 이하만 허용한다. `delivery_note`는 UTF-8 `text/plain`, 64 KiB 이하만 허용한다.
+- 한 package의 artifact는 최대 20개, 각 artifact는 최대 25 MiB, 압축 전 합계는 최대 100 MiB, 완성 ZIP은 최대 50 MiB다. 이 값은 배포 설정으로 낮출 수 있지만 높이려면 계약과 보안 테스트 변경이 필요하다.
+- template rebase와 기존 instance 자동 변환은 Phase 3 범위 밖이다. 새 template version은 새 instance/revision을 만들고 기존 record를 보존한다.
+- 프로젝트 소유자 `USER`와 `ADMIN`은 접근 가능한 프로젝트의 checklist/readiness를 읽을 수 있다. checklist 생성, verify, waiver, rebase는 `ADMIN`만 수행하며 서비스 계층에서 project scope를 함께 검사한다. `GUEST`는 접근할 수 없다.
 
 ## 관련 문서
 

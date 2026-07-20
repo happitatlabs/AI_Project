@@ -1,6 +1,6 @@
 # Delivery Checklist and Package Service Contract
 
-- 문서 상태: Draft for implementation review
+- 문서 상태: Implementation contract
 - 계약 수준: transport-neutral service contract
 - 비대상 범위: FastAPI router, schema code, DB implementation
 
@@ -9,14 +9,15 @@
 1. checklist/readiness/package 정책은 service 계층에서 권한과 project ownership을 다시 검사한다.
 2. mutation은 `expected_version`과 `idempotency_key`를 사용한다.
 3. 상태 변경, audit, idempotency 결과는 하나의 transaction이다.
-4. 실제 URL과 HTTP method는 구현 PR에서 기존 routing 규칙에 맞춰 정한다.
+4. URL과 HTTP method는 아래 FastAPI transport mapping을 따른다.
 5. 응답은 opaque reference와 안전한 code만 사용하고 내부 경로/원본 filename/raw content를 반환하지 않는다.
 
-## Capability 초안
+## Capability 및 역할 매핑
 
 | capability | 동작 |
 | --- | --- |
 | `delivery.checklist.read` | 접근 가능한 Pilot checklist/readiness 조회 |
+| `delivery.checklist.create` | 현재 template으로 Pilot checklist 생성 |
 | `delivery.checklist.verify` | item 검증 요청/확인 |
 | `delivery.waive` | 허용된 item waiver |
 | `delivery.package.assemble` | package assembly 요청·retry |
@@ -24,9 +25,37 @@
 | `delivery.package.download` | 무결성 검증 후 안전한 download reference 발급 |
 | `delivery.audit.read` | checklist/package audit 조회 |
 
-현재 `UserRole`과 capability의 실제 매핑은 구현 PR 결정이다. ADMIN이라는 이유만으로 tenant/project 범위를 우회하지 않는다.
+| role | 허용 capability |
+| --- | --- |
+| `USER` | 소유 프로젝트의 `delivery.checklist.read`, `delivery.package.read` |
+| `ADMIN` | 위 읽기와 create, verify, waive, assemble/retry, download, audit. mutation마다 대상 project 존재와 scope를 service에서 확인 |
+| `GUEST` | 없음 |
+
+현재 저장소에는 별도 tenant/capability store가 없으므로 capability는 위 `UserRole` mapping으로 구현한다. 새로운 인증 체계를 만들지 않으며 router 검사만 신뢰하지 않는다.
+
+## FastAPI transport mapping
+
+| Operation | Method and path |
+| --- | --- |
+| checklist 생성/조회 | `POST/GET /pilot-delivery/pilots/{pilot_id}/checklist` |
+| item 조회/검증/waiver | `GET /pilot-delivery/pilots/{pilot_id}/checklist/items/{item_key}`, `POST .../verify`, `POST .../waive` |
+| readiness | `GET /pilot-delivery/pilots/{pilot_id}/readiness` |
+| assembly 요청/조회/retry | `POST /pilot-delivery/pilots/{pilot_id}/assemblies`, `GET /pilot-delivery/assemblies/{assembly_id}`, `POST .../retry` |
+| package 목록/manifest | `GET /pilot-delivery/pilots/{pilot_id}/packages`, `GET /pilot-delivery/packages/{package_id}/manifest` |
+| download reference/사용 | `POST /pilot-delivery/packages/{package_id}/download-references`, `GET /pilot-delivery/downloads/{token}` |
+| audit | `GET /pilot-delivery/pilots/{pilot_id}/audit` |
+
+JSON response는 기존 router처럼 response model을 직접 반환하고 오류는 `detail.code`와 안전한 message를 사용한다. 목록 기본 limit은 50, 최대 100이며 opaque cursor를 사용한다.
 
 ## Operation 계약
+
+### `CreateDeliveryChecklist`
+
+- 입력: `pilot_id`, `idempotency_key`, actor.
+- 전제: project 접근 + `delivery.checklist.create`; Pilot이 `delivered`가 아님.
+- 결과: 현재 immutable template의 version 0 checklist와 item snapshot. 동일 Pilot/template version은 하나만 생성한다.
+- audit: `checklist_created`; 같은 key/payload의 재요청은 기존 결과를 반환한다.
+- 이미 같은 template checklist가 있고 다른 key로 요청하면 기존 checklist를 반환하며 추가 audit/idempotency 성공 record를 만들지 않는다.
 
 ### `GetDeliveryChecklist`
 
@@ -65,7 +94,7 @@
 
 - 입력: `pilot_id`, `expected_pilot_version`, `expected_checklist_version`, `artifact_set_fingerprint`, `manifest_version`, `idempotency_key`, actor.
 - 전제: Pilot `approved`, readiness `ready`, assemble capability.
-- 결과: `pending` assembly view 또는 동일 요청의 기존 결과.
+- 결과: 동기 조립이 완료되면 `assembled`, 안전하게 실패하면 `failed`, 동일 요청이면 기존 결과를 반환한다. DB에는 `pending`과 `assembling` 전이가 모두 보존된다.
 - audit: `package_assembly_requested`.
 - 상태/version/fingerprint 재검증과 request/idempotency 저장은 원자적이다.
 
@@ -130,18 +159,16 @@
 
 - checklist mutation: `expected_checklist_version`.
 - assembly request: Pilot/checklist version과 artifact fingerprint 모두 고정.
-- worker mutation: `expected_assembly_version`.
+- assembly 상태 mutation: `expected_assembly_version`.
 - idempotency key는 actor/client scope에서 영속 저장하며 command와 canonical request hash에 결합한다.
 - 같은 key/payload는 프로세스 재시작 후에도 최초 응답을 반환한다.
 - conflict/validation/권한 실패는 성공 idempotency result나 상태 전이 audit를 만들지 않는다.
 
-## Open Decisions
+## 구현 결정
 
-- 최종 endpoint/HTTP method와 response envelope
-- 현재 role과 capability의 실제 매핑
-- cursor format/page size
-- download reference 수명과 인증 연동
-- idempotency/audit/package retention
+- endpoint, 역할, pagination은 위 표를 따른다.
+- download reference는 15분 single-use이며 token 사용 시 현재 인증과 권한을 다시 검사한다.
+- idempotency, audit, checklist, manifest, package binary는 Phase 3에서 자동 삭제하지 않는다. download token은 만료/사용 상태를 유지하고 staging/부분 파일만 24시간 정책으로 정리한다.
 
 ## 관련 문서
 
