@@ -1,0 +1,6 @@
+-r requirements-test-pilot.txt
+
+# Existing repository tooling used by the focused Priority 3 workflow.
+black==26.1.0
+ruff==0.13.2
+pyyaml==6.0.3

@@ -8,6 +8,8 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.pilot-delivery-pytest/
+core/mellow_link/.pilot-delivery-*/
 
 # =========================
 # Virtual environments
