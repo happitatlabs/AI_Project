@@ -662,6 +662,7 @@ if FASTAPI_AVAILABLE:
     from mellow_link.routers.projects import router as projects_router
     from mellow_link.routers.daily_checkin import router as daily_checkin_router
     from mellow_link.routers.pilot_state import router as pilot_state_router
+    from mellow_link.routers.delivery_package import router as delivery_package_router
 
     app.include_router(auth_router)
     app.include_router(folders_router)
@@ -680,6 +681,7 @@ if FASTAPI_AVAILABLE:
     app.include_router(projects_router)
     app.include_router(daily_checkin_router)
     app.include_router(pilot_state_router)
+    app.include_router(delivery_package_router)
     for module in get_module_registry().list_modules():
         app.include_router(module.router)
 

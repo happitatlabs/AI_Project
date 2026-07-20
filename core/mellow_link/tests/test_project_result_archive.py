@@ -82,10 +82,12 @@ async def test_project_result_archive_uses_deterministic_paths_and_reopenable_do
     expected_dir = tmp_path / "archive" / "proj_pilot_delivery" / "run_pilot_delivery"
     expected_markdown = expected_dir / "result.md"
     expected_docx = expected_dir / "result.docx"
+    expected_external_docx = expected_dir / "external_result.docx"
 
     assert result == {
         "markdown_path": str(expected_markdown),
         "docx_path": str(expected_docx),
+        "external_docx_path": str(expected_external_docx),
     }
     assert expected_markdown.read_text(encoding="utf-8") == "# 현대화 판단 보고서\n"
     assert expected_docx.is_file()
@@ -96,6 +98,11 @@ async def test_project_result_archive_uses_deterministic_paths_and_reopenable_do
     assert "9. 분석 근거와 provenance" in text
     assert len(reopened.tables) == 4
     assert logger.warnings == []
+    external = Document(expected_external_docx)
+    external_text = "\n".join(paragraph.text for paragraph in external.paragraphs)
+    assert "9. 산출물 기준" in external_text
+    assert "9. 분석 근거와 provenance" not in external_text
+    assert "run_pilot_delivery" not in external_text
 
     same_paths = build_project_result_archive_paths(
         archive_root=tmp_path / "archive",

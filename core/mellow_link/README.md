@@ -87,3 +87,34 @@ python -c "from mellow_link.infra.database import init_db; init_db()"
 cd core\mellow_link
 python -m pytest tests/test_pilot_state_and_approval_queue.py
 ```
+
+## Delivery Checklist and Package Assembly
+
+Priority 3은 승인된 Pilot의 고객 전달 준비 상태를 영속 checklist와 실제 artifact 검증으로 계산하고, 검증된 external DOCX만 결정적인 ZIP package로 조립한다. 기존 Priority 2 `deliver`의 DOCX 조건은 유지되며 package 조립이 Pilot을 자동으로 `delivered`로 바꾸지 않는다.
+
+주요 계약:
+
+- immutable `delivery-v1` checklist와 required/optional item snapshot
+- expected version 및 영속 idempotency 보호
+- external DOCX 재열기, 고정 섹션, 내부 provenance 차단, checksum 검증
+- 파생 `ready|not_ready|stale` 판정
+- 동기 `pending -> assembling -> assembled|failed` 조립과 수동 retry
+- 같은 filesystem staging, 검증 후 atomic publish, 안전한 manifest
+- 15분 single-use opaque download reference
+- 서비스 계층 프로젝트 소유권 및 운영자 권한 검사
+
+새 구조는 기존 SQLAlchemy `Base.metadata.create_all()` 방식으로 additive하게 생성된다. 기존 table이나 Pilot record는 변환·삭제하지 않는다. 운영 배포 전에는 DB backup을 만들고 애플리케이션 DB 계정에 `CREATE TABLE` 권한이 있는지 확인해야 한다. 여러 인스턴스가 동시에 시작하더라도 SQLAlchemy metadata와 DB constraint가 동일 구조를 보호하지만, 최초 schema 생성은 가능하면 단일 배포 단계에서 실행한다. `create_all()` 실패는 숨기지 않고 애플리케이션 시작을 중단하며, 부분 생성이 발생한 경우 원인을 해결한 뒤 같은 additive 명령을 다시 실행한다.
+
+코드 rollback 시 신규 table과 package binary는 비활성 상태로 남으며 자동 down migration이나 table 삭제를 수행하지 않는다. 향후 기존 column 변경이나 파괴적 schema 변경이 필요하면 이 additive 경로에 얹지 않고 별도 migration 전략을 먼저 정의해야 한다.
+
+```powershell
+cd core
+python -c "from mellow_link.infra.database import init_db; init_db()"
+```
+
+집중 검증:
+
+```powershell
+cd core\mellow_link
+python -m pytest tests/test_delivery_checklist_and_package.py tests/test_project_result_archive.py
+```
