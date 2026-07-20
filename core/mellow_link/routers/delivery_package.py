@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TypeVar
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -199,10 +199,16 @@ def retry_assembly(
 @router.get("/pilots/{pilot_id}/packages", response_model=PackagePage)
 def list_packages(
     pilot_id: str,
+    cursor: str | None = Query(default=None, max_length=500),
+    limit: int = Query(default=50, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return _execute(lambda: _service(db).list_packages(current_user, pilot_id))
+    return _execute(
+        lambda: _service(db).list_packages(
+            current_user, pilot_id, cursor=cursor, limit=limit
+        )
+    )
 
 
 @router.get("/packages/{package_id}/manifest", response_model=ManifestView)
@@ -247,7 +253,13 @@ def download_package(
 @router.get("/pilots/{pilot_id}/audit", response_model=DeliveryAuditPage)
 def get_audit_history(
     pilot_id: str,
+    cursor: str | None = Query(default=None, max_length=500),
+    limit: int = Query(default=50, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return _execute(lambda: _service(db).get_audit_history(current_user, pilot_id))
+    return _execute(
+        lambda: _service(db).get_audit_history(
+            current_user, pilot_id, cursor=cursor, limit=limit
+        )
+    )

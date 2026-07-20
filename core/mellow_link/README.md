@@ -103,7 +103,9 @@ Priority 3은 승인된 Pilot의 고객 전달 준비 상태를 영속 checklist
 - 15분 single-use opaque download reference
 - 서비스 계층 프로젝트 소유권 및 운영자 권한 검사
 
-새 구조는 기존 SQLAlchemy `Base.metadata.create_all()` 방식으로 additive하게 생성된다. 기존 table이나 Pilot record는 변환·삭제하지 않는다.
+새 구조는 기존 SQLAlchemy `Base.metadata.create_all()` 방식으로 additive하게 생성된다. 기존 table이나 Pilot record는 변환·삭제하지 않는다. 운영 배포 전에는 DB backup을 만들고 애플리케이션 DB 계정에 `CREATE TABLE` 권한이 있는지 확인해야 한다. 여러 인스턴스가 동시에 시작하더라도 SQLAlchemy metadata와 DB constraint가 동일 구조를 보호하지만, 최초 schema 생성은 가능하면 단일 배포 단계에서 실행한다. `create_all()` 실패는 숨기지 않고 애플리케이션 시작을 중단하며, 부분 생성이 발생한 경우 원인을 해결한 뒤 같은 additive 명령을 다시 실행한다.
+
+코드 rollback 시 신규 table과 package binary는 비활성 상태로 남으며 자동 down migration이나 table 삭제를 수행하지 않는다. 향후 기존 column 변경이나 파괴적 schema 변경이 필요하면 이 additive 경로에 얹지 않고 별도 migration 전략을 먼저 정의해야 한다.
 
 ```powershell
 cd core

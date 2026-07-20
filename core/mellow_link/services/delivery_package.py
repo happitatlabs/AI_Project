@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
+import io
 import json
 import os
 import re
@@ -15,6 +18,7 @@ from typing import Callable
 
 from docx import Document
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -160,7 +164,9 @@ class ChecklistItemView(BaseModel):
     byte_size: int | None = None
     checksum: str | None = None
     content_type: str | None = None
+    verified_by_ref: str | None = None
     verified_at: datetime | None = None
+    waived_by_ref: str | None = None
     waived: bool
     version: int
 
@@ -212,6 +218,9 @@ class PackageSummary(BaseModel):
     package_ref: str
     status: str
     manifest_version: str
+    source_pilot_version: int
+    checklist_version: int
+    checklist_template_version: int
     byte_size: int
     checksum: str
     created_at: datetime
@@ -219,6 +228,7 @@ class PackageSummary(BaseModel):
 
 class PackagePage(BaseModel):
     items: list[PackageSummary]
+    next_cursor: str | None = None
 
 
 class ManifestView(BaseModel):
@@ -245,6 +255,7 @@ class DeliveryAuditView(BaseModel):
 
 class DeliveryAuditPage(BaseModel):
     items: list[DeliveryAuditView]
+    next_cursor: str | None = None
 
 
 @dataclass(frozen=True)
@@ -950,19 +961,49 @@ class DeliveryPackageService:
             manifest=json.loads(package.manifest_json),
         )
 
-    def list_packages(self, actor: User, pilot_id: str) -> PackagePage:
+    def list_packages(
+        self,
+        actor: User,
+        pilot_id: str,
+        *,
+        cursor: str | None = None,
+        limit: int = 50,
+    ) -> PackagePage:
         pilot, project = self._pilot_and_project(pilot_id)
         self._require_project_access(actor, project)
+        _validate_page_limit(limit)
+        query = self.db.query(DeliveryPackage).filter(
+            DeliveryPackage.pilot_id == pilot.pilot_id
+        )
+        if cursor is not None:
+            created_at, package_id = _decode_cursor("package", cursor)
+            query = query.filter(
+                or_(
+                    DeliveryPackage.created_at < created_at,
+                    and_(
+                        DeliveryPackage.created_at == created_at,
+                        DeliveryPackage.package_id < package_id,
+                    ),
+                )
+            )
         packages = (
-            self.db.query(DeliveryPackage)
-            .filter(DeliveryPackage.pilot_id == pilot.pilot_id)
-            .order_by(
+            query.order_by(
                 DeliveryPackage.created_at.desc(), DeliveryPackage.package_id.desc()
             )
-            .limit(100)
+            .limit(limit + 1)
             .all()
         )
-        return PackagePage(items=[self._package_summary(item) for item in packages])
+        page = packages[:limit]
+        next_cursor = None
+        if len(packages) > limit:
+            last = page[-1]
+            next_cursor = _encode_cursor(
+                "package", _as_utc(last.created_at), last.package_id
+            )
+        return PackagePage(
+            items=[self._package_summary(item) for item in page],
+            next_cursor=next_cursor,
+        )
 
     def create_download_reference(
         self, actor: User, package_id: str
@@ -1030,6 +1071,7 @@ class DeliveryPackageService:
             .filter(
                 DeliveryDownloadReference.reference_id == reference.reference_id,
                 DeliveryDownloadReference.consumed_at.is_(None),
+                DeliveryDownloadReference.expires_at > now,
             )
             .update({"consumed_at": now}, synchronize_session=False)
         )
@@ -1043,18 +1085,46 @@ class DeliveryPackageService:
             content_type="application/zip",
         )
 
-    def get_audit_history(self, actor: User, pilot_id: str) -> DeliveryAuditPage:
+    def get_audit_history(
+        self,
+        actor: User,
+        pilot_id: str,
+        *,
+        cursor: str | None = None,
+        limit: int = 50,
+    ) -> DeliveryAuditPage:
         pilot, project = self._pilot_and_project(pilot_id)
         self._require_operator(actor)
         self._require_project_access(actor, project)
+        _validate_page_limit(limit)
+        query = self.db.query(DeliveryAuditEvent).filter(
+            DeliveryAuditEvent.pilot_id == pilot.pilot_id
+        )
+        if cursor is not None:
+            occurred_at, event_id = _decode_cursor("audit", cursor)
+            query = query.filter(
+                or_(
+                    DeliveryAuditEvent.occurred_at > occurred_at,
+                    and_(
+                        DeliveryAuditEvent.occurred_at == occurred_at,
+                        DeliveryAuditEvent.event_id > event_id,
+                    ),
+                )
+            )
         events = (
-            self.db.query(DeliveryAuditEvent)
-            .filter(DeliveryAuditEvent.pilot_id == pilot.pilot_id)
-            .order_by(
+            query.order_by(
                 DeliveryAuditEvent.occurred_at.asc(), DeliveryAuditEvent.event_id.asc()
             )
+            .limit(limit + 1)
             .all()
         )
+        page = events[:limit]
+        next_cursor = None
+        if len(events) > limit:
+            last = page[-1]
+            next_cursor = _encode_cursor(
+                "audit", _as_utc(last.occurred_at), last.event_id
+            )
         return DeliveryAuditPage(
             items=[
                 DeliveryAuditView(
@@ -1064,8 +1134,9 @@ class DeliveryPackageService:
                     occurred_at=_as_utc(event.occurred_at),
                     result_version=event.result_version,
                 )
-                for event in events
-            ]
+                for event in page
+            ],
+            next_cursor=next_cursor,
         )
 
     def recover_interrupted_assemblies(self, actor: User) -> int:
@@ -1081,13 +1152,32 @@ class DeliveryPackageService:
             .all()
         )
         recovered = 0
-        for assembly in records:
+        for snapshot in records:
+            claimed = (
+                self.db.query(DeliveryPackageAssembly)
+                .filter(
+                    DeliveryPackageAssembly.assembly_id == snapshot.assembly_id,
+                    DeliveryPackageAssembly.status == AssemblyStatus.ASSEMBLING.value,
+                    DeliveryPackageAssembly.version == snapshot.version,
+                    DeliveryPackageAssembly.updated_at < cutoff,
+                )
+                .update(
+                    {
+                        "status": AssemblyStatus.FAILED.value,
+                        "version": snapshot.version + 1,
+                        "failed_at": now,
+                        "updated_at": now,
+                        "failure_code": "assembly_interrupted",
+                    },
+                    synchronize_session=False,
+                )
+            )
+            if claimed != 1:
+                self.db.rollback()
+                continue
+            self.db.expire_all()
+            assembly = self._get_assembly(snapshot.assembly_id)
             pilot = self._get_pilot(assembly.pilot_id)
-            assembly.status = AssemblyStatus.FAILED.value
-            assembly.version += 1
-            assembly.failed_at = now
-            assembly.updated_at = now
-            assembly.failure_code = "assembly_interrupted"
             self._add_audit(
                 pilot,
                 actor,
@@ -1109,10 +1199,15 @@ class DeliveryPackageService:
             ):
                 command.result_version = assembly.version
                 command.response_json = response.model_dump_json()
-            recovered += 1
+            try:
+                self.db.commit()
+                recovered += 1
+            except SQLAlchemyError as exc:
+                self.db.rollback()
+                raise DeliveryStorageError(
+                    "Assembly recovery could not be stored"
+                ) from exc
         self._cleanup_staging(now)
-        if recovered:
-            self.db.commit()
         return recovered
 
     def _run_assembly(
@@ -1157,10 +1252,12 @@ class DeliveryPackageService:
         self.db.commit()
         self.db.expire_all()
         assembly = self._get_assembly(assembly.assembly_id)
+        published_path: Path | None = None
         try:
             package_id, manifest, final_path, checksum, byte_size = self._build_archive(
                 actor, assembly
             )
+            published_path = final_path
             completed_at = self._now()
             prior_packages = (
                 self.db.query(DeliveryPackage)
@@ -1233,6 +1330,8 @@ class DeliveryPackageService:
             return response
         except Exception as exc:
             self.db.rollback()
+            if published_path is not None:
+                self._quarantine_orphan(published_path)
             failure_code = _safe_failure_code(exc)
             failed_at = self._now()
             assembly = self._get_assembly(assembly.assembly_id)
@@ -1315,6 +1414,7 @@ class DeliveryPackageService:
         ).encode("utf-8")
         if artifact.byte_size + len(manifest_bytes) > MAX_PACKAGE_INPUT_BYTES:
             raise InvalidArtifactError("Package input exceeds size policy")
+        published = False
         try:
             with zipfile.ZipFile(
                 staging_path,
@@ -1330,10 +1430,13 @@ class DeliveryPackageService:
                 raise InvalidArtifactError("Package exceeds size policy")
             self._verify_archive(staging_path, manifest)
             os.replace(staging_path, final_path)
+            published = True
             checksum = _sha256_path(final_path)
             return package_id, manifest, final_path, checksum, final_path.stat().st_size
         except Exception:
             staging_path.unlink(missing_ok=True)
+            if published:
+                self._quarantine_orphan(final_path)
             raise
 
     def _verify_archive(self, path: Path, manifest: dict[str, object]) -> None:
@@ -1348,6 +1451,12 @@ class DeliveryPackageService:
             expected = manifest["artifacts"][0]["checksum"]  # type: ignore[index]
             if _sha256_bytes(report) != expected:
                 raise PackageIntegrityError("Artifact checksum verification failed")
+            try:
+                Document(io.BytesIO(report))
+            except (OSError, ValueError, zipfile.BadZipFile, KeyError) as exc:
+                raise PackageIntegrityError(
+                    "Packaged DOCX verification failed"
+                ) from exc
 
     def _resolve_item(
         self, pilot: PilotStateRecord, item: DeliveryChecklistItem
@@ -1398,7 +1507,10 @@ class DeliveryPackageService:
             current = current.parent
         if has_symlink:
             raise InvalidArtifactError("Symbolic links are not allowed")
-        size = path.stat().st_size
+        metadata = path.stat()
+        if metadata.st_nlink > 1:
+            raise InvalidArtifactError("Hard links are not allowed")
+        size = metadata.st_size
         if size > MAX_ARTIFACT_BYTES:
             raise InvalidArtifactError("Artifact exceeds size policy")
         _validate_docx(path)
@@ -1543,7 +1655,17 @@ class DeliveryPackageService:
                     byte_size=artifact.byte_size if artifact else None,
                     checksum=artifact.checksum if artifact else None,
                     content_type=artifact.content_type if artifact else None,
+                    verified_by_ref=(
+                        _safe_ref("actor", str(record.verified_by_id))
+                        if record.verified_by_id is not None
+                        else None
+                    ),
                     verified_at=_optional_utc(record.verified_at),
+                    waived_by_ref=(
+                        _safe_ref("actor", str(record.waived_by_id))
+                        if record.waived_by_id is not None
+                        else None
+                    ),
                     waived=status == ChecklistItemStatus.WAIVED,
                     version=record.version,
                 )
@@ -1578,11 +1700,15 @@ class DeliveryPackageService:
         )
 
     def _package_summary(self, package: DeliveryPackage) -> PackageSummary:
+        assembly = self._get_assembly(package.assembly_id)
         return PackageSummary(
             package_id=package.package_id,
             package_ref=_safe_ref("package", package.package_id),
             status=package.status,
             manifest_version=package.manifest_version,
+            source_pilot_version=assembly.source_pilot_version,
+            checklist_version=assembly.checklist_version,
+            checklist_template_version=assembly.template_version,
             byte_size=package.byte_size,
             checksum=package.checksum,
             created_at=_as_utc(package.created_at),
@@ -1908,6 +2034,23 @@ class DeliveryPackageService:
                 except OSError:
                     continue
 
+    def _quarantine_orphan(self, path: Path) -> None:
+        if not path.exists():
+            return
+        self._assert_safe_root(path, self.archive_root)
+        package_root = path.parent
+        self._assert_safe_root(path, package_root)
+        quarantine_root = package_root / ".orphaned"
+        quarantine_root.mkdir(parents=True, exist_ok=True)
+        self._assert_safe_root(quarantine_root, package_root)
+        destination = quarantine_root / f"{path.stem}-{uuid.uuid4().hex}.orphan"
+        try:
+            os.replace(path, destination)
+        except OSError:
+            # An unreferenced file has no DB package record and is never
+            # downloadable. A later operator recovery can quarantine it.
+            return
+
     def _now(self) -> datetime:
         value = self.now_provider()
         if value.tzinfo is None or value.utcoffset() is None:
@@ -1961,6 +2104,48 @@ def _request_hash(operation: str, payload: dict[str, object]) -> str:
         separators=(",", ":"),
     )
     return _sha256_bytes(canonical.encode())
+
+
+def _validate_page_limit(limit: int) -> None:
+    if limit < 1 or limit > 100:
+        raise DeliveryValidationError("limit must be between 1 and 100")
+
+
+def _encode_cursor(kind: str, occurred_at: datetime, record_id: str) -> str:
+    payload = json.dumps(
+        {"kind": kind, "at": occurred_at.isoformat(), "id": record_id},
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return base64.urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")
+
+
+def _decode_cursor(kind: str, cursor: str) -> tuple[datetime, str]:
+    if not cursor or len(cursor) > 500 or any(ord(char) < 33 for char in cursor):
+        raise DeliveryValidationError("cursor is invalid")
+    try:
+        padding = "=" * (-len(cursor) % 4)
+        raw = base64.b64decode(
+            cursor + padding,
+            altchars=b"-_",
+            validate=True,
+        )
+        payload = json.loads(raw)
+        if (
+            not isinstance(payload, dict)
+            or payload.get("kind") != kind
+            or not isinstance(payload.get("at"), str)
+            or not isinstance(payload.get("id"), str)
+            or not payload["id"]
+        ):
+            raise ValueError
+        occurred_at = datetime.fromisoformat(payload["at"])
+        if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
+            raise ValueError
+        return occurred_at.astimezone(timezone.utc), payload["id"]
+    except (ValueError, TypeError, json.JSONDecodeError, binascii.Error) as exc:
+        raise DeliveryValidationError("cursor is invalid") from exc
 
 
 def _safe_ref(prefix: str, value: str) -> str:
