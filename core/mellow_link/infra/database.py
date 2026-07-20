@@ -478,6 +478,289 @@ class PilotCommandResult(Base):
     )
 
 
+class DeliveryChecklistTemplate(Base):
+    __tablename__ = "delivery_checklist_templates"
+
+    template_id = Column(String(40), primary_key=True, index=True)
+    template_key = Column(String(100), nullable=False)
+    template_version = Column(Integer, nullable=False)
+    name = Column(String(255), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    retired_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "template_key",
+            "template_version",
+            name="uq_delivery_template_key_version",
+        ),
+        CheckConstraint("template_version > 0", name="ck_delivery_template_version"),
+    )
+
+
+class DeliveryChecklistTemplateItem(Base):
+    __tablename__ = "delivery_checklist_template_items"
+
+    template_item_id = Column(String(40), primary_key=True)
+    template_id = Column(
+        String(40),
+        ForeignKey("delivery_checklist_templates.template_id"),
+        nullable=False,
+        index=True,
+    )
+    item_key = Column(String(100), nullable=False)
+    display_name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=False, default="")
+    requirement = Column(String(20), nullable=False)
+    artifact_type = Column(String(50), nullable=False)
+    source = Column(String(100), nullable=False)
+    waiver_allowed = Column(Boolean, nullable=False, default=False)
+    sort_order = Column(Integer, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "template_id", "item_key", name="uq_delivery_template_item_key"
+        ),
+        CheckConstraint(
+            "requirement IN ('required', 'optional')",
+            name="ck_delivery_template_item_requirement",
+        ),
+        CheckConstraint("sort_order >= 0", name="ck_delivery_template_item_order"),
+    )
+
+
+class DeliveryChecklist(Base):
+    __tablename__ = "delivery_checklists"
+
+    checklist_id = Column(String(40), primary_key=True, index=True)
+    pilot_id = Column(
+        String(40), ForeignKey("pilot_states.pilot_id"), nullable=False, index=True
+    )
+    project_id = Column(
+        String(40), ForeignKey("modernization_projects.id"), nullable=False, index=True
+    )
+    run_id = Column(
+        String(100), ForeignKey("agent_runs.run_id"), nullable=False, index=True
+    )
+    template_id = Column(
+        String(40),
+        ForeignKey("delivery_checklist_templates.template_id"),
+        nullable=False,
+    )
+    template_version = Column(Integer, nullable=False)
+    version = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "pilot_id",
+            "template_id",
+            "template_version",
+            name="uq_delivery_checklist_pilot_template",
+        ),
+        CheckConstraint("version >= 0", name="ck_delivery_checklist_version"),
+    )
+
+
+class DeliveryChecklistItem(Base):
+    __tablename__ = "delivery_checklist_items"
+
+    checklist_item_id = Column(String(40), primary_key=True)
+    checklist_id = Column(
+        String(40),
+        ForeignKey("delivery_checklists.checklist_id"),
+        nullable=False,
+        index=True,
+    )
+    item_key = Column(String(100), nullable=False)
+    display_name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=False, default="")
+    requirement = Column(String(20), nullable=False)
+    artifact_type = Column(String(50), nullable=False)
+    source = Column(String(100), nullable=False)
+    waiver_allowed = Column(Boolean, nullable=False, default=False)
+    sort_order = Column(Integer, nullable=False)
+    status = Column(String(20), nullable=False, index=True)
+    artifact_ref = Column(String(100), nullable=True)
+    artifact_fingerprint = Column(String(64), nullable=True)
+    verified_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    verified_at = Column(DateTime(timezone=True), nullable=True)
+    waived_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    waived_at = Column(DateTime(timezone=True), nullable=True)
+    waiver_reason = Column(Text, nullable=True)
+    version = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "checklist_id", "item_key", name="uq_delivery_checklist_item_key"
+        ),
+        CheckConstraint(
+            "requirement IN ('required', 'optional')",
+            name="ck_delivery_checklist_item_requirement",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'present', 'missing', 'waived', 'invalid', 'stale')",
+            name="ck_delivery_checklist_item_status",
+        ),
+        CheckConstraint("version >= 0", name="ck_delivery_checklist_item_version"),
+        CheckConstraint("sort_order >= 0", name="ck_delivery_checklist_item_order"),
+    )
+
+
+class DeliveryPackageAssembly(Base):
+    __tablename__ = "delivery_package_assemblies"
+
+    assembly_id = Column(String(40), primary_key=True, index=True)
+    pilot_id = Column(
+        String(40), ForeignKey("pilot_states.pilot_id"), nullable=False, index=True
+    )
+    checklist_id = Column(
+        String(40), ForeignKey("delivery_checklists.checklist_id"), nullable=False
+    )
+    project_id = Column(
+        String(40), ForeignKey("modernization_projects.id"), nullable=False, index=True
+    )
+    run_id = Column(
+        String(100), ForeignKey("agent_runs.run_id"), nullable=False, index=True
+    )
+    status = Column(String(20), nullable=False, index=True)
+    version = Column(Integer, nullable=False, default=0)
+    attempt = Column(Integer, nullable=False, default=1)
+    request_fingerprint = Column(String(64), nullable=False, unique=True, index=True)
+    source_pilot_version = Column(Integer, nullable=False)
+    checklist_version = Column(Integer, nullable=False)
+    template_version = Column(Integer, nullable=False)
+    artifact_set_fingerprint = Column(String(64), nullable=False)
+    manifest_version = Column(String(50), nullable=False)
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    failed_at = Column(DateTime(timezone=True), nullable=True)
+    failure_code = Column(String(80), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'assembling', 'assembled', 'failed', 'superseded')",
+            name="ck_delivery_assembly_status",
+        ),
+        CheckConstraint("version >= 0", name="ck_delivery_assembly_version"),
+        CheckConstraint(
+            "attempt >= 1 AND attempt <= 3", name="ck_delivery_assembly_attempt"
+        ),
+    )
+
+
+class DeliveryPackage(Base):
+    __tablename__ = "delivery_packages"
+
+    package_id = Column(String(40), primary_key=True, index=True)
+    assembly_id = Column(
+        String(40),
+        ForeignKey("delivery_package_assemblies.assembly_id"),
+        nullable=False,
+        unique=True,
+    )
+    pilot_id = Column(
+        String(40), ForeignKey("pilot_states.pilot_id"), nullable=False, index=True
+    )
+    project_id = Column(
+        String(40), ForeignKey("modernization_projects.id"), nullable=False, index=True
+    )
+    run_id = Column(
+        String(100), ForeignKey("agent_runs.run_id"), nullable=False, index=True
+    )
+    status = Column(String(20), nullable=False, index=True)
+    manifest_version = Column(String(50), nullable=False)
+    manifest_json = Column(Text, nullable=False)
+    artifact_reference = Column(String(100), nullable=False, unique=True)
+    byte_size = Column(Integer, nullable=False)
+    checksum = Column(String(64), nullable=False)
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    superseded_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('assembled', 'superseded')",
+            name="ck_delivery_package_status",
+        ),
+        CheckConstraint("byte_size >= 0", name="ck_delivery_package_size"),
+    )
+
+
+class DeliveryAuditEvent(Base):
+    __tablename__ = "delivery_audit_events"
+
+    event_id = Column(String(40), primary_key=True, index=True)
+    pilot_id = Column(
+        String(40), ForeignKey("pilot_states.pilot_id"), nullable=False, index=True
+    )
+    project_id = Column(
+        String(40), ForeignKey("modernization_projects.id"), nullable=False, index=True
+    )
+    run_id = Column(
+        String(100), ForeignKey("agent_runs.run_id"), nullable=False, index=True
+    )
+    checklist_id = Column(String(40), nullable=True, index=True)
+    assembly_id = Column(String(40), nullable=True, index=True)
+    package_id = Column(String(40), nullable=True, index=True)
+    event_type = Column(String(80), nullable=False, index=True)
+    actor_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    occurred_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    idempotency_key = Column(String(200), nullable=True)
+    result_version = Column(Integer, nullable=False)
+    metadata_json = Column(Text, nullable=False, default="{}")
+
+    __table_args__ = (
+        CheckConstraint("result_version >= 0", name="ck_delivery_audit_version"),
+    )
+
+
+class DeliveryCommandResult(Base):
+    __tablename__ = "delivery_command_results"
+
+    id = Column(Integer, primary_key=True, index=True)
+    actor_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    idempotency_key = Column(String(200), nullable=False)
+    operation = Column(String(80), nullable=False)
+    request_hash = Column(String(64), nullable=False)
+    resource_type = Column(String(40), nullable=False)
+    resource_id = Column(String(40), nullable=False, index=True)
+    result_version = Column(Integer, nullable=False)
+    response_json = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "actor_id", "idempotency_key", name="uq_delivery_commands_actor_key"
+        ),
+        CheckConstraint("result_version >= 0", name="ck_delivery_command_version"),
+    )
+
+
+class DeliveryDownloadReference(Base):
+    __tablename__ = "delivery_download_references"
+
+    reference_id = Column(String(40), primary_key=True)
+    package_id = Column(
+        String(40),
+        ForeignKey("delivery_packages.package_id"),
+        nullable=False,
+        index=True,
+    )
+    actor_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    token_digest = Column(String(64), nullable=False, unique=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    consumed_at = Column(DateTime(timezone=True), nullable=True)
+
+
 # =========================
 # Helper Functions
 # =========================
