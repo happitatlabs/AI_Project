@@ -1,0 +1,95 @@
+name: pilot-delivery
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/pilot-delivery.yml"
+      - "core/mellow_link/requirements-test-delivery.txt"
+      - "core/mellow_link/requirements-test-pilot.txt"
+      - "core/mellow_link/infra/database.py"
+      - "core/mellow_link/infra/__init__.py"
+      - "core/mellow_link/main.py"
+      - "core/mellow_link/routers/delivery_package.py"
+      - "core/mellow_link/services/delivery_package.py"
+      - "core/mellow_link/services/project_results/archive.py"
+      - "core/mellow_link/tests/test_delivery_checklist_and_package.py"
+      - "core/mellow_link/tests/test_project_result_archive.py"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/pilot-delivery.yml"
+      - "core/mellow_link/requirements-test-delivery.txt"
+      - "core/mellow_link/requirements-test-pilot.txt"
+      - "core/mellow_link/infra/database.py"
+      - "core/mellow_link/infra/__init__.py"
+      - "core/mellow_link/main.py"
+      - "core/mellow_link/routers/delivery_package.py"
+      - "core/mellow_link/services/delivery_package.py"
+      - "core/mellow_link/services/project_results/archive.py"
+      - "core/mellow_link/tests/test_delivery_checklist_and_package.py"
+      - "core/mellow_link/tests/test_project_result_archive.py"
+
+jobs:
+  pilot-delivery:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core/mellow_link
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install focused test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-test-delivery.txt
+
+      - name: Static checks
+        run: |
+          python -m ruff check \
+            services/project_results/archive.py \
+            services/delivery_package.py \
+            routers/delivery_package.py \
+            tests/test_delivery_checklist_and_package.py \
+            tests/test_project_result_archive.py
+          python -m ruff check --select E9,F63,F7,F82 \
+            infra/database.py infra/__init__.py main.py
+          python -m black --check \
+            services/project_results/archive.py \
+            services/delivery_package.py \
+            routers/delivery_package.py \
+            tests/test_delivery_checklist_and_package.py \
+            tests/test_project_result_archive.py
+          python -m compileall -q \
+            infra/database.py infra/__init__.py main.py \
+            services/project_results/archive.py services/delivery_package.py \
+            routers/delivery_package.py
+          python -c "import yaml; yaml.safe_load(open('../../.github/workflows/pilot-delivery.yml', encoding='utf-8'))"
+
+      - name: Run Priority 3 and regression contracts
+        env:
+          PILOT_DELIVERY_ARTIFACT_DIR: .pilot-delivery-artifacts/review
+        run: |
+          python -m pytest -q --basetemp=.pilot-delivery-pytest \
+            tests/test_delivery_checklist_and_package.py \
+            tests/test_project_result_archive.py \
+            tests/test_pilot_state_and_approval_queue.py \
+            tests/test_daily_checkin_core.py \
+            tests/test_docx_polish_layer.py \
+            tests/test_pilot_demo_samples.py \
+            ../mellow_chat_runtime/tests/test_runtime_api_contract.py \
+            ../mellow_chat_runtime/tests/test_runtime_state_and_status.py
+
+      - name: Upload synthetic delivery package
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-pilot-delivery-package
+          path: core/mellow_link/.pilot-delivery-artifacts/review/synthetic-pilot-delivery-package.zip
+          if-no-files-found: error
