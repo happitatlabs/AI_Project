@@ -9,12 +9,17 @@ from sqlalchemy.orm import Session
 from mellow_link.infra import ModernizationProject
 
 
-def build_project_result_archive_paths(*, archive_root: Path, project_id: str, run_id: str) -> dict[str, Path]:
-    archive_dir = archive_root / (project_id or "unknown_project") / (run_id or "unknown_run")
+def build_project_result_archive_paths(
+    *, archive_root: Path, project_id: str, run_id: str
+) -> dict[str, Path]:
+    archive_dir = (
+        archive_root / (project_id or "unknown_project") / (run_id or "unknown_run")
+    )
     return {
         "dir": archive_dir,
         "markdown": archive_dir / "result.md",
         "docx": archive_dir / "result.docx",
+        "external_docx": archive_dir / "external_result.docx",
     }
 
 
@@ -56,7 +61,9 @@ async def persist_project_result_archive(
     archive_paths["dir"].mkdir(parents=True, exist_ok=True)
 
     if result_package is None:
-        resolved_assets = assets if assets is not None else build_assets_payload_fn(project, db)
+        resolved_assets = (
+            assets if assets is not None else build_assets_payload_fn(project, db)
+        )
         result_package = build_result_package_fn(
             project,
             snapshot,
@@ -84,15 +91,21 @@ async def persist_project_result_archive(
                 internal_export_mode="full",
             )
             shutil.copy2(str(generated_docx_path), str(archive_paths["docx"]))
-    except Exception as exc:
+
+        generated_external_path, _ = await generate_result_package_docx_fn(
+            project,
+            result_package,
+            surface_mode="external",
+            internal_export_mode="deck-only",
+        )
+        shutil.copy2(str(generated_external_path), str(archive_paths["external_docx"]))
+    except Exception:
         logger.warning(
-            "[Projects] Failed to persist DOCX archive for project=%s run=%s: %s",
-            project.id,
-            normalized_run_id,
-            exc,
+            "[Projects] Failed to persist one or more DOCX archive artifacts"
         )
 
     return {
         "markdown_path": str(archive_paths["markdown"]),
         "docx_path": str(archive_paths["docx"]),
+        "external_docx_path": str(archive_paths["external_docx"]),
     }
