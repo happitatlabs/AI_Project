@@ -15,12 +15,16 @@ npm run dev
 npm run build
 ```
 
-## Cloudflare Pages
+## Cloudflare Workers Builds
 
-- Framework preset: `Vite`
-- Build command: `npm run build`
-- Build output directory: `dist`
+- Repository: `happitatlabs/AI_Project`
+- Production branch: `main`
 - Root directory: `happitat-labs-homepage`
+- Build command: `npm run build`
+- Deploy command: `npx wrangler deploy`
+
+정적 자산 Worker 설정은 [`wrangler.jsonc`](./wrangler.jsonc)에 있으며, Vite 빌드 결과인
+`dist`를 배포하고 SPA 경로 fallback을 처리합니다.
 
 ## Links
 
