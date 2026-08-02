@@ -70,6 +70,7 @@ function App() {
       <footer className="site-footer">
         <div className="container">
           <p>© {new Date().getFullYear()} Happitat Labs</p>
+          <a href="/privacy-policy.html">해피 해비타트 개인정보처리방침</a>
         </div>
       </footer>
     </>
@@ -309,6 +310,7 @@ function HomePage() {
 
 function ProductDetailPage({ product }: { product: Product }) {
   const relatedProducts = products.filter((item) => item.path !== product.path);
+  const isSqlDiagnoser = product.path === "/products/sql-diagnoser";
 
   return (
     <main id="main" className="detail-main">
@@ -339,20 +341,71 @@ function ProductDetailPage({ product }: { product: Product }) {
         </div>
       </section>
 
-      <section className="section detail-section" aria-labelledby="detail-status-title">
-        <div className="container section-grid">
-          <div className="section-heading reveal">
-            <p className="eyebrow">Product page</p>
-            <h2 id="detail-status-title">상세 소개 페이지 준비 중</h2>
+      {isSqlDiagnoser ? (
+        <section className="section detail-section" aria-labelledby="sql-demo-title">
+          <div className="container">
+            <div className="section-heading reveal">
+              <p className="eyebrow">Protected demo</p>
+              <h2 id="sql-demo-title">구조를 먼저 확인하는 SQL 분석 데모</h2>
+              <p className="section-lead">
+                SQL을 실행하거나 저장하지 않고, 입력된 문장에서 테이블·JOIN·조건·집계·의존성
+                구조를 추출해 신규 개발자가 읽을 수 있는 형태로 정리합니다.
+              </p>
+            </div>
+
+            <div className="product-demo-layout">
+              <div className="demo-purpose reveal">
+                <p className="eyebrow">What to test</p>
+                <h3>이 데모에서 확인할 수 있는 것</h3>
+                <ul className="safeguard-list">
+                  <li>단건·다건 SQL의 테이블 사용과 JOIN 관계</li>
+                  <li>CTE, WHERE, HAVING, 집계, 윈도우 함수와 CASE 구조</li>
+                  <li>테이블 중심 자산 지도, 의존성 흐름, 리스크 후보</li>
+                  <li>팀 문서에 붙여 넣을 수 있는 분석 보고서 초안</li>
+                </ul>
+              </div>
+
+              <div className="demo-safety-panel reveal reveal-delay-1">
+                <p className="eyebrow">Safe access</p>
+                <h3>승인된 테스트 계정으로만 접근</h3>
+                <p>
+                  데모는 Cloudflare Access로 보호하고, 지정된 테스트 계정만 허용하는 방식으로
+                  운영합니다. 실제 운영 SQL, 개인정보, 고객 식별값은 입력하지 마세요.
+                </p>
+                <p>
+                  공개 데모에서는 기본 룰 기반 분석만 제공하며, AI 설명 보강은 별도 승인 환경에서
+                  선택적으로 활성화합니다.
+                </p>
+                {product.demoUrl ? (
+                  <a
+                    className="button button-primary"
+                    href={product.demoUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    보호된 데모 열기
+                  </a>
+                ) : null}
+              </div>
+            </div>
           </div>
-          <div className="section-body reveal reveal-delay-1">
-            <p>
-              이 경로는 제품별 상세 페이지를 위해 미리 열어두었습니다. 공개 가능한 소개,
-              데모, 업데이트 로그를 순차적으로 연결할 예정입니다.
-            </p>
+        </section>
+      ) : (
+        <section className="section detail-section" aria-labelledby="detail-status-title">
+          <div className="container section-grid">
+            <div className="section-heading reveal">
+              <p className="eyebrow">Product page</p>
+              <h2 id="detail-status-title">상세 소개 페이지 준비 중</h2>
+            </div>
+            <div className="section-body reveal reveal-delay-1">
+              <p>
+                이 경로는 제품별 상세 페이지를 위해 미리 열어두었습니다. 공개 가능한 소개,
+                데모, 업데이트 로그를 순차적으로 연결할 예정입니다.
+              </p>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {relatedProducts.length > 0 && (
         <section className="section related-section" aria-labelledby="related-title">
