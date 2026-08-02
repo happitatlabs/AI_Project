@@ -647,6 +647,53 @@ h3 {
   border-bottom: 1px solid var(--border);
 }
 
+.product-demo-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+.demo-purpose,
+.demo-safety-panel {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 1.35rem;
+}
+
+.demo-purpose h3,
+.demo-safety-panel h3 {
+  margin-top: 0.4rem;
+  font-size: 1.2rem;
+}
+
+.demo-safety-panel {
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface-strong));
+}
+
+.demo-safety-panel p:not(.eyebrow) {
+  margin-top: 0.9rem;
+  color: var(--muted);
+  line-height: 1.75;
+  word-break: keep-all;
+}
+
+.demo-safety-panel .button {
+  margin-top: 1.25rem;
+}
+
+.safeguard-list {
+  display: grid;
+  gap: 0.8rem;
+  margin: 1.25rem 0 0;
+  padding-left: 1.15rem;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
 .related-section {
   background: var(--bg-soft);
 }
@@ -800,6 +847,10 @@ h3 {
 
   .detail-hero h1 {
     font-size: 3rem;
+  }
+
+  .product-demo-layout {
+    grid-template-columns: 1fr;
   }
 }
 
