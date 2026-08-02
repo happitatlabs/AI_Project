@@ -63,7 +63,7 @@ export const products = [
     signal: "ANALYZE",
     status: "MVP Complete",
     path: "/products/sql-diagnoser",
-    demoUrl: "https://sql-diagnoser.happitatlabs.com",
+    demoUrl: "https://sql-diagnoser-demo.pletta900114.workers.dev",
   },
   {
     name: "Dot Code Editor",
