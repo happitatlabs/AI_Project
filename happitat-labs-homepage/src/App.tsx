@@ -345,7 +345,7 @@ function ProductDetailPage({ product }: { product: Product }) {
         <section className="section detail-section" aria-labelledby="sql-demo-title">
           <div className="container">
             <div className="section-heading reveal">
-              <p className="eyebrow">Protected demo</p>
+              <p className="eyebrow">Portfolio demo</p>
               <h2 id="sql-demo-title">구조를 먼저 확인하는 SQL 분석 데모</h2>
               <p className="section-lead">
                 SQL을 실행하거나 저장하지 않고, 입력된 문장에서 테이블·JOIN·조건·집계·의존성
@@ -366,14 +366,14 @@ function ProductDetailPage({ product }: { product: Product }) {
               </div>
 
               <div className="demo-safety-panel reveal reveal-delay-1">
-                <p className="eyebrow">Safe access</p>
-                <h3>승인된 테스트 계정으로만 접근</h3>
+                <p className="eyebrow">Safe demo</p>
+                <h3>운영 데이터를 사용하지 않는 데모</h3>
                 <p>
-                  데모는 Cloudflare Access로 보호하고, 지정된 테스트 계정만 허용하는 방식으로
-                  운영합니다. 실제 운영 SQL, 개인정보, 고객 식별값은 입력하지 마세요.
+                  이 공개 데모는 SQL을 실행하거나 저장하지 않고, 입력된 문장의 구조만 브라우저에서
+                  분석합니다. 실제 운영 SQL, 개인정보, 고객 식별값은 입력하지 마세요.
                 </p>
                 <p>
-                  공개 데모에서는 기본 룰 기반 분석만 제공하며, AI 설명 보강은 별도 승인 환경에서
+                  기본 룰 기반 분석과 보고서 기능을 확인할 수 있으며, AI 설명 보강은 별도 환경에서
                   선택적으로 활성화합니다.
                 </p>
                 {product.demoUrl ? (
