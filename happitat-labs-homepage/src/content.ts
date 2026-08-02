@@ -11,6 +11,7 @@ export type Product = {
   signal: string;
   status: "Private Beta" | "MVP Complete" | "Coming Soon";
   path: string;
+  demoUrl?: string;
 };
 
 export const capabilityTags = ["문제 구조화", "AI 활용", "MVP", "UI/UX", "업무 자동화"];
@@ -62,6 +63,7 @@ export const products = [
     signal: "ANALYZE",
     status: "MVP Complete",
     path: "/products/sql-diagnoser",
+    demoUrl: "https://sql-diagnoser.happitatlabs.com",
   },
   {
     name: "Dot Code Editor",
