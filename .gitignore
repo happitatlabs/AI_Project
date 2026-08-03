@@ -124,6 +124,9 @@ mem.json
 # RAG 데이터 (Mellow-Link)
 chroma_db/
 data/
+# The dot editor keeps its sample sprite modules under this path.
+!dot-code-editor-mvp-typescript-react/src/data/
+!dot-code-editor-mvp-typescript-react/src/data/**
 
 # --------------------------------------------------------
 # 5. 🎨 Open_llm_Vtuber 에셋 관리 (Heavy Assets)
