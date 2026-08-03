@@ -1,0 +1,14 @@
+node_modules/
+dist/
+web-output/
+*.log
+.DS_Store
+.local-android-sdk/
+.local-android-commandlinetools.zip
+.local-android-commandlinetools-extract/
+apk-output/
+android/.gradle/
+android/build/
+android/app/build/
+android/capacitor-cordova-android-plugins/build/
+android/local.properties
