@@ -20,7 +20,8 @@ body {
 
 button,
 select,
-textarea {
+textarea,
+input {
   font: inherit;
 }
 
@@ -41,6 +42,116 @@ textarea {
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 18px;
+}
+
+.demo-login-shell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  background: #f3f5f7;
+}
+
+.demo-login-panel {
+  display: grid;
+  width: min(440px, 100%);
+  gap: 16px;
+  border: 1px solid #d8e0ea;
+  border-radius: 8px;
+  padding: 28px;
+  background: #ffffff;
+  box-shadow: 0 18px 42px rgba(28, 39, 58, 0.12);
+}
+
+.demo-login-panel h1 {
+  font-size: 1.65rem;
+}
+
+.demo-login-description,
+.demo-login-help,
+.demo-login-checking {
+  margin: 0;
+  color: #526071;
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.65;
+}
+
+.demo-login-form {
+  display: grid;
+  gap: 14px;
+}
+
+.demo-login-form label {
+  display: grid;
+  gap: 7px;
+  color: #334155;
+  font-size: 0.88rem;
+  font-weight: 850;
+}
+
+.demo-login-form input {
+  min-height: 44px;
+  border: 1px solid #cbd6e3;
+  border-radius: 6px;
+  padding: 0 11px;
+  color: #172033;
+  background: #fbfcfe;
+}
+
+.demo-login-form input:focus-visible {
+  outline: 3px solid rgba(31, 111, 235, 0.28);
+  outline-offset: 2px;
+}
+
+.demo-login-error {
+  margin: 0;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: #9f1239;
+  background: #fff1f2;
+  font-size: 0.88rem;
+  font-weight: 750;
+  line-height: 1.55;
+}
+
+.demo-session-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  color: #42526a;
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.demo-session-control small {
+  width: 100%;
+  color: #9f1239;
+  text-align: right;
+}
+
+.text-button {
+  min-height: 32px;
+  border: 1px solid #c9d7e8;
+  border-radius: 6px;
+  padding: 5px 9px;
+  color: #17463e;
+  background: #ffffff;
+  cursor: pointer;
+  font-weight: 850;
+}
+
+.text-button:hover:not(:disabled) {
+  border-color: #6eb29f;
+  background: #eff9f5;
+}
+
+.text-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 .eyebrow {
@@ -282,6 +393,18 @@ h3 {
   font-size: 0.9rem;
   font-weight: 700;
   line-height: 1.65;
+}
+
+.demo-provider-status {
+  margin: 0 0 14px;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  padding: 12px 14px;
+  color: #854d0e;
+  background: #fffbeb;
+  font-size: 0.9rem;
+  font-weight: 750;
+  line-height: 1.6;
 }
 
 .preset-panel {
@@ -1760,9 +1883,25 @@ code {
     padding: 18px;
   }
 
+  .demo-login-shell {
+    padding: 18px;
+  }
+
+  .demo-login-panel {
+    padding: 22px;
+  }
+
   .app-header {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .demo-session-control {
+    justify-content: flex-start;
+  }
+
+  .demo-session-control small {
+    text-align: left;
   }
 
   textarea {

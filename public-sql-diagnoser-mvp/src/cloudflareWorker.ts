@@ -11,6 +11,7 @@ type WorkerAssets = {
 type WorkerEnv = {
   ASSETS: WorkerAssets;
   DEMO_PASSWORD?: string;
+  DEMO_SESSION_SECRET?: string;
   DEMO_USERNAME?: string;
   [key: string]: WorkerAssets | string | undefined;
 };
@@ -28,7 +29,20 @@ type ApiHandler = (
   },
 ) => Promise<ApiRouteResult>;
 
+type DemoAccessConfig = {
+  password: string;
+  sessionSecret: string;
+  username: string;
+};
+
+type DemoSession = {
+  expiresAt: number;
+  username: string;
+};
+
 const MAX_API_BODY_BYTES = 1024 * 1024;
+const SESSION_COOKIE_NAME = "__Host-sql-diagnoser-demo";
+const SESSION_TTL_SECONDS = 60 * 60 * 8;
 
 const apiHandlers: Record<string, ApiHandler> = {
   "/api/ai-data-insights": handleAiDataInsightsRequest as ApiHandler,
@@ -37,26 +51,34 @@ const apiHandlers: Record<string, ApiHandler> = {
   "/api/ai-multi-document-draft": handleAiMultiDocumentDraftRequest as ApiHandler,
 };
 
-const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
+const jsonResponse = (
+  body: unknown,
+  status = 200,
+  additionalHeaders: Record<string, string> = {},
+) => new Response(JSON.stringify(body), {
   headers: {
     "Cache-Control": "no-store",
     "Content-Type": "application/json; charset=utf-8",
+    ...additionalHeaders,
   },
   status,
 });
 
-const hasDemoAccessConfig = (env: WorkerEnv) =>
-  Boolean(env.DEMO_USERNAME?.trim() && env.DEMO_PASSWORD?.trim());
+const getDemoAccessConfig = (env: WorkerEnv): DemoAccessConfig | undefined => {
+  const username = env.DEMO_USERNAME?.trim();
+  const password = env.DEMO_PASSWORD;
 
-const encodeBasicCredentials = (value: string) => {
-  const bytes = new TextEncoder().encode(value);
-  let binary = "";
+  if (!username || !password) {
+    return undefined;
+  }
 
-  bytes.forEach((byte) => {
-    binary += String.fromCharCode(byte);
-  });
-
-  return btoa(binary);
+  return {
+    password,
+    // A separate secret supports independent session invalidation. The password
+    // fallback keeps existing two-variable demo deployments working safely.
+    sessionSecret: env.DEMO_SESSION_SECRET?.trim() || password,
+    username,
+  };
 };
 
 const equalLengthStringsMatch = (left: string, right: string) => {
@@ -73,24 +95,127 @@ const equalLengthStringsMatch = (left: string, right: string) => {
   return difference === 0;
 };
 
-const hasAuthorizedDemoAccess = (request: Request, env: WorkerEnv) => {
-  if (!hasDemoAccessConfig(env)) {
-    return false;
-  }
+const base64UrlEncode = (value: Uint8Array) => {
+  let binary = "";
 
-  const expected = `Basic ${encodeBasicCredentials(`${env.DEMO_USERNAME}:${env.DEMO_PASSWORD}`)}`;
-  const authorization = request.headers.get("Authorization") ?? "";
+  value.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
 
-  return equalLengthStringsMatch(authorization, expected);
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
 };
 
-const unauthorizedResponse = () => new Response("Demo authentication is required.", {
-  headers: {
-    "Cache-Control": "no-store",
-    "WWW-Authenticate": 'Basic realm="SQL Diagnoser Demo", charset="UTF-8"',
-  },
-  status: 401,
-});
+const base64UrlDecode = (value: string) => {
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padding = "=".repeat((4 - (normalized.length % 4)) % 4);
+  const binary = atob(`${normalized}${padding}`);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return bytes;
+};
+
+const createSessionSigningKey = (sessionSecret: string) => crypto.subtle.importKey(
+  "raw",
+  new TextEncoder().encode(sessionSecret),
+  { hash: "SHA-256", name: "HMAC" },
+  false,
+  ["sign", "verify"],
+);
+
+const createDemoSessionToken = async (config: DemoAccessConfig) => {
+  const expiresAt = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS;
+  const payload = base64UrlEncode(new TextEncoder().encode(JSON.stringify({
+    expiresAt,
+    username: config.username,
+    version: 1,
+  })));
+  const signingKey = await createSessionSigningKey(config.sessionSecret);
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    signingKey,
+    new TextEncoder().encode(payload),
+  );
+
+  return `${payload}.${base64UrlEncode(new Uint8Array(signature))}`;
+};
+
+const parseCookieValue = (request: Request, name: string) => {
+  const cookieHeader = request.headers.get("Cookie") ?? "";
+  const cookie = cookieHeader
+    .split(";")
+    .map((item) => item.trim())
+    .find((item) => item.startsWith(`${name}=`));
+
+  return cookie ? cookie.slice(name.length + 1) : undefined;
+};
+
+const getDemoSession = async (
+  request: Request,
+  config: DemoAccessConfig,
+): Promise<DemoSession | undefined> => {
+  const token = parseCookieValue(request, SESSION_COOKIE_NAME);
+
+  if (!token) {
+    return undefined;
+  }
+
+  const [payload, signature, ...extraSegments] = token.split(".");
+
+  if (!payload || !signature || extraSegments.length > 0) {
+    return undefined;
+  }
+
+  try {
+    const signingKey = await createSessionSigningKey(config.sessionSecret);
+    const valid = await crypto.subtle.verify(
+      "HMAC",
+      signingKey,
+      base64UrlDecode(signature),
+      new TextEncoder().encode(payload),
+    );
+
+    if (!valid) {
+      return undefined;
+    }
+
+    const parsed = JSON.parse(new TextDecoder().decode(base64UrlDecode(payload))) as {
+      expiresAt?: unknown;
+      username?: unknown;
+      version?: unknown;
+    };
+
+    if (
+      parsed.version !== 1
+      || typeof parsed.expiresAt !== "number"
+      || !Number.isSafeInteger(parsed.expiresAt)
+      || parsed.expiresAt <= Math.floor(Date.now() / 1000)
+      || typeof parsed.username !== "string"
+      || !equalLengthStringsMatch(parsed.username, config.username)
+    ) {
+      return undefined;
+    }
+
+    return {
+      expiresAt: parsed.expiresAt,
+      username: config.username,
+    };
+  } catch {
+    return undefined;
+  }
+};
+
+const sessionCookie = (token: string) =>
+  `${SESSION_COOKIE_NAME}=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL_SECONDS}`;
+
+const expiredSessionCookie = () =>
+  `${SESSION_COOKIE_NAME}=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0`;
 
 const isUsableWorkerOllamaEndpoint = (value: string | undefined) => {
   if (!value) {
@@ -134,6 +259,90 @@ const parseJsonRequest = async (request: Request) => {
   return rawBody ? JSON.parse(rawBody) : {};
 };
 
+const loginRequiredResponse = () => jsonResponse({
+  error: "AI 설명 보강은 로그인한 테스트 계정에서만 사용할 수 있습니다.",
+}, 401);
+
+const handleLoginRequest = async (request: Request, env: WorkerEnv) => {
+  if (request.method !== "POST") {
+    return jsonResponse({ error: "POST 요청만 지원합니다." }, 405);
+  }
+
+  const config = getDemoAccessConfig(env);
+
+  if (!config) {
+    return jsonResponse({
+      error: "데모 로그인 계정이 아직 설정되지 않았습니다. DEMO_USERNAME과 DEMO_PASSWORD를 Worker secret으로 설정하세요.",
+    }, 503);
+  }
+
+  try {
+    const body = await parseJsonRequest(request) as { password?: unknown; username?: unknown };
+    const username = typeof body.username === "string" ? body.username.trim() : "";
+    const password = typeof body.password === "string" ? body.password : "";
+
+    if (
+      !equalLengthStringsMatch(username, config.username)
+      || !equalLengthStringsMatch(password, config.password)
+    ) {
+      return jsonResponse({ error: "아이디 또는 비밀번호가 일치하지 않습니다." }, 401);
+    }
+
+    const token = await createDemoSessionToken(config);
+
+    return jsonResponse({
+      aiEnabled: isWorkerAiConfigured(env),
+      authenticated: true,
+      loginRequired: true,
+      username: config.username,
+    }, 200, {
+      "Set-Cookie": sessionCookie(token),
+    });
+  } catch (error) {
+    if (error instanceof RangeError) {
+      return jsonResponse({ error: error.message }, 413);
+    }
+
+    return jsonResponse({ error: "로그인 요청 형식을 해석하지 못했습니다." }, 400);
+  }
+};
+
+const handleLogoutRequest = (request: Request) => {
+  if (request.method !== "POST") {
+    return jsonResponse({ error: "POST 요청만 지원합니다." }, 405);
+  }
+
+  return jsonResponse({ authenticated: false }, 200, {
+    "Set-Cookie": expiredSessionCookie(),
+  });
+};
+
+const handleRuntimeConfigRequest = async (request: Request, env: WorkerEnv) => {
+  const config = getDemoAccessConfig(env);
+  const session = config ? await getDemoSession(request, config) : undefined;
+  const aiConfigured = isWorkerAiConfigured(env);
+
+  return jsonResponse({
+    aiConfigured,
+    aiEnabled: Boolean(config && session && aiConfigured),
+    authenticated: Boolean(session),
+    loginRequired: Boolean(config),
+    username: session?.username,
+  });
+};
+
+const handleAuthenticationRequest = async (request: Request, env: WorkerEnv, pathname: string) => {
+  if (pathname === "/api/auth/login") {
+    return handleLoginRequest(request, env);
+  }
+
+  if (pathname === "/api/auth/logout") {
+    return handleLogoutRequest(request);
+  }
+
+  return undefined;
+};
+
 const handleApiRequest = async (request: Request, env: WorkerEnv, pathname: string) => {
   const handler = apiHandlers[pathname];
 
@@ -145,10 +354,16 @@ const handleApiRequest = async (request: Request, env: WorkerEnv, pathname: stri
     return jsonResponse({ error: "POST 요청만 지원합니다." }, 405);
   }
 
-  if (!hasDemoAccessConfig(env)) {
+  const config = getDemoAccessConfig(env);
+
+  if (!config) {
     return jsonResponse({
-      error: "AI 데모 접근 계정이 설정되지 않았습니다. DEMO_USERNAME과 DEMO_PASSWORD를 Worker 비밀값으로 설정하세요.",
+      error: "AI 데모 접근 계정이 설정되지 않았습니다. DEMO_USERNAME과 DEMO_PASSWORD를 Worker secret으로 설정하세요.",
     }, 503);
+  }
+
+  if (!await getDemoSession(request, config)) {
+    return loginRequiredResponse();
   }
 
   if (!isWorkerAiConfigured(env)) {
@@ -177,16 +392,15 @@ const handleApiRequest = async (request: Request, env: WorkerEnv, pathname: stri
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(request.url);
-    const protectedDemo = hasDemoAccessConfig(env);
-
-    if (protectedDemo && !hasAuthorizedDemoAccess(request, env)) {
-      return unauthorizedResponse();
-    }
 
     if (url.pathname === "/api/runtime-config") {
-      return jsonResponse({
-        aiEnabled: protectedDemo && isWorkerAiConfigured(env),
-      });
+      return handleRuntimeConfigRequest(request, env);
+    }
+
+    const authenticationResponse = await handleAuthenticationRequest(request, env, url.pathname);
+
+    if (authenticationResponse) {
+      return authenticationResponse;
     }
 
     const apiResponse = await handleApiRequest(request, env, url.pathname);

@@ -264,7 +264,9 @@ AI 설명 보강은 사용자가 `AI로 설명 보강하기` 버튼을 클릭할
 
 현재 Cloudflare Worker 배포 주소는 `https://sql-diagnoser-demo.pletta900114.workers.dev`입니다. Worker는 정적 앱과 `/api/ai-*` endpoint를 같은 origin에서 제공합니다. API 키는 브라우저와 Git 저장소에 포함하지 않습니다.
 
-AI 데모는 비용과 악용을 막기 위해 접근 계정이 설정된 경우에만 활성화됩니다. `DEMO_USERNAME`과 `DEMO_PASSWORD`를 Worker secret으로 설정하면 Worker가 정적 앱과 AI API 모두에 HTTP Basic 인증을 요구합니다. 지정한 사용자만 브라우저 인증 창에서 로그인해 사용할 수 있습니다.
+AI 데모는 비용과 악용을 막기 위해 지정한 테스트 계정이 로그인한 경우에만 활성화됩니다. `DEMO_USERNAME`, `DEMO_PASSWORD`, `DEMO_SESSION_SECRET`을 Worker secret으로 설정하면 앱에 로그인 화면이 표시됩니다. 로그인 성공 시 Worker가 `HttpOnly`, `Secure`, `SameSite=Strict` 세션 쿠키를 발급하며, `/api/ai-*` 요청은 유효한 세션 없이는 처리되지 않습니다.
+
+`DEMO_SESSION_SECRET`은 32자 이상인 무작위 값으로 별도 설정하는 것을 권장합니다. 설정하지 않은 기존 데모는 `DEMO_PASSWORD`를 세션 서명 키로 사용해 호환되지만, 운영성 데모에서는 별도 secret을 사용해야 합니다. 현재 환경 변수 방식은 한 개의 지정 테스트 계정을 위한 방식이며, 여러 개인 계정 관리가 필요하면 Cloudflare Access 또는 별도 사용자 저장소를 추가하는 단계로 확장합니다.
 
 Cloudflare Worker 설정:
 
@@ -285,6 +287,7 @@ DEMO_USERNAME=test-user
 # Worker secret
 AZURE_OPENAI_API_KEY=...
 DEMO_PASSWORD=...
+DEMO_SESSION_SECRET=long-random-session-secret
 ```
 
 OpenAI를 사용할 때는 다음을 사용합니다.
@@ -297,6 +300,7 @@ DEMO_USERNAME=test-user
 # Worker secret
 OPENAI_API_KEY=...
 DEMO_PASSWORD=...
+DEMO_SESSION_SECRET=long-random-session-secret
 ```
 
 Ollama는 Cloudflare Worker에서 PC의 `http://localhost:11434`에 접근할 수 없습니다. 웹 데모에 Ollama를 연결하려면 인증으로 보호된 HTTPS endpoint가 필요합니다. 로컬 검증에는 기존처럼 `OLLAMA_BASE_URL=http://localhost:11434`와 설치된 모델을 사용하세요.
@@ -338,7 +342,7 @@ Azure OpenAI의 `AZURE_OPENAI_MODEL`에는 일반 모델명이 아니라 Azure�
 
 로컬 개발에서는 `npm run dev`로 실행되는 Vite 개발 서버가 `POST /api/ai-explain`, `/api/ai-document-draft`, `/api/ai-multi-document-draft`, `/api/ai-data-insights`를 함께 처리합니다. 별도 API 서버를 직접 띄우지 않아도 됩니다.
 
-Cloudflare Worker 배포에서는 `src/cloudflareWorker.ts`가 같은 origin의 `/api/ai-*` endpoint를 처리합니다. provider별 키와 접근 비밀번호는 Worker secret으로 설정해야 합니다.
+Cloudflare Worker 배포에서는 `src/cloudflareWorker.ts`가 같은 origin의 `/api/auth/*`, `/api/runtime-config`, `/api/ai-*` endpoint를 처리합니다. provider별 키와 테스트 계정·세션 비밀값은 Worker secret으로 설정해야 합니다.
 
 ## 현재 한계
 

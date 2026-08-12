@@ -1346,37 +1346,91 @@ const unconfiguredWorkerRuntime = await cloudflareWorker.fetch(
   { ASSETS: workerAssets },
 );
 assert.equal(unconfiguredWorkerRuntime.status, 200);
-assert.equal((await unconfiguredWorkerRuntime.json()).aiEnabled, false);
+assert.deepEqual(await unconfiguredWorkerRuntime.json(), {
+  aiConfigured: false,
+  aiEnabled: false,
+  authenticated: false,
+  loginRequired: false,
+});
 
 const protectedWorkerEnv = {
   AI_PROVIDER: "openai",
   ASSETS: workerAssets,
   DEMO_PASSWORD: "demo-password",
+  DEMO_SESSION_SECRET: "test-session-secret",
   DEMO_USERNAME: "demo-user",
   OPENAI_API_KEY: "test-key",
   OPENAI_MODEL: "test-model",
 };
-const unauthorizedWorkerResponse = await cloudflareWorker.fetch(
+
+const publicWorkerAssetResponse = await cloudflareWorker.fetch(
   new Request("https://sql-diagnoser-demo.example/"),
   protectedWorkerEnv,
 );
-assert.equal(unauthorizedWorkerResponse.status, 401);
-assert.match(unauthorizedWorkerResponse.headers.get("WWW-Authenticate") ?? "", /Basic/);
+assert.equal(await publicWorkerAssetResponse.text(), "asset response");
 
-const workerAuthorization = `Basic ${Buffer.from("demo-user:demo-password").toString("base64")}`;
-const configuredWorkerRuntime = await cloudflareWorker.fetch(
-  new Request("https://sql-diagnoser-demo.example/api/runtime-config", {
-    headers: { Authorization: workerAuthorization },
+const signedOutWorkerRuntime = await cloudflareWorker.fetch(
+  new Request("https://sql-diagnoser-demo.example/api/runtime-config"),
+  protectedWorkerEnv,
+);
+assert.deepEqual(await signedOutWorkerRuntime.json(), {
+  aiConfigured: true,
+  aiEnabled: false,
+  authenticated: false,
+  loginRequired: true,
+});
+
+const unauthenticatedAiResponse = await cloudflareWorker.fetch(
+  new Request("https://sql-diagnoser-demo.example/api/ai-explain", {
+    body: "{}",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    method: "POST",
   }),
   protectedWorkerEnv,
 );
-assert.equal((await configuredWorkerRuntime.json()).aiEnabled, true);
+assert.equal(unauthenticatedAiResponse.status, 401);
+assert.match((await unauthenticatedAiResponse.json()).error, /로그인한 테스트 계정/);
+
+const invalidLoginResponse = await cloudflareWorker.fetch(
+  new Request("https://sql-diagnoser-demo.example/api/auth/login", {
+    body: JSON.stringify({ password: "wrong-password", username: "demo-user" }),
+    headers: {
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  }),
+  protectedWorkerEnv,
+);
+assert.equal(invalidLoginResponse.status, 401);
+assert.match((await invalidLoginResponse.json()).error, /아이디 또는 비밀번호/);
+
+const loginResponse = await cloudflareWorker.fetch(
+  new Request("https://sql-diagnoser-demo.example/api/auth/login", {
+    body: JSON.stringify({ password: "demo-password", username: "demo-user" }),
+    headers: {
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  }),
+  protectedWorkerEnv,
+);
+assert.equal(loginResponse.status, 200);
+assert.equal((await loginResponse.clone().json()).authenticated, true);
+assert.equal((await loginResponse.clone().json()).aiEnabled, true);
+const loginCookie = loginResponse.headers.get("Set-Cookie") ?? "";
+assert.match(loginCookie, /__Host-sql-diagnoser-demo=/);
+assert.match(loginCookie, /HttpOnly/);
+assert.match(loginCookie, /Secure/);
+assert.match(loginCookie, /SameSite=Strict/);
+const sessionCookie = loginCookie.split(";")[0];
 
 const protectedWorkerInvalidAiRequest = await cloudflareWorker.fetch(
   new Request("https://sql-diagnoser-demo.example/api/ai-explain", {
     body: "{}",
     headers: {
-      Authorization: workerAuthorization,
+      Cookie: sessionCookie,
       "Content-Type": "application/json",
     },
     method: "POST",
@@ -1386,22 +1440,39 @@ const protectedWorkerInvalidAiRequest = await cloudflareWorker.fetch(
 assert.equal(protectedWorkerInvalidAiRequest.status, 400);
 assert.match((await protectedWorkerInvalidAiRequest.json()).error, /분석할 SQL/);
 
-const protectedWorkerAssetResponse = await cloudflareWorker.fetch(
-  new Request("https://sql-diagnoser-demo.example/products/sql-diagnoser", {
-    headers: { Authorization: workerAuthorization },
+const authenticatedWorkerRuntime = await cloudflareWorker.fetch(
+  new Request("https://sql-diagnoser-demo.example/api/runtime-config", {
+    headers: { Cookie: sessionCookie },
   }),
   protectedWorkerEnv,
 );
-assert.equal(await protectedWorkerAssetResponse.text(), "asset response");
+assert.deepEqual(await authenticatedWorkerRuntime.json(), {
+  aiConfigured: true,
+  aiEnabled: true,
+  authenticated: true,
+  loginRequired: true,
+  username: "demo-user",
+});
+
+const logoutResponse = await cloudflareWorker.fetch(
+  new Request("https://sql-diagnoser-demo.example/api/auth/logout", {
+    headers: { Cookie: sessionCookie },
+    method: "POST",
+  }),
+  protectedWorkerEnv,
+);
+assert.equal(logoutResponse.status, 200);
+assert.match(logoutResponse.headers.get("Set-Cookie") ?? "", /Max-Age=0/);
 
 const localOllamaWorkerRuntime = await cloudflareWorker.fetch(
   new Request("https://sql-diagnoser-demo.example/api/runtime-config", {
-    headers: { Authorization: workerAuthorization },
+    headers: { Cookie: sessionCookie },
   }),
   {
     AI_PROVIDER: "ollama",
     ASSETS: workerAssets,
     DEMO_PASSWORD: "demo-password",
+    DEMO_SESSION_SECRET: "test-session-secret",
     DEMO_USERNAME: "demo-user",
     OLLAMA_BASE_URL: "http://localhost:11434",
     OLLAMA_MODEL: "qwen3:14b",
