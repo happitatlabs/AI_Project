@@ -54,6 +54,7 @@ compileTsFile("src/multiAiExplanation.ts", path.join(tempModuleRoot, "src/multiA
 compileTsFile("src/tableAssetMap.ts", path.join(tempModuleRoot, "src/tableAssetMap.js"));
 compileTsFile("src/systemGraph.ts", path.join(tempModuleRoot, "src/systemGraph.js"));
 compileTsFile("src/riskDetector.ts", path.join(tempModuleRoot, "src/riskDetector.js"));
+compileTsFile("src/diagnosticNarrative.ts", path.join(tempModuleRoot, "src/diagnosticNarrative.js"));
 compileTsFile("src/reportModel.ts", path.join(tempModuleRoot, "src/reportModel.js"));
 compileTsFile("api/ai-provider.ts", path.join(tempModuleRoot, "api/ai-provider.js"));
 compileTsFile("api/ai-explain.ts", path.join(tempModuleRoot, "api/ai-explain.js"));
@@ -123,6 +124,10 @@ const {
 const { analyzeSqlRisks } = await import(
   pathToFileURL(path.join(tempModuleRoot, "src/riskDetector.js")).href
 );
+const {
+  buildMultiSqlNarrative,
+  buildSingleSqlNarrative,
+} = await import(pathToFileURL(path.join(tempModuleRoot, "src/diagnosticNarrative.js")).href);
 const {
   buildMarkdownReport,
   buildPasteDocument,
@@ -470,6 +475,12 @@ const preservedAnalysis = preserveAnalysisWithAiError(sensitiveAnalysis, "AI fai
 assert.equal(preservedAnalysis.analysis, sensitiveAnalysis);
 assert.equal(preservedAnalysis.aiState.status, "error");
 assert.equal(preservedAnalysis.aiState.errorMessage, "AI failed");
+const narrativeAfterAiError = buildSingleSqlNarrative(
+  sensitiveAnalysisSql,
+  preservedAnalysis.analysis,
+);
+assert.ok(narrativeAfterAiError.keyFindings.length > 0);
+assert.ok(narrativeAfterAiError.nextQuestions.length > 0);
 
 const splitInput = `SELECT 'value;still literal' AS memo FROM orders;
 -- SELECT * FROM fake_table; this semicolon is a comment
@@ -550,6 +561,20 @@ const tableAssetReport = buildTableAssetMapMarkdownSection(tableAssetMap);
 assert.match(tableAssetReport, /테이블 자산 지도/);
 assert.match(tableAssetReport, /핵심 테이블 후보/);
 assert.match(tableAssetReport, /monthly_order_snapshot/);
+
+const multiNarrative = buildMultiSqlNarrative(
+  multiAnalysis,
+  tableAssetMap,
+  analyzeSqlRisks(multiAnalysis),
+);
+assert.equal(multiNarrative.title, "자산 지도 핵심 결과");
+assert.equal(multiNarrative.keyFindings.length, 3);
+assert.ok(multiNarrative.keyFindings.some((finding) => finding.id.startsWith("multi-core-table-")));
+assert.ok(multiNarrative.keyFindings.some((finding) => finding.id.startsWith("multi-priority-sql-")));
+assert.ok(multiNarrative.priorityTargets.some((target) => target.target?.type === "table"));
+assert.ok(multiNarrative.nextQuestions.some((question) => question.id === "multi-core-table-impact"));
+assert.ok(multiNarrative.nextQuestions.some((question) => question.id === "multi-write-order"));
+assert.doesNotMatch(JSON.stringify(multiNarrative), /증감률|시계열 추세|변화 기여도|이상치/);
 
 const multiDocumentRiskAnalysis = analyzeSqlRisks(multiAnalysis);
 const multiDocumentSystemGraph = buildSystemGraph(multiAnalysis);
@@ -743,6 +768,19 @@ assert.ok(!findingsByCategory("suspicious_aggregation").some((finding) => findin
 assert.ok(!findingsByCategory("date_function_on_column").some((finding) => finding.statementId === "SQL-009"));
 assert.ok(riskFindings.summary.critical >= 2);
 assert.ok(riskFindings.summary.total >= 10);
+
+const writeRiskMultiAnalysis = analyzeMultipleSql(`UPDATE orders
+SET status = 'CANCELLED';
+
+DELETE FROM order_items;`);
+const writeRiskMultiNarrative = buildMultiSqlNarrative(
+  writeRiskMultiAnalysis,
+  buildTableAssetMap(writeRiskMultiAnalysis),
+  analyzeSqlRisks(writeRiskMultiAnalysis),
+);
+assert.ok(writeRiskMultiNarrative.keyFindings.some((finding) => finding.id.startsWith("multi-risk-")));
+assert.ok(writeRiskMultiNarrative.nextQuestions.some((question) => question.id === "multi-write-order"));
+assert.ok(writeRiskMultiNarrative.nextQuestions.some((question) => question.id === "multi-risk-concentration"));
 
 const reportTableAssetMap = buildTableAssetMap(systemGraphAnalysis);
 const documentationReport = buildSqlExplainerReport({
@@ -972,6 +1010,56 @@ assert.equal(insertSelect.aggregations.length, 0);
 assert.equal(insertSelect.windowFunctions.length, 0);
 assert.equal(insertSelect.caseExpressions.length, 0);
 assertIncludesNone(insertSelectText, ["단순 조회 SQL", "목록 조회", "CRM", "VIP"]);
+
+const safeSimpleNarrativeSql = `SELECT order_id
+FROM orders
+WHERE created_at >= DATE '2026-01-01';`;
+const safeSimpleNarrative = buildSingleSqlNarrative(
+  safeSimpleNarrativeSql,
+  analyzeSql(safeSimpleNarrativeSql),
+);
+assert.equal(safeSimpleNarrative.title, "SQL 핵심 결과");
+assert.equal(safeSimpleNarrative.keyFindings.length, 3);
+assert.ok(safeSimpleNarrative.keyFindings.some((finding) => finding.id === "single-risk-none"));
+assert.ok(safeSimpleNarrative.nextQuestions.some((question) => question.id === "single-date-boundary"));
+assert.ok(!safeSimpleNarrative.nextQuestions.some((question) => question.id === "single-aggregation-grain"));
+assert.doesNotMatch(JSON.stringify(safeSimpleNarrative), /증감률|시계열 추세|변화 기여도|이상치/);
+
+const numericFilterNarrativeSql = "SELECT order_id FROM orders WHERE total_amount >= 100000;";
+const numericFilterNarrative = buildSingleSqlNarrative(
+  numericFilterNarrativeSql,
+  analyzeSql(numericFilterNarrativeSql),
+);
+assert.ok(!numericFilterNarrative.nextQuestions.some((question) => question.id === "single-date-boundary"));
+
+const productSalesNarrative = buildSingleSqlNarrative(
+  readFixture("product-sales-summary.sql"),
+  productSales,
+);
+assert.ok(productSalesNarrative.keyFindings.some((finding) => finding.id === "single-structure-join-aggregation"));
+assert.ok(productSalesNarrative.nextQuestions.some((question) => question.id === "single-join-key-uniqueness"));
+assert.ok(productSalesNarrative.nextQuestions.some((question) => question.id === "single-aggregation-grain"));
+assert.ok(!productSalesNarrative.nextQuestions.some((question) => question.id === "single-intermediate-grain"));
+
+const stagedCteNarrative = buildSingleSqlNarrative(
+  readFixture("cte-without-aggregation.sql"),
+  stagedCte,
+);
+assert.ok(stagedCteNarrative.nextQuestions.some((question) => question.id === "single-intermediate-grain"));
+assert.ok(!stagedCteNarrative.nextQuestions.some((question) => question.id === "single-aggregation-grain"));
+
+const complexNarrative = buildSingleSqlNarrative(readFixture("complex-sales-analysis.sql"), complex);
+assert.ok(complexNarrative.nextQuestions.some((question) => question.id === "single-intermediate-grain"));
+assert.ok(complexNarrative.nextQuestions.some((question) => question.id === "single-aggregation-grain"));
+
+const unsafeWriteNarrativeSql = "UPDATE orders SET status = 'CANCELLED';";
+const unsafeWriteNarrative = buildSingleSqlNarrative(
+  unsafeWriteNarrativeSql,
+  analyzeSql(unsafeWriteNarrativeSql),
+);
+assert.ok(unsafeWriteNarrative.keyFindings.some((finding) => finding.id.startsWith("single-risk-")));
+assert.ok(unsafeWriteNarrative.nextQuestions.some((question) => question.id === "single-write-row-count"));
+assert.ok(unsafeWriteNarrative.nextQuestions.some((question) => question.id === "single-write-rollback"));
 
 const schemaQualified = analyzeSql(readFixture("schema-qualified-tables.sql"));
 const schemaOrderTable = schemaQualified.tables.find((table) => table.rawName === "public.orders");
