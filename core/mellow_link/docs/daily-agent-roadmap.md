@@ -20,7 +20,7 @@ Out of scope:
 
 ## Phase 2: Risk Analyzer
 
-Planned. Define explicit safety policy, risk language, tests, and escalation boundaries before implementation.
+Design contract drafted; implementation remains planned. The contract defines a deterministic, versioned, advisory rule analyzer, user isolation, non-clinical language, self-review actions, idempotency, audit, and test boundaries. No analyzer implementation is included in the design PR.
 
 ## Phase 3: Morning and Evening Check-in
 

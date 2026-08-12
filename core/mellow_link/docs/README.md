@@ -169,6 +169,21 @@
   - [Delivery Preparedness Operator UX Contract](delivery-package-operator-ux.md): 운영자 흐름, 상태, 접근성 계약
   - [ADR: Persistent Delivery Checklist and Package Assembly](ADR-delivery-package-persistence.md): persistence와 DB/filesystem transaction 결정
   - [Delivery Checklist and Package Acceptance Test Contract](delivery-package-test-contract.md): 구현 PR acceptance 기준
+- Daily Agent Risk Analyzer 설계 패키지
+  - [Scope and Terminology](daily-risk-scope-and-terminology.md): Daily Agent 의미, 사용자·날짜 분석 단위, 비의료적 범위
+  - [Input and Freshness Contract](daily-risk-input-contract.md): DailyState allowlist, snapshot, missing/stale 규칙
+  - [Risk Signal Model](daily-risk-signal-model.md): assessment, signal, severity와 reason code
+  - [Rule Engine Contract](daily-risk-rule-engine.md): 결정적 `daily-risk-v1` rule과 변경 게이트
+  - [Aggregation Contract](daily-risk-aggregation.md): overall result와 signal 결합 규칙
+  - [Actions and Review Boundary](daily-risk-actions-and-review.md): advisory 자동 행동과 self-review 경계
+  - [False-positive Handling](daily-risk-false-positive-handling.md): acknowledge, dispute, suppression, 재평가
+  - [Evaluation Lifecycle](daily-risk-evaluation-lifecycle.md): 실행 상태, schedule, retry와 recovery
+  - [Idempotency and Versioning](daily-risk-idempotency-versioning.md): logical identity, replay, 동시성
+  - [API and Service Contract](daily-risk-api-contract.md): transport-neutral operation과 오류 계약
+  - [Self-review UX Contract](daily-risk-operator-ux.md): 사용자 검토 흐름과 접근성
+  - [ADR: Daily Risk Persistence](ADR-daily-risk-persistence.md): 영속 구조, transaction, retention 결정
+  - [Security and Privacy](daily-risk-security-privacy.md): 건강 데이터 최소화와 접근 경계
+  - [Acceptance Test Contract](daily-risk-test-contract.md): 구현 PR acceptance 기준
 - [PILOT_CONTRACT_READINESS_PLAN.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/PILOT_CONTRACT_READINESS_PLAN.md)
   - 파일럿 계약 준비 상태와 남은 작업
 - [PYTEST_REPRODUCE.md](/C:/Users/Hyein/ClaudeAI/AI_Project/mellow_link/docs/PYTEST_REPRODUCE.md)

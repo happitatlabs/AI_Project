@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">픽셀 정비소</string>
+    <string name="title_activity_main">픽셀 정비소</string>
+    <string name="package_name">com.pixelgarage.editor</string>
+    <string name="custom_url_scheme">com.pixelgarage.editor</string>
+</resources>
