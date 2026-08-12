@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { DataInsightWorkspace } from "./DataInsightWorkspace";
 import {
   AI_SQL_DOCUMENT_TYPE_OPTIONS,
@@ -317,6 +324,116 @@ type AiMultiDocumentDraftState =
   | { status: "loading"; draft?: undefined; errorMessage?: undefined }
   | { status: "success"; draft: AiMultiSqlDocumentDraft; errorMessage?: undefined }
   | { status: "error"; draft?: undefined; errorMessage: string };
+type DemoAccessState = {
+  aiConfigured: boolean;
+  authenticated: boolean;
+  loginRequired: boolean;
+  status: "checking" | "public" | "unauthenticated" | "authenticated";
+  username?: string;
+};
+type RuntimeConfig = {
+  aiConfigured: boolean;
+  aiEnabled: boolean;
+  authenticated: boolean;
+  loginRequired: boolean;
+  username?: string;
+};
+
+const readRuntimeConfig = (value: unknown): RuntimeConfig | undefined => {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const config = value as {
+    aiConfigured?: unknown;
+    aiEnabled?: unknown;
+    authenticated?: unknown;
+    loginRequired?: unknown;
+    username?: unknown;
+  };
+
+  if (typeof config.aiEnabled !== "boolean") {
+    return undefined;
+  }
+
+  return {
+    aiConfigured: config.aiConfigured === true,
+    aiEnabled: config.aiEnabled,
+    authenticated: config.authenticated === true,
+    loginRequired: config.loginRequired === true,
+    username: typeof config.username === "string" ? config.username : undefined,
+  };
+};
+
+type DemoLoginScreenProps = {
+  errorMessage?: string;
+  isChecking?: boolean;
+  isSubmitting: boolean;
+  onPasswordChange: (value: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onUsernameChange: (value: string) => void;
+  password: string;
+  username: string;
+};
+
+function DemoLoginScreen({
+  errorMessage,
+  isChecking = false,
+  isSubmitting,
+  onPasswordChange,
+  onSubmit,
+  onUsernameChange,
+  password,
+  username,
+}: DemoLoginScreenProps) {
+  return (
+    <main className="demo-login-shell">
+      <section className="demo-login-panel" aria-labelledby="demo-login-title">
+        <p className="eyebrow">Protected SQL Diagnoser</p>
+        <h1 id="demo-login-title">테스트 계정 로그인</h1>
+        <p className="demo-login-description">
+          지정된 테스트 계정으로 로그인하면 AI 설명 보강과 문서 초안을 사용할 수 있습니다.
+        </p>
+
+        {isChecking ? (
+          <p className="demo-login-checking" role="status">접근 상태를 확인하고 있습니다.</p>
+        ) : (
+          <form className="demo-login-form" onSubmit={onSubmit}>
+            <label htmlFor="demo-username">
+              아이디
+              <input
+                id="demo-username"
+                autoComplete="username"
+                disabled={isSubmitting}
+                value={username}
+                onChange={(event) => onUsernameChange(event.target.value)}
+              />
+            </label>
+            <label htmlFor="demo-password">
+              비밀번호
+              <input
+                id="demo-password"
+                autoComplete="current-password"
+                disabled={isSubmitting}
+                type="password"
+                value={password}
+                onChange={(event) => onPasswordChange(event.target.value)}
+              />
+            </label>
+            {errorMessage ? <p className="demo-login-error" role="alert">{errorMessage}</p> : null}
+            <button className="primary-button" disabled={isSubmitting} type="submit">
+              {isSubmitting ? "로그인 확인 중" : "로그인"}
+            </button>
+          </form>
+        )}
+
+        <p className="demo-login-help">
+          테스트 계정이 없거나 로그인할 수 없으면 데모 관리자에게 요청하세요.
+        </p>
+      </section>
+    </main>
+  );
+}
 
 const tableAssetImportanceLabel = (importance: TableAssetProfile["importance"]) => {
   if (importance === "high") {
@@ -423,6 +540,19 @@ const DEFAULT_MULTI_SQL = SQL_PRESETS
 function App() {
   const [runtimeAiFeatureEnabled, setRuntimeAiFeatureEnabled] =
     useState(buildAiFeatureEnabled);
+  const [demoAccessState, setDemoAccessState] = useState<DemoAccessState>(() => ({
+    aiConfigured: false,
+    authenticated: false,
+    loginRequired: false,
+    status: isDemoMode ? "checking" : "public",
+  }));
+  const [demoUsername, setDemoUsername] = useState("");
+  const [demoPassword, setDemoPassword] = useState("");
+  const [demoLoginState, setDemoLoginState] = useState<{
+    errorMessage?: string;
+    status: "idle" | "loading";
+  }>({ status: "idle" });
+  const [demoLogoutState, setDemoLogoutState] = useState<"idle" | "loading" | "error">("idle");
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>("single");
   const [sql, setSql] = useState(DEFAULT_SQL);
   const [multiSql, setMultiSql] = useState(DEFAULT_MULTI_SQL);
@@ -464,36 +594,53 @@ function App() {
   const [riskFilter, setRiskFilter] = useState<RiskFilter>("all");
   const isAiFeatureEnabled = runtimeAiFeatureEnabled;
 
-  useEffect(() => {
-    let active = true;
+  const applyRuntimeConfig = useCallback((config: RuntimeConfig) => {
+    setRuntimeAiFeatureEnabled(config.aiEnabled);
+    setDemoAccessState({
+      aiConfigured: config.aiConfigured,
+      authenticated: config.authenticated,
+      loginRequired: config.loginRequired,
+      status: config.loginRequired
+        ? config.authenticated ? "authenticated" : "unauthenticated"
+        : "public",
+      username: config.username,
+    });
+  }, []);
 
-    void fetch("/api/runtime-config")
-      .then(async (response) => {
-        if (!response.ok) {
-          return undefined;
-        }
-
-        return response.json() as Promise<unknown>;
-      })
-      .then((config) => {
-        if (!active || !config || typeof config !== "object") {
-          return;
-        }
-
-        const aiEnabled = (config as { aiEnabled?: unknown }).aiEnabled;
-
-        if (typeof aiEnabled === "boolean") {
-          setRuntimeAiFeatureEnabled(aiEnabled);
-        }
-      })
-      .catch(() => {
-        // Static-only deployments retain the build-time feature setting.
+  const refreshDemoRuntimeConfig = useCallback(async () => {
+    try {
+      const response = await fetch("/api/runtime-config", {
+        credentials: "same-origin",
       });
 
-    return () => {
-      active = false;
-    };
-  }, []);
+      if (!response.ok) {
+        throw new Error("runtime config unavailable");
+      }
+
+      const config = readRuntimeConfig(await response.json());
+
+      if (!config) {
+        throw new Error("runtime config invalid");
+      }
+
+      applyRuntimeConfig(config);
+      return config;
+    } catch {
+      // Static-only and local Vite deployments retain build-time AI behavior.
+      setRuntimeAiFeatureEnabled(buildAiFeatureEnabled);
+      setDemoAccessState({
+        aiConfigured: false,
+        authenticated: false,
+        loginRequired: false,
+        status: "public",
+      });
+      return undefined;
+    }
+  }, [applyRuntimeConfig]);
+
+  useEffect(() => {
+    void refreshDemoRuntimeConfig();
+  }, [refreshDemoRuntimeConfig]);
   const hasSingleAiRepresentative =
     aiState.status === "success" || aiDocumentDraftState.status === "success";
   const hasMultiAiRepresentative =
@@ -1226,6 +1373,94 @@ function App() {
     );
   };
 
+  const submitDemoLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!demoUsername.trim() || !demoPassword) {
+      setDemoLoginState({
+        errorMessage: "아이디와 비밀번호를 모두 입력하세요.",
+        status: "idle",
+      });
+      return;
+    }
+
+    setDemoLoginState({ status: "loading" });
+
+    try {
+      const response = await fetch("/api/auth/login", {
+        body: JSON.stringify({
+          password: demoPassword,
+          username: demoUsername.trim(),
+        }),
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      const body = await response.json().catch(() => undefined);
+
+      if (!response.ok) {
+        throw new Error(
+          typeof body?.error === "string"
+            ? body.error
+            : "로그인에 실패했습니다. 입력한 계정을 확인하세요.",
+        );
+      }
+
+      setDemoPassword("");
+      setDemoLoginState({ status: "idle" });
+      await refreshDemoRuntimeConfig();
+    } catch (error) {
+      setDemoLoginState({
+        errorMessage: error instanceof Error
+          ? error.message
+          : "로그인에 실패했습니다. 잠시 후 다시 시도하세요.",
+        status: "idle",
+      });
+    }
+  };
+
+  const logoutDemo = async () => {
+    setDemoLogoutState("loading");
+
+    try {
+      const response = await fetch("/api/auth/logout", {
+        credentials: "same-origin",
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        throw new Error("logout failed");
+      }
+
+      setDemoPassword("");
+      setDemoLogoutState("idle");
+      await refreshDemoRuntimeConfig();
+    } catch {
+      setDemoLogoutState("error");
+    }
+  };
+
+  const showDemoLogin =
+    demoAccessState.status === "unauthenticated"
+    || (isDemoMode && demoAccessState.status === "checking");
+
+  if (showDemoLogin) {
+    return (
+      <DemoLoginScreen
+        errorMessage={demoLoginState.errorMessage}
+        isChecking={demoAccessState.status === "checking"}
+        isSubmitting={demoLoginState.status === "loading"}
+        password={demoPassword}
+        username={demoUsername}
+        onPasswordChange={setDemoPassword}
+        onSubmit={(event) => void submitDemoLogin(event)}
+        onUsernameChange={setDemoUsername}
+      />
+    );
+  }
+
   return (
     <main
       className={`app-shell ${isDemoMode ? "demo-mode" : ""} ${!isAiFeatureEnabled ? "ai-disabled" : ""}`.trim()}
@@ -1236,6 +1471,22 @@ function App() {
             <p className="eyebrow">Legacy SQL Mapper</p>
             <h1>SQL 설명기 MVP 0.1</h1>
           </div>
+          {demoAccessState.status === "authenticated" ? (
+            <div className="demo-session-control">
+              <span>{demoAccessState.username ?? "테스트 사용자"} 로그인됨</span>
+              <button
+                className="text-button"
+                disabled={demoLogoutState === "loading"}
+                type="button"
+                onClick={() => void logoutDemo()}
+              >
+                {demoLogoutState === "loading" ? "로그아웃 중" : "로그아웃"}
+              </button>
+              {demoLogoutState === "error" ? (
+                <small role="alert">로그아웃 처리에 실패했습니다.</small>
+              ) : null}
+            </div>
+          ) : null}
         </header>
 
         <details className="scope-notice" open>
@@ -1254,8 +1505,15 @@ function App() {
             <p>
               이 화면은 승인된 테스트 계정에서만 사용합니다. SQL을 실행하지 않고 브라우저에
               저장하지 않지만, 실제 운영 SQL·개인정보·고객 식별값은 입력하지 마세요. AI 보강은
-              데모 서버에 설정된 provider와 접근 계정이 있는 경우에만 사용할 수 있습니다.
+              로그인 후에만 사용할 수 있으며, 마스킹된 SQL과 분석 결과만 provider에 전송됩니다.
             </p>
+          </aside>
+        ) : null}
+
+        {demoAccessState.status === "authenticated" && !isAiFeatureEnabled ? (
+          <aside className="demo-provider-status" role="status">
+            로그인은 완료되었지만 AI provider 설정이 아직 준비되지 않았습니다. Worker의 Azure OpenAI,
+            OpenAI 또는 보호된 HTTPS Ollama 설정을 확인하세요.
           </aside>
         ) : null}
 
