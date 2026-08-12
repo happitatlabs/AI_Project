@@ -3,6 +3,7 @@ import type { MultiSqlAnalysisResult } from "./multiSqlAnalysis.js";
 import type { SqlRiskAnalysisResult } from "./riskDetector.js";
 import type {
   AggregationAnalysis,
+  AdvancedSqlFeature,
   BusinessIntentType,
   CaseExpressionAnalysis,
   CteAnalysis,
@@ -111,6 +112,14 @@ export const buildMultiSqlAiAnalysis = (
   }));
 
   return {
+    advancedFeatures: flattenAnalysisItems<AdvancedSqlFeature>(
+      multiAnalysis,
+      (analysis) => analysis.advancedFeatures,
+      (feature, statementId) => ({
+        ...feature,
+        evidence: `${statementId}: ${feature.evidence}`,
+      }),
+    ),
     aggregations: flattenAnalysisItems<AggregationAnalysis>(
       multiAnalysis,
       (analysis) => analysis.aggregations,

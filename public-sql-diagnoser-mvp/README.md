@@ -29,6 +29,8 @@ SQL Explainer는 레거시 시스템 분석을 돕기 위한 룰 기반 SQL 설�
 - 선택형 AI 설명 보강
 - 단건 AI 문서 초안 생성
 - 다건 AI 문서 초안 생성
+- CSV / JSON 기반 데이터 인사이트 계산
+- 선택형 AI 데이터 인사이트 해석
 
 ## 분석 가능한 SQL 요소
 
@@ -44,6 +46,32 @@ SQL Explainer는 레거시 시스템 분석을 돕기 위한 룰 기반 SQL 설�
 - 서브쿼리: EXISTS, IN, scalar subquery, derived table 탐지
 - SET 연산: UNION, UNION ALL, EXCEPT, INTERSECT
 - INSERT INTO SELECT: 조회 결과 적재/배치성 SQL
+
+## 데이터 인사이트 계산 계층
+
+`데이터 인사이트` 모드는 SQL 구조 분석과 별도로, CSV 또는 JSON 행 데이터를 브라우저에서 기계식으로 계산하는 기능입니다. 목적은 숫자는 프로그램이 계산하고, AI는 검증 가능한 계산 결과의 의미만 해석하도록 역할을 분리하는 것입니다.
+
+처리 흐름은 다음과 같습니다.
+
+```text
+CSV / JSON 원본 행 데이터
+-> 브라우저 내 기계식 계산
+-> 검증 가능한 계산 결과와 인사이트 후보
+-> 선택 실행 AI 해석
+-> 사실 / 해석 / 확인 필요 사항 / 제안 보고서
+```
+
+사용자는 숫자 지표 컬럼을 선택하고, 필요하면 시간 컬럼과 그룹 컬럼을 선택합니다. 프로그램은 다음을 직접 계산합니다.
+
+- 계산 대상 건수, 합계, 평균, 최대값, 최소값
+- 기간별 값과 이전 기간 대비 증감률
+- 그룹별 합계, 전체 비중, 그룹 평균 대비 차이
+- IQR 또는 Z-score 기반 이상치 후보
+- 변화폭, 지속성, 그룹 차이, 이상치 여부를 근거로 한 중요도 후보
+
+AI는 원본 행 데이터를 받지 않습니다. `/api/ai-data-insights`에는 원본 행이 없는 `ComputedAnalysisResult`만 전달되고, 서버는 `rows` 필드가 포함된 요청을 거부합니다. AI provider로는 마스킹된 범주 정보, 계산된 수치, 근거 ID, 후보 우선순위만 전송합니다. AI는 후보를 선택해 해석·확인 필요 사항·제안만 작성하며, 표시되는 사실과 숫자는 프로그램이 계산한 결과를 사용합니다.
+
+입력 데이터는 최대 20,000행까지 계산합니다. 현재 시간 추세는 `YYYY-MM`, `YYYY-MM-DD` 등 일반적인 날짜/월 형식에 한정되며, 중첩 JSON, 복잡한 날짜 형식, 통계적 인과 검증은 지원 범위가 아닙니다.
 
 ## 다건 SQL 분석
 
@@ -186,6 +214,8 @@ View는 `CREATE VIEW ... AS SELECT ...` 형태를 감지해 View 노드와 원�
 
 AI 설명 보강은 사용자가 `AI로 설명 보강하기` 버튼을 클릭할 때만 호출됩니다. 단건 SQL에서는 현재 SQL과 단건 분석 결과를, 다건 SQL에서는 SQL 묶음과 다건 분석 요약을 `/api/ai-explain` 서버 API에 전달합니다. 서버는 SQL을 `maskSensitiveSql(sql)`로 마스킹한 뒤 AI API에 요청합니다.
 
+데이터 인사이트의 `AI로 인사이트 해석`도 선택 실행 기능입니다. 원본 CSV/JSON 행은 브라우저에서만 계산하며, AI에는 계산 결과와 근거 ID만 전달합니다. AI가 계산되지 않은 숫자나 날짜를 포함한 문장을 반환하면 해당 문장을 표시에서 제외합니다.
+
 다건 AI 설명 보강에는 다음 집계 정보가 포함됩니다.
 
 - SQL별 요약
@@ -232,25 +262,46 @@ AI 설명 보강은 사용자가 `AI로 설명 보강하기` 버튼을 클릭할
 
 ## 안전한 웹 데모 배포
 
-포트폴리오 공개용 데모는 홈페이지와 SQL 분석 앱을 별도 배포하는 것을 권장합니다.
+현재 Cloudflare Worker 배포 주소는 `https://sql-diagnoser-demo.pletta900114.workers.dev`입니다. Worker는 정적 앱과 `/api/ai-*` endpoint를 같은 origin에서 제공합니다. API 키는 브라우저와 Git 저장소에 포함하지 않습니다.
 
-- 홈페이지: `https://happitatlabs.com/products/sql-diagnoser`
-- 보호된 데모: `https://sql-diagnoser.happitatlabs.com`
+AI 데모는 비용과 악용을 막기 위해 접근 계정이 설정된 경우에만 활성화됩니다. `DEMO_USERNAME`과 `DEMO_PASSWORD`를 Worker secret으로 설정하면 Worker가 정적 앱과 AI API 모두에 HTTP Basic 인증을 요구합니다. 지정한 사용자만 브라우저 인증 창에서 로그인해 사용할 수 있습니다.
+
+Cloudflare Worker 설정:
+
 - 빌드 명령: `npm run build`
+- 배포 명령: `npx wrangler versions upload`
 - 배포 디렉터리: `dist`
+- Worker entry: `src/cloudflareWorker.ts`
 
-SQL 앱을 Cloudflare Pages 프로젝트로 연결한 뒤 다음 환경변수를 설정합니다.
+Azure OpenAI를 사용할 때 Worker 환경 변수/비밀값은 다음처럼 설정합니다.
 
 ```text
-VITE_DEMO_MODE=true
-VITE_ENABLE_AI_FEATURES=false
+# 일반 변수 또는 secret
+AI_PROVIDER=azure_openai
+AZURE_OPENAI_ENDPOINT=https://your-resource-name.openai.azure.com
+AZURE_OPENAI_MODEL=your-deployment-name
+DEMO_USERNAME=test-user
+
+# Worker secret
+AZURE_OPENAI_API_KEY=...
+DEMO_PASSWORD=...
 ```
 
-이 설정에서는 AI 요청 버튼과 AI 출력 영역을 숨기고 룰 기반 SQL 분석만 제공합니다. `public/_headers`와 `public/_redirects`는 빌드 결과에 포함되어 보안 헤더와 SPA 경로 처리를 적용합니다.
+OpenAI를 사용할 때는 다음을 사용합니다.
 
-Cloudflare Access에서는 `sql-diagnoser.happitatlabs.com`을 보호된 애플리케이션으로 등록하고, 허용 정책에 지정 테스트 계정 이메일만 추가합니다. 공개 링크를 아는 것만으로 접근할 수 있게 두지 말고, 테스트 계정의 2차 인증과 세션 만료 정책도 함께 설정합니다.
+```text
+AI_PROVIDER=openai
+OPENAI_MODEL=your-model-name
+DEMO_USERNAME=test-user
 
-데모는 SQL을 실행하지 않고 브라우저 저장소에 SQL을 저장하지 않지만, 실제 운영 SQL·개인정보·고객 식별값은 입력하지 않습니다. AI를 별도 승인 환경에서 켤 때에도 API 키는 서버 환경변수에만 두며, 테이블명·컬럼명·업무 구조는 마스킹 후에도 요청에 포함될 수 있습니다.
+# Worker secret
+OPENAI_API_KEY=...
+DEMO_PASSWORD=...
+```
+
+Ollama는 Cloudflare Worker에서 PC의 `http://localhost:11434`에 접근할 수 없습니다. 웹 데모에 Ollama를 연결하려면 인증으로 보호된 HTTPS endpoint가 필요합니다. 로컬 검증에는 기존처럼 `OLLAMA_BASE_URL=http://localhost:11434`와 설치된 모델을 사용하세요.
+
+데모는 SQL을 실행하지 않고 브라우저 저장소에 SQL을 저장하지 않지만, 실제 운영 SQL·개인정보·고객 식별값은 입력하지 않습니다. AI를 별도 승인 환경에서 켤 때에도 테이블명·컬럼명·업무 구조는 마스킹 후에도 요청에 포함될 수 있습니다.
 
 ### AI 기능 환경변수
 
@@ -285,9 +336,9 @@ AZURE_OPENAI_MODEL=your_deployment_name_here
 
 Azure OpenAI의 `AZURE_OPENAI_MODEL`에는 일반 모델명이 아니라 Azure에 배포한 deployment name을 넣습니다.
 
-로컬 개발에서는 `npm run dev`로 실행되는 Vite 개발 서버가 `POST /api/ai-explain`을 함께 처리합니다. 별도 API 서버를 직접 띄우지 않아도 됩니다.
+로컬 개발에서는 `npm run dev`로 실행되는 Vite 개발 서버가 `POST /api/ai-explain`, `/api/ai-document-draft`, `/api/ai-multi-document-draft`, `/api/ai-data-insights`를 함께 처리합니다. 별도 API 서버를 직접 띄우지 않아도 됩니다.
 
-배포 환경에서는 Vercel Serverless Function 형태의 `api/ai-explain.ts` 엔드포인트를 사용합니다. 이 경우에도 provider별 환경변수는 서버 환경변수로 설정해야 합니다.
+Cloudflare Worker 배포에서는 `src/cloudflareWorker.ts`가 같은 origin의 `/api/ai-*` endpoint를 처리합니다. provider별 키와 접근 비밀번호는 Worker secret으로 설정해야 합니다.
 
 ## 현재 한계
 
@@ -302,10 +353,11 @@ Azure OpenAI의 `AZURE_OPENAI_MODEL`에는 일반 모델명이 아니라 Azure�
 - PDF는 현재 브라우저 인쇄 기능을 이용해 저장하는 방식입니다.
 - Excel 다운로드는 현재 `.csv` 형식이며, 다중 시트 `.xlsx` 생성은 후속 고도화 대상입니다.
 - AI 설명은 보강용이며, SQL 실행 결과나 실제 데이터 분포를 알 수 없습니다.
+- 데이터 인사이트의 이상치 후보는 통계적 검토 우선순위이며, 오류나 원인을 단정하지 않습니다.
 
 ## SQL 마스킹 유틸리티
 
-추후 AI 전송 전에 민감 정보를 가리기 위한 `maskSensitiveSql(sql)` 유틸리티가 포함되어 있습니다.
+추후 AI 전송 전에 민감 정보를 가리기 위한 `maskSensitiveSql(sql)` 유틸리티가 포함되어 있습니다. 계산 결과의 자유 텍스트에는 `maskSensitiveText(text)`를 사용합니다.
 
 마스킹 대상:
 
@@ -335,7 +387,7 @@ AI 보강 기능까지 로컬에서 확인하려면 `.env`에 사용할 provider
 npm test
 ```
 
-테스트는 SQL 분석 회귀 테스트, SQL 마스킹 유틸리티 테스트, AI payload/API mock 테스트를 함께 실행합니다. 실제 AI API는 호출하지 않습니다.
+테스트는 SQL 분석 회귀 테스트, SQL 마스킹 유틸리티 테스트, 기계식 CSV/JSON 계산 테스트, 원본 행 미전송 검증, AI payload/API mock 테스트를 함께 실행합니다. 실제 AI API는 호출하지 않습니다.
 
 ## 빌드
 
