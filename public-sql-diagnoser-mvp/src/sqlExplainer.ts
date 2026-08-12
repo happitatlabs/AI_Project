@@ -90,6 +90,28 @@ export type AnalysisConfidence = {
   score: number;
 };
 
+export type AdvancedSqlFeatureType =
+  | "recursive_cte"
+  | "merge"
+  | "update_from"
+  | "delete_using"
+  | "pivot"
+  | "unpivot"
+  | "lateral"
+  | "apply"
+  | "json"
+  | "array"
+  | "dynamic_sql"
+  | "deep_nesting"
+  | "dialect_specific";
+
+export type AdvancedSqlFeature = {
+  description: string;
+  dialect?: string;
+  evidence: string;
+  type: AdvancedSqlFeatureType;
+};
+
 export type BusinessIntentType =
   | "lookup"
   | "list_query"
@@ -114,6 +136,7 @@ export type BusinessIntent = {
 };
 
 export type SqlExplanation = {
+  advancedFeatures: AdvancedSqlFeature[];
   aggregations: AggregationAnalysis[];
   businessIntent: BusinessIntent;
   summary: string;
@@ -2685,6 +2708,7 @@ const buildNotes = (
   aggregations: AggregationAnalysis[] = [],
   windowFunctions: WindowFunctionAnalysis[] = [],
   caseExpressions: CaseExpressionAnalysis[] = [],
+  advancedFeatures: AdvancedSqlFeature[] = [],
 ) => {
   const notes: string[] = [];
 
@@ -2711,6 +2735,10 @@ const buildNotes = (
 
   if (ctes.length > 0) {
     notes.push("CTE 이름과 내부 SELECT 구조를 근거로 단계별 역할을 추정했습니다.");
+  }
+
+  if (advancedFeatures.length > 0) {
+    notes.push(`고급 문법 감지: ${advancedFeatures.map((feature) => feature.evidence).join(", ")}. 세부 실행 의미는 실제 DBMS와 실행 환경 확인이 필요합니다.`);
   }
 
   return unique(notes);
@@ -2771,6 +2799,204 @@ const maxParenthesisDepth = (sql: string) => {
   return maxDepth;
 };
 
+const maskSqlLiterals = (sql: string) => {
+  let masked = "";
+  let quote: "'" | "\"" | "`" | "]" | null = null;
+
+  for (let index = 0; index < sql.length; index += 1) {
+    const char = sql[index];
+    const nextChar = sql[index + 1];
+
+    if (quote) {
+      if (
+        ((quote === "'" || quote === "\"" || quote === "`") && char === quote && nextChar === quote) ||
+        (quote === "]" && char === "]" && nextChar === "]")
+      ) {
+        masked += "  ";
+        index += 1;
+        continue;
+      }
+
+      if (
+        (quote === "'" && char === "'") ||
+        (quote === "\"" && char === "\"") ||
+        (quote === "`" && char === "`") ||
+        (quote === "]" && char === "]")
+      ) {
+        quote = null;
+      }
+
+      masked += " ";
+      continue;
+    }
+
+    if (char === "'" || char === "\"" || char === "`") {
+      quote = char;
+      masked += " ";
+      continue;
+    }
+
+    if (char === "[") {
+      quote = "]";
+      masked += " ";
+      continue;
+    }
+
+    masked += char;
+  }
+
+  return masked;
+};
+
+const detectAdvancedFeatures = (sql: string): AdvancedSqlFeature[] => {
+  const normalized = compactSql(sql);
+  const executableSql = maskSqlLiterals(normalized);
+  const features: AdvancedSqlFeature[] = [];
+  const addFeature = (
+    type: AdvancedSqlFeatureType,
+    evidence: string,
+    description: string,
+    dialect?: string,
+  ) => {
+    if (features.some((feature) => feature.type === type && feature.dialect === dialect)) {
+      return;
+    }
+
+    features.push({ description, dialect, evidence, type });
+  };
+
+  if (/\bWITH\s+RECURSIVE\b/i.test(executableSql)) {
+    addFeature(
+      "recursive_cte",
+      "WITH RECURSIVE",
+      "재귀 CTE가 감지되었습니다. 상위/하위 관계나 반복 단계를 확장하는 구조로 보이며, 종료 조건과 최대 깊이는 별도 확인이 필요합니다.",
+    );
+  }
+
+  if (/\bMERGE\s+INTO\b/i.test(executableSql)) {
+    addFeature(
+      "merge",
+      "MERGE INTO",
+      "MERGE 문이 감지되었습니다. 소스와 대상의 일치 여부에 따라 UPDATE 또는 INSERT가 수행될 수 있습니다.",
+    );
+  }
+
+  if (/\bUPDATE\b[\s\S]{0,600}\bSET\b[\s\S]{0,600}\bFROM\b/i.test(executableSql)) {
+    addFeature(
+      "update_from",
+      "UPDATE ... FROM",
+      "UPDATE ... FROM 구조가 감지되었습니다. 다른 테이블을 참조해 대상 행을 갱신하는 문법으로 해석할 수 있습니다.",
+    );
+  }
+
+  if (/\bDELETE\s+FROM\b[\s\S]{0,600}\bUSING\b/i.test(executableSql)) {
+    addFeature(
+      "delete_using",
+      "DELETE FROM ... USING",
+      "DELETE ... USING 구조가 감지되었습니다. 보조 테이블 조건과 일치하는 대상 행을 삭제할 수 있습니다.",
+    );
+  }
+
+  if (/\bPIVOT\s*\(/i.test(executableSql)) {
+    addFeature(
+      "pivot",
+      "PIVOT",
+      "PIVOT 문이 감지되었습니다. 행 값을 컬럼 형태로 펼쳐 교차 집계하는 구조로 보입니다.",
+    );
+  }
+
+  if (/\bUNPIVOT\s*\(/i.test(executableSql)) {
+    addFeature(
+      "unpivot",
+      "UNPIVOT",
+      "UNPIVOT 문이 감지되었습니다. 여러 컬럼을 행 형태로 변환하는 구조로 보입니다.",
+    );
+  }
+
+  if (/\bLATERAL\b/i.test(executableSql)) {
+    addFeature(
+      "lateral",
+      "LATERAL",
+      "LATERAL 참조가 감지되었습니다. 앞에서 읽은 행의 값을 이용해 뒤의 테이블 함수 또는 서브쿼리를 행별로 평가할 수 있습니다.",
+    );
+  }
+
+  if (/\b(?:CROSS|OUTER)\s+APPLY\b/i.test(executableSql)) {
+    addFeature(
+      "apply",
+      "CROSS/OUTER APPLY",
+      "APPLY 구조가 감지되었습니다. 왼쪽 행을 기준으로 오른쪽 테이블 함수 또는 서브쿼리를 평가하는 문법으로 보입니다.",
+      "SQL Server 계열 문법으로 추정",
+    );
+  }
+
+  if (
+    /\b(?:JSON|JSONB)\b/i.test(executableSql) ||
+    /\bJSON_[A-Z_]+\s*\(/i.test(executableSql) ||
+    /\bOPENJSON\s*\(/i.test(executableSql) ||
+    /(?:->>|->)\s*['\"]?/i.test(executableSql)
+  ) {
+    addFeature(
+      "json",
+      "JSON/JSONB 함수 또는 경로 연산자",
+      "JSON 데이터 함수 또는 경로 연산자가 감지되었습니다. JSON 내부 속성을 조회하거나 펼치는 구조로 보입니다.",
+    );
+  }
+
+  if (
+    /\bARRAY\s*\[/i.test(executableSql) ||
+    /\bUNNEST\s*\(/i.test(executableSql) ||
+    /\bARRAY_AGG\s*\(/i.test(executableSql) ||
+    /\bJSONB_ARRAY_ELEMENTS\s*\(/i.test(executableSql)
+  ) {
+    addFeature(
+      "array",
+      "ARRAY/UNNEST 배열 함수",
+      "배열 생성 또는 분해 함수가 감지되었습니다. 한 행에 포함된 여러 값을 행 단위로 펼치거나 집계할 수 있습니다.",
+    );
+  }
+
+  if (
+    /\bEXECUTE\s+IMMEDIATE\b/i.test(executableSql) ||
+    /\bSP_EXECUTESQL\b/i.test(executableSql) ||
+    /\bEXEC\s*\(/i.test(executableSql) ||
+    /\bPREPARE\s+\w+\s+FROM\b/i.test(executableSql)
+  ) {
+    addFeature(
+      "dynamic_sql",
+      "EXECUTE/EXECUTE IMMEDIATE/PREPARE",
+      "동적 SQL 실행 구문이 감지되었습니다. 실행 시점에 최종 SQL이 생성될 수 있어 정적 분석만으로 내부 테이블과 조건을 모두 확인하기 어렵습니다.",
+    );
+  }
+
+  if (maxParenthesisDepth(sql) >= 4) {
+    addFeature(
+      "deep_nesting",
+      `괄호 중첩 깊이 ${maxParenthesisDepth(sql)}`,
+      "중첩 깊이가 깊은 SQL이 감지되었습니다. 서브쿼리 또는 함수의 소속이 일부 단순화될 수 있습니다.",
+    );
+  }
+
+  const dialectSignals: Array<{
+    dialect: string;
+    evidence: string;
+    pattern: RegExp;
+  }> = [
+    { dialect: "PostgreSQL 계열로 추정", evidence: "DISTINCT ON/::/ILIKE/LATERAL", pattern: /\bDISTINCT\s+ON\b|::\s*[A-Za-z_]|\bILIKE\b|\bLATERAL\b/i },
+    { dialect: "Oracle 계열로 추정", evidence: "CONNECT BY/START WITH/NVL/DUAL", pattern: /\bCONNECT\s+BY\b|\bSTART\s+WITH\b|\bNVL\s*\(/i },
+    { dialect: "SQL Server 계열로 추정", evidence: "TOP/[]/APPLY/OPENJSON", pattern: /\bTOP\s*\(?\d+|\b(?:CROSS|OUTER)\s+APPLY\b|\bOPENJSON\s*\(/i },
+    { dialect: "MySQL 계열로 추정", evidence: "백틱 식별자/LIMIT/IFNULL", pattern: /`[^`]+`|\bIFNULL\s*\(|\bLIMIT\s+\d+/i },
+  ];
+
+  dialectSignals.forEach(({ dialect, evidence, pattern }) => {
+    if (pattern.test(executableSql)) {
+      addFeature("dialect_specific", evidence, `${dialect} 문법 신호가 감지되었지만 실제 DBMS는 연결 정보로 확인해야 합니다.`, dialect);
+    }
+  });
+
+  return features;
+};
+
 const buildConfidence = (
   sql: string,
   tables: SqlTable[],
@@ -2784,6 +3010,7 @@ const buildConfidence = (
   caseExpressions: CaseExpressionAnalysis[],
   subqueries: SubqueryAnalysis[],
   setOperations: SetOperationAnalysis[],
+  advancedFeatures: AdvancedSqlFeature[],
 ): AnalysisConfidence => {
   const reasons: string[] = [];
   let score = 0.45;
@@ -2848,6 +3075,11 @@ const buildConfidence = (
     reasons.push("UNION/EXCEPT/INTERSECT 계열 set operation이 포함됨");
   }
 
+  if (advancedFeatures.length > 0) {
+    score -= Math.min(0.12, advancedFeatures.length * 0.02);
+    reasons.push("고급 문법 신호가 감지되어 일부 의미 해석은 추정으로 표시");
+  }
+
   if (maxParenthesisDepth(sql) >= 4) {
     score -= 0.08;
     reasons.push("중첩 괄호가 깊어 일부 절 추출이 제한될 수 있음");
@@ -2875,6 +3107,7 @@ const buildWarnings = (
   confidence: AnalysisConfidence,
   subqueries: SubqueryAnalysis[],
   setOperations: SetOperationAnalysis[],
+  advancedFeatures: AdvancedSqlFeature[],
 ) => {
   const warnings = [
     "정규식 기반 분석이므로 중첩 서브쿼리나 DBMS 특화 문법은 일부 누락될 수 있습니다.",
@@ -2886,6 +3119,22 @@ const buildWarnings = (
 
   if (setOperations.length > 0) {
     warnings.push("UNION/EXCEPT/INTERSECT 계열 SQL은 각 SELECT 블록별 상세 의미가 일부 단순화될 수 있습니다.");
+  }
+
+  if (advancedFeatures.length > 0) {
+    warnings.push("고급 문법은 키워드와 구조를 감지한 결과이며, DBMS별 실행 의미는 완전한 AST 분석이 아닙니다.");
+  }
+
+  if (advancedFeatures.some((feature) => feature.type === "dynamic_sql")) {
+    warnings.push("동적 SQL은 실행 시 생성되는 최종 문장을 알 수 없어 내부 테이블이나 조건이 누락될 수 있습니다.");
+  }
+
+  if (advancedFeatures.some((feature) => feature.type === "deep_nesting")) {
+    warnings.push("중첩 깊이가 깊어 서브쿼리와 절의 소속이 일부 단순화될 수 있습니다.");
+  }
+
+  if (advancedFeatures.some((feature) => feature.type === "dialect_specific")) {
+    warnings.push("DBMS 방언 신호는 문법 패턴으로 추정했으며 실제 연결 DBMS를 확인해야 합니다.");
   }
 
   if (relations.some((relation) => relation.joinType === "WHERE")) {
@@ -2908,6 +3157,7 @@ const buildWarnings = (
 };
 
 export function analyzeSql(sql: string): SqlExplanation {
+  const advancedFeatures = detectAdvancedFeatures(sql);
   const cteMetadata = extractCteMetadata(sql);
   const subqueries = extractSubqueries(sql, cteMetadata);
   const setOperations = extractSetOperations(sql);
@@ -2983,6 +3233,7 @@ export function analyzeSql(sql: string): SqlExplanation {
     aggregations,
     windowFunctions,
     caseExpressions,
+    advancedFeatures,
   );
   const confidence = buildConfidence(
     sql,
@@ -2997,6 +3248,7 @@ export function analyzeSql(sql: string): SqlExplanation {
     caseExpressions,
     subqueries,
     setOperations,
+    advancedFeatures,
   );
   const warnings = buildWarnings(
     tables,
@@ -3004,9 +3256,11 @@ export function analyzeSql(sql: string): SqlExplanation {
     confidence,
     subqueries,
     setOperations,
+    advancedFeatures,
   );
 
   return {
+    advancedFeatures,
     aggregations,
     businessIntent,
     summary: buildSummary(

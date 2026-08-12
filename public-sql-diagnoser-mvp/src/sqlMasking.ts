@@ -74,3 +74,11 @@ const maskBareSensitiveValues = (sql: string) =>
 
 export const maskSensitiveSql = (sql: string) =>
   maskBareSensitiveValues(maskStringLiterals(sql));
+
+export const maskSensitiveText = (value: string) =>
+  value
+    .replace(new RegExp(EMAIL_PATTERN.source, "gi"), "[REDACTED_EMAIL]")
+    .replace(new RegExp(PHONE_PATTERN.source, "g"), "[REDACTED_PHONE]")
+    .replace(new RegExp(UUID_PATTERN.source, "gi"), "[REDACTED_UUID]")
+    .replace(new RegExp(LONG_TOKEN_PATTERN.source, "gi"), "[REDACTED_TOKEN]")
+    .replace(new RegExp(LONG_NUMBER_PATTERN.source, "g"), "[REDACTED_NUMBER]");
