@@ -108,9 +108,57 @@ export type ComputedInsightCandidate = {
   type: "trend" | "comparison" | "outlier";
 };
 
+export type ComputedTimeCalculationBasis = {
+  aggregation: "sum_by_period";
+  endPeriod: string;
+  granularity: "day" | "month" | "mixed";
+  periodCount: number;
+  recurrenceAssessment: "not_evaluated";
+  startPeriod: string;
+  trendAvailability: "calculated" | "insufficient_periods";
+  validPeriodRowCount: number;
+};
+
+export type ComputedComparisonCalculationBasis = {
+  aggregation: "sum_by_group";
+  baseline: "group_average";
+  displayedGroupCount: number;
+  groupCount: number;
+};
+
+export type ComputedOutlierDetectionBasis = {
+  candidateCount: number;
+  evaluatedRowCount: number;
+  iqrMultiplier: number;
+  methods: Array<"iqr" | "z_score">;
+  zScoreThreshold: number;
+};
+
+export type ComputedCalculationBasis = {
+  comparison?: ComputedComparisonCalculationBasis;
+  dataQuality: {
+    excludedMetricRowCount: number;
+    inputRowCount: number;
+    invalidPeriodRowCount?: number;
+    validMetricRowCount: number;
+  };
+  outlierDetection: ComputedOutlierDetectionBasis;
+  summary: {
+    average: "arithmetic_mean";
+    count: "valid_numeric_rows";
+    extrema: "min_max";
+    total: "sum";
+  };
+  time?: ComputedTimeCalculationBasis;
+};
+
+export const COMPUTED_ANALYSIS_CONTRACT_VERSION = "computed-analysis-v1" as const;
+
 export type ComputedAnalysisResult = {
+  calculationBasis: ComputedCalculationBasis;
   comparisons: ComputedComparison[];
   config: ComputedAnalysisConfig;
+  contractVersion: typeof COMPUTED_ANALYSIS_CONTRACT_VERSION;
   facts: ComputedFact[];
   insightCandidates: ComputedInsightCandidate[];
   outliers: ComputedOutlierCandidate[];
@@ -135,6 +183,8 @@ export type ComputedAnalysisOutcome =
 const MAX_ANALYSIS_ROWS = 20000;
 const MAX_COMPARISON_ITEMS = 20;
 const MAX_OUTLIERS = 10;
+const IQR_MULTIPLIER = 1.5;
+const Z_SCORE_THRESHOLD = 2.5;
 
 export const DEFAULT_DATA_ANALYSIS_SAMPLE = `period,team,processed_count
 2026-05,A,82
@@ -208,6 +258,7 @@ const normalizePeriod = (value: string) => {
   const monthLabel = `${year}-${String(month).padStart(2, "0")}`;
 
   return {
+    granularity: matched[3] ? "day" as const : "month" as const,
     key: matched[3] ? `${monthLabel}-${String(day).padStart(2, "0")}` : monthLabel,
     label: matched[3] ? `${monthLabel}-${String(day).padStart(2, "0")}` : monthLabel,
     sortValue: date.getTime(),
@@ -751,8 +802,8 @@ const buildOutliers = (
   const q1 = percentile(sortedValues, 0.25);
   const q3 = percentile(sortedValues, 0.75);
   const iqr = q3 - q1;
-  const lowerBound = q1 - iqr * 1.5;
-  const upperBound = q3 + iqr * 1.5;
+  const lowerBound = q1 - iqr * IQR_MULTIPLIER;
+  const upperBound = q3 + iqr * IQR_MULTIPLIER;
   const standardDeviation = populationStandardDeviation(sortedValues, average);
   const candidates = rows
     .map((row) => {
@@ -769,7 +820,7 @@ const buildOutliers = (
 
       const zScore = standardDeviation > 0 ? (row.value - average) / standardDeviation : 0;
 
-      if (Math.abs(zScore) >= 2.5) {
+      if (Math.abs(zScore) >= Z_SCORE_THRESHOLD) {
         return {
           ...row,
           deviation: zScore,
@@ -815,6 +866,67 @@ const buildOutliers = (
       value: candidate.value,
     } satisfies ComputedOutlierCandidate;
   });
+};
+
+const buildTimeCalculationBasis = (
+  rows: Array<{ period?: NonNullable<ReturnType<typeof normalizePeriod>> }>,
+) => {
+  const periods = new Map<string, {
+    granularity: "day" | "month";
+    label: string;
+    sortValue: number;
+  }>();
+  let validPeriodRowCount = 0;
+
+  rows.forEach((row) => {
+    if (!row.period) {
+      return;
+    }
+
+    validPeriodRowCount += 1;
+    periods.set(row.period.key, {
+      granularity: row.period.granularity,
+      label: row.period.label,
+      sortValue: row.period.sortValue,
+    });
+  });
+
+  const sortedPeriods = Array.from(periods.values())
+    .sort((left, right) => left.sortValue - right.sortValue);
+
+  if (sortedPeriods.length === 0) {
+    return undefined;
+  }
+
+  const granularities = unique(sortedPeriods.map((period) => period.granularity));
+
+  return {
+    aggregation: "sum_by_period",
+    endPeriod: sortedPeriods[sortedPeriods.length - 1].label,
+    granularity: granularities.length === 1 ? granularities[0] : "mixed",
+    periodCount: sortedPeriods.length,
+    recurrenceAssessment: "not_evaluated",
+    startPeriod: sortedPeriods[0].label,
+    trendAvailability: sortedPeriods.length >= 2 ? "calculated" : "insufficient_periods",
+    validPeriodRowCount,
+  } satisfies ComputedTimeCalculationBasis;
+};
+
+const buildComparisonCalculationBasis = (
+  rows: Array<{ group?: string }>,
+  groupColumn: string | undefined,
+  comparisons: ComputedComparison[],
+) => {
+  if (!groupColumn) {
+    return undefined;
+  }
+
+  return {
+    aggregation: "sum_by_group",
+    baseline: "group_average",
+    displayedGroupCount: comparisons.length,
+    groupCount: unique(rows.map((row) => row.group?.trim() || "(값 없음)")).length,
+  } satisfies ComputedComparisonCalculationBasis;
 };
 
 const buildInsightCandidates = (
@@ -970,12 +1082,12 @@ export const calculateComputedAnalysis = (
     };
   }
 
-  if (normalizedConfig.timeColumn) {
-    const invalidPeriodCount = numericRows.filter((row) => !row.period).length;
+  const invalidPeriodRowCount = normalizedConfig.timeColumn
+    ? numericRows.filter((row) => !row.period).length
+    : undefined;
 
-    if (invalidPeriodCount > 0) {
-      warnings.push(`${invalidPeriodCount}행은 시간 형식을 해석하지 못해 추세 계산에서 제외될 수 있습니다.`);
-    }
+  if (invalidPeriodRowCount && invalidPeriodRowCount > 0) {
+    warnings.push(`${invalidPeriodRowCount}행은 시간 형식을 해석하지 못해 추세 계산에서 제외될 수 있습니다.`);
   }
 
   const values = numericRows.map((row) => row.value);
@@ -1039,6 +1151,9 @@ export const calculateComputedAnalysis = (
       value: definition.value,
     } satisfies ComputedSummaryMetric;
   });
+  const timeCalculationBasis = normalizedConfig.timeColumn
+    ? buildTimeCalculationBasis(numericRows)
+    : undefined;
   const trend = normalizedConfig.timeColumn
     ? buildTrend(numericRows, warnings, facts)
     : undefined;
@@ -1054,6 +1169,29 @@ export const calculateComputedAnalysis = (
     warnings,
     facts,
   );
+  const calculationBasis: ComputedCalculationBasis = {
+    comparison: buildComparisonCalculationBasis(numericRows, normalizedConfig.groupColumn, comparisons),
+    dataQuality: {
+      excludedMetricRowCount: invalidMetricCount,
+      inputRowCount: inspection.rows.length,
+      ...(invalidPeriodRowCount !== undefined ? { invalidPeriodRowCount } : {}),
+      validMetricRowCount: numericRows.length,
+    },
+    outlierDetection: {
+      candidateCount: outliers.length,
+      evaluatedRowCount: numericRows.length,
+      iqrMultiplier: IQR_MULTIPLIER,
+      methods: ["iqr", "z_score"],
+      zScoreThreshold: Z_SCORE_THRESHOLD,
+    },
+    summary: {
+      average: "arithmetic_mean",
+      count: "valid_numeric_rows",
+      extrema: "min_max",
+      total: "sum",
+    },
+    ...(timeCalculationBasis ? { time: timeCalculationBasis } : {}),
+  };
   const insightCandidates = buildInsightCandidates(trend, comparisons, outliers);
 
   if (insightCandidates.length === 0) {
@@ -1063,8 +1201,10 @@ export const calculateComputedAnalysis = (
   return {
     ok: true,
     result: {
+      calculationBasis,
       comparisons,
       config: normalizedConfig,
+      contractVersion: COMPUTED_ANALYSIS_CONTRACT_VERSION,
       facts,
       insightCandidates,
       outliers,

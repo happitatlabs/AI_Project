@@ -66,6 +66,7 @@ const { buildAiSqlExplanationPayload } = await import(
   pathToFileURL(path.join(tempModuleRoot, "src/aiExplanation.js")).href
 );
 const {
+  COMPUTED_ANALYSIS_CONTRACT_VERSION,
   calculateComputedAnalysis,
   inspectDataInput,
 } = await import(pathToFileURL(path.join(tempModuleRoot, "src/computedAnalysis.js")).href);
@@ -1149,6 +1150,31 @@ const dataCalculation = calculateComputedAnalysis(dataInspection, {
 assert.equal(dataCalculation.ok, true);
 assert.equal(dataCalculation.result.scope.rowCount, 8);
 assert.equal(dataCalculation.result.scope.validMetricRowCount, 8);
+assert.equal(dataCalculation.result.contractVersion, COMPUTED_ANALYSIS_CONTRACT_VERSION);
+assert.deepEqual(dataCalculation.result.calculationBasis.dataQuality, {
+  excludedMetricRowCount: 0,
+  inputRowCount: 8,
+  invalidPeriodRowCount: 0,
+  validMetricRowCount: 8,
+});
+assert.deepEqual(dataCalculation.result.calculationBasis.time, {
+  aggregation: "sum_by_period",
+  endPeriod: "2026-08",
+  granularity: "month",
+  periodCount: 4,
+  recurrenceAssessment: "not_evaluated",
+  startPeriod: "2026-05",
+  trendAvailability: "calculated",
+  validPeriodRowCount: 8,
+});
+assert.deepEqual(dataCalculation.result.calculationBasis.comparison, {
+  aggregation: "sum_by_group",
+  baseline: "group_average",
+  displayedGroupCount: 2,
+  groupCount: 2,
+});
+assert.equal(dataCalculation.result.calculationBasis.outlierDetection.iqrMultiplier, 1.5);
+assert.equal(dataCalculation.result.calculationBasis.outlierDetection.zScoreThreshold, 2.5);
 assert.equal(dataCalculation.result.summary.find((metric) => metric.id === "total")?.value, 755);
 assert.equal(dataCalculation.result.summary.find((metric) => metric.id === "max")?.value, 182);
 assert.equal(dataCalculation.result.summary.find((metric) => metric.id === "min")?.value, 65);
@@ -1161,6 +1187,34 @@ assert.ok(dataCalculation.result.insightCandidates.some((candidate) => candidate
 assert.ok(dataCalculation.result.insightCandidates.some((candidate) => candidate.type === "outlier"));
 assert.equal("rows" in dataCalculation.result, false);
 assert.ok(dataCalculation.result.facts.every((fact) => fact.source === "mechanical_calculation"));
+
+const dataQualityInspection = inspectDataInput(readFixture("data-analysis-data-quality.csv"));
+const dataQualityCalculation = calculateComputedAnalysis(dataQualityInspection, {
+  groupColumn: "team",
+  metricColumn: "processed_count",
+  timeColumn: "period",
+});
+assert.equal(dataQualityCalculation.ok, true);
+assert.deepEqual(dataQualityCalculation.result.calculationBasis.dataQuality, {
+  excludedMetricRowCount: 1,
+  inputRowCount: 4,
+  invalidPeriodRowCount: 1,
+  validMetricRowCount: 3,
+});
+assert.equal(dataQualityCalculation.result.calculationBasis.time?.startPeriod, "2026-01");
+assert.equal(dataQualityCalculation.result.calculationBasis.time?.endPeriod, "2026-03");
+assert.equal(dataQualityCalculation.result.calculationBasis.time?.periodCount, 2);
+assert.equal(dataQualityCalculation.result.calculationBasis.comparison?.groupCount, 2);
+
+const singlePeriodInspection = inspectDataInput(readFixture("data-analysis-single-period.csv"));
+const singlePeriodCalculation = calculateComputedAnalysis(singlePeriodInspection, {
+  metricColumn: "value",
+  timeColumn: "period",
+});
+assert.equal(singlePeriodCalculation.ok, true);
+assert.equal(singlePeriodCalculation.result.trend, undefined);
+assert.equal(singlePeriodCalculation.result.calculationBasis.time?.trendAvailability, "insufficient_periods");
+assert.equal(singlePeriodCalculation.result.calculationBasis.time?.periodCount, 1);
 
 const jsonDataInspection = inspectDataInput(JSON.stringify([
   { period: "2026-01", team: "A", value: 10 },
@@ -1204,11 +1258,14 @@ const dataInsightsPayload = buildAiDataInsightsPayload(
 const serializedDataInsightsPayload = JSON.stringify(dataInsightsPayload);
 assert.match(dataInsightsPayload.instructions, /원본 행 데이터는 제공되지 않았으며/);
 assert.match(dataInsightsPayload.instructions, /제공되지 않은 숫자를 생성하지 않는다/);
+assert.match(dataInsightsPayload.instructions, /반복 주기나 계절성을 추정하지 마라/);
 assert.doesNotMatch(serializedDataInsightsPayload, /alice@example\.com/);
 assert.doesNotMatch(serializedDataInsightsPayload, /bob@example\.com/);
 assert.doesNotMatch(serializedDataInsightsPayload, /customer_email/);
 assert.match(serializedDataInsightsPayload, /그룹 1/);
 assert.equal("rows" in dataInsightsPayload.computedAnalysis, false);
+assert.equal(dataInsightsPayload.computedAnalysis.contractVersion, COMPUTED_ANALYSIS_CONTRACT_VERSION);
+assert.equal(dataInsightsPayload.computedAnalysis.calculationBasis.time?.recurrenceAssessment, "not_evaluated");
 
 const normalizedDataInsights = normalizeAiDataInsights({
   conclusion: "계산 결과를 우선 확인하세요.",
@@ -1246,8 +1303,11 @@ const dataInsightReport = buildDataInsightMarkdownReport(
   normalizedDataInsights,
 );
 assert.match(dataInsightReport, /## 분석 개요/);
+assert.match(dataInsightReport, /## 계산 기준 및 데이터 범위/);
+assert.match(dataInsightReport, /기간 범위: 2026-05 ~ 2026-08/);
 assert.match(dataInsightReport, /## 핵심 지표/);
 assert.match(dataInsightReport, /## 주요 인사이트/);
+assert.match(dataInsightReport, /## 기계식 분석 근거/);
 assert.match(dataInsightReport, /관찰된 사실/);
 assert.match(dataInsightReport, /확인 필요 사항/);
 
@@ -1265,6 +1325,23 @@ const missingDataCalculationRoute = await handleAiDataInsightsRequest(
 );
 assert.equal(missingDataCalculationRoute.status, 400);
 assert.match(missingDataCalculationRoute.body.error, /기계식 계산 결과/);
+
+const invalidContractDataRoute = await handleAiDataInsightsRequest(
+  {
+    computedAnalysis: {
+      ...dataCalculation.result,
+      contractVersion: "computed-analysis-v0",
+    },
+  },
+  {
+    env: {},
+    fetcher: async () => {
+      throw new Error("invalid contract must not call provider");
+    },
+  },
+);
+assert.equal(invalidContractDataRoute.status, 400);
+assert.match(invalidContractDataRoute.body.error, /기계식 계산 결과/);
 
 const rawRowsDataRoute = await handleAiDataInsightsRequest(
   {
