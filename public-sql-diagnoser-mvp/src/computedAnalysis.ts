@@ -2,9 +2,56 @@ export type DataInputFormat = "auto" | "csv" | "json";
 
 export type DataRow = Record<string, string>;
 
+export type DataColumnRole = "aggregate_marker" | "category" | "identifier" | "metric" | "time" | "unknown";
+
+export type DataColumnProfile = {
+  column: string;
+  confidence: "high" | "low" | "medium";
+  primaryRole: DataColumnRole;
+  reasons: string[];
+  roles: DataColumnRole[];
+  statistics: {
+    aggregateMarkerCount: number;
+    nonEmptyCount: number;
+    numericRatio: number;
+    timeRatio: number;
+    uniqueCount: number;
+    uniqueRatio: number;
+  };
+};
+
+export type DataAggregationLevel = {
+  level: number;
+  rowCount: number;
+};
+
+export type DataAggregationStructure = {
+  aggregateRowCount: number;
+  categoryColumns: string[];
+  levels: DataAggregationLevel[];
+};
+
+export type DataAnalysisPlan = {
+  aggregationStructure: DataAggregationStructure;
+  groupCandidates: string[];
+  metricCandidates: string[];
+  questionSuggestions: string[];
+  recommendedGroupColumn?: string;
+  recommendedMetricColumn?: string;
+  recommendedTimeColumn?: string;
+  warnings: string[];
+};
+
 export type DataColumnOptions = {
+  analysisPlan: DataAnalysisPlan;
+  editable: {
+    groupColumns: string[];
+    metricColumns: string[];
+    timeColumns: string[];
+  };
   groupColumns: string[];
   metricColumns: string[];
+  profiles: DataColumnProfile[];
   recommended: {
     groupColumn?: string;
     metricColumn?: string;
@@ -38,7 +85,7 @@ export type ComputedAnalysisConfig = {
   timeColumn?: string;
 };
 
-export type ComputedFactCategory = "summary" | "trend" | "comparison" | "outlier";
+export type ComputedFactCategory = "summary" | "trend" | "comparison" | "contribution" | "outlier";
 
 export type ComputedFact = {
   category: ComputedFactCategory;
@@ -87,6 +134,24 @@ export type ComputedComparison = {
   value: number;
 };
 
+export type ComputedChangeContribution = {
+  contributionRate: number;
+  currentValue: number;
+  factId: string;
+  group: string;
+  previousValue: number;
+  valueChange: number;
+};
+
+export type ComputedCrossAnalysisBasis = {
+  aggregation: "sum_by_period_and_group";
+  comparableGroupCount: number;
+  currentPeriod: string;
+  previousPeriod: string;
+  skippedIncompleteGroupCount: number;
+  valueCoverage: "complete" | "partial";
+};
+
 export type ComputedOutlierCandidate = {
   deviation?: number;
   factId: string;
@@ -105,13 +170,27 @@ export type ComputedInsightCandidate = {
   importanceReasons: string[];
   importanceScore: number;
   title: string;
-  type: "trend" | "comparison" | "outlier";
+  type: "trend" | "comparison" | "contribution" | "outlier";
+};
+
+export type ComputedReportFinding = {
+  evidenceFactIds: string[];
+  id: string;
+  statements: string[];
+  title: string;
+  type: "trend" | "comparison" | "contribution" | "review";
+};
+
+export type ComputedFollowUpQuestion = {
+  id: string;
+  question: string;
+  rationale: string;
 };
 
 export type ComputedTimeCalculationBasis = {
   aggregation: "sum_by_period";
   endPeriod: string;
-  granularity: "day" | "month" | "mixed";
+  granularity: "day" | "month" | "mixed" | "year";
   periodCount: number;
   recurrenceAssessment: "not_evaluated";
   startPeriod: string;
@@ -136,7 +215,9 @@ export type ComputedOutlierDetectionBasis = {
 
 export type ComputedCalculationBasis = {
   comparison?: ComputedComparisonCalculationBasis;
+  crossAnalysis?: ComputedCrossAnalysisBasis;
   dataQuality: {
+    excludedAggregateRowCount?: number;
     excludedMetricRowCount: number;
     inputRowCount: number;
     invalidPeriodRowCount?: number;
@@ -152,16 +233,20 @@ export type ComputedCalculationBasis = {
   time?: ComputedTimeCalculationBasis;
 };
 
-export const COMPUTED_ANALYSIS_CONTRACT_VERSION = "computed-analysis-v1" as const;
+export const COMPUTED_ANALYSIS_CONTRACT_VERSION = "computed-analysis-v2" as const;
 
 export type ComputedAnalysisResult = {
+  analysisPlan: DataAnalysisPlan;
   calculationBasis: ComputedCalculationBasis;
+  changeContributions: ComputedChangeContribution[];
   comparisons: ComputedComparison[];
   config: ComputedAnalysisConfig;
   contractVersion: typeof COMPUTED_ANALYSIS_CONTRACT_VERSION;
   facts: ComputedFact[];
+  followUpQuestions: ComputedFollowUpQuestion[];
   insightCandidates: ComputedInsightCandidate[];
   outliers: ComputedOutlierCandidate[];
+  reportFindings: ComputedReportFinding[];
   scope: {
     columnCount: number;
     datasetName?: string;
@@ -197,8 +282,25 @@ export const DEFAULT_DATA_ANALYSIS_SAMPLE = `period,team,processed_count
 2026-08,B,86`;
 
 const emptyColumnOptions = (): DataColumnOptions => ({
+  analysisPlan: {
+    aggregationStructure: {
+      aggregateRowCount: 0,
+      categoryColumns: [],
+      levels: [],
+    },
+    groupCandidates: [],
+    metricCandidates: [],
+    questionSuggestions: [],
+    warnings: [],
+  },
+  editable: {
+    groupColumns: [],
+    metricColumns: [],
+    timeColumns: [],
+  },
   groupColumns: [],
   metricColumns: [],
+  profiles: [],
   recommended: {},
   timeColumns: [],
 });
@@ -235,6 +337,23 @@ const parseNumericValue = (value: string) => {
 
 const normalizePeriod = (value: string) => {
   const normalized = value.trim();
+  const yearOnly = normalized.match(/^(\d{4})$/);
+
+  if (yearOnly) {
+    const year = Number(yearOnly[1]);
+
+    if (year < 1000 || year > 9999) {
+      return undefined;
+    }
+
+    return {
+      granularity: "year" as const,
+      key: String(year),
+      label: String(year),
+      sortValue: Date.UTC(year, 0, 1),
+    };
+  }
+
   const matched = normalized.match(/^(\d{4})[-/.]?(\d{1,2})(?:[-/.](\d{1,2}))?$/);
 
   if (!matched) {
@@ -397,49 +516,233 @@ const collectColumns = (rows: DataRow[]) => {
 const columnNameScore = (column: string, patterns: RegExp[]) =>
   patterns.some((pattern) => pattern.test(column)) ? 1 : 0;
 
-const buildColumnOptions = (rows: DataRow[], columns: string[]): DataColumnOptions => {
-  const metricColumns = columns.filter((column) => {
-    const values = rows.map((row) => row[column] ?? "").filter((value) => value.trim());
-    const numericCount = values.filter((value) => parseNumericValue(value) !== undefined).length;
-    return values.length >= 2 && numericCount >= Math.ceil(values.length * 0.6);
-  });
-  const timeColumns = columns.filter((column) => {
-    const values = rows.map((row) => row[column] ?? "").filter((value) => value.trim());
-    const timeCount = values.filter((value) => normalizePeriod(value) !== undefined).length;
-    return values.length >= 2 && timeCount >= Math.ceil(values.length * 0.6);
-  });
-  const groupColumns = columns.filter((column) => {
-    const values = rows.map((row) => row[column] ?? "").filter((value) => value.trim());
-    const uniqueValues = unique(values);
-    const numericCount = values.filter((value) => parseNumericValue(value) !== undefined).length;
-    const maximumGroups = Math.max(2, Math.min(20, Math.floor(rows.length / 2)));
+const metricNamePatterns = [/amount|count|value|sales|quantity|volume|건수|처리|매출|수량|금액|비용|인원|규모/i];
+const timeNamePatterns = [/year|month|date|period|time|연도|년도|년월|일자|날짜|월|기간/i];
+const groupNamePatterns = [/group|team|region|type|category|department|부서|팀|지역|구분|그룹|장르|규모/i];
+const identifierNamePatterns = [/(^|[_\s])(id|key|uuid|code|no|number)([_\s]|$)/i, /아이디|식별|번호|코드/i];
+const aggregateMarkerPattern = /^(?:전체(?:\s*합계)?|합계|총계|소계|all|total|grand\s*total|subtotal)$/i;
 
-    return (
-      values.length >= 2 &&
-      uniqueValues.length >= 2 &&
-      uniqueValues.length <= maximumGroups &&
-      numericCount < Math.ceil(values.length * 0.5)
-    );
-  });
-  const recommendedMetric = [...metricColumns].sort((left, right) => {
-    const leftScore = columnNameScore(left, [/amount|count|value|sales|quantity|volume|건수|처리|매출|수량|금액/i]);
-    const rightScore = columnNameScore(right, [/amount|count|value|sales|quantity|volume|건수|처리|매출|수량|금액/i]);
-    return rightScore - leftScore || left.localeCompare(right);
-  })[0];
-  const recommendedTime = [...timeColumns].sort((left, right) => {
-    const leftScore = columnNameScore(left, [/date|month|period|time|일자|날짜|월|기간/i]);
-    const rightScore = columnNameScore(right, [/date|month|period|time|일자|날짜|월|기간/i]);
-    return rightScore - leftScore || left.localeCompare(right);
-  })[0];
-  const recommendedGroup = [...groupColumns].sort((left, right) => {
-    const leftScore = columnNameScore(left, [/group|team|region|type|category|부서|팀|지역|구분|그룹/i]);
-    const rightScore = columnNameScore(right, [/group|team|region|type|category|부서|팀|지역|구분|그룹/i]);
-    return rightScore - leftScore || left.localeCompare(right);
-  })[0];
+const isAggregateLikeValue = (value: string) => aggregateMarkerPattern.test(value.trim());
+
+const ratio = (numerator: number, denominator: number) => denominator === 0 ? 0 : numerator / denominator;
+
+const buildColumnProfile = (rows: DataRow[], column: string): DataColumnProfile => {
+  const values = rows.map((row) => row[column] ?? "").filter((value) => value.trim());
+  const uniqueValues = unique(values);
+  const numericCount = values.filter((value) => parseNumericValue(value) !== undefined).length;
+  const timeCount = values.filter((value) => normalizePeriod(value) !== undefined).length;
+  const aggregateMarkerCount = values.filter(isAggregateLikeValue).length;
+  const numericRatio = ratio(numericCount, values.length);
+  const timeRatio = ratio(timeCount, values.length);
+  const uniqueRatio = ratio(uniqueValues.length, values.length);
+  const maximumGroups = Math.max(2, Math.min(50, Math.floor(rows.length / 2)));
+  const metric = values.length >= 2 && numericRatio >= 0.6;
+  const time = values.length >= 2 && timeRatio >= 0.6;
+  const identifier = values.length >= 2 && (
+    (columnNameScore(column, identifierNamePatterns) > 0 && uniqueRatio >= 0.6) ||
+    (values.length >= 5 && uniqueRatio >= 0.95)
+  );
+  const category = values.length >= 2 && uniqueValues.length >= 2 && uniqueValues.length <= maximumGroups && numericRatio < 0.5;
+  const roles: DataColumnRole[] = [];
+
+  if (time) {
+    roles.push("time");
+  }
+  if (metric) {
+    roles.push("metric");
+  }
+  if (category) {
+    roles.push("category");
+  }
+  if (identifier) {
+    roles.push("identifier");
+  }
+  if (aggregateMarkerCount > 0) {
+    roles.push("aggregate_marker");
+  }
+
+  const primaryRole: DataColumnRole = time
+    ? "time"
+    : metric
+      ? "metric"
+      : identifier
+        ? "identifier"
+        : category
+          ? "category"
+          : aggregateMarkerCount > 0
+            ? "aggregate_marker"
+            : "unknown";
+  const primaryRatio = primaryRole === "time"
+    ? timeRatio
+    : primaryRole === "metric"
+      ? numericRatio
+      : primaryRole === "identifier"
+        ? uniqueRatio
+        : primaryRole === "category"
+          ? 1 - uniqueRatio
+          : 0;
+  const nameMatchesRole = (
+    (primaryRole === "time" && columnNameScore(column, timeNamePatterns) > 0) ||
+    (primaryRole === "metric" && columnNameScore(column, metricNamePatterns) > 0) ||
+    (primaryRole === "category" && columnNameScore(column, groupNamePatterns) > 0) ||
+    (primaryRole === "identifier" && columnNameScore(column, identifierNamePatterns) > 0)
+  );
+  const confidence: DataColumnProfile["confidence"] = primaryRatio >= 0.9 && (nameMatchesRole || primaryRole === "time" || primaryRole === "metric")
+    ? "high"
+    : primaryRatio >= 0.6 || nameMatchesRole
+      ? "medium"
+      : "low";
+  const reasons: string[] = [];
+
+  if (primaryRole === "time") {
+    reasons.push(`값의 ${formatPercent(timeRatio * 100)}가 기간 형식입니다.`);
+  } else if (primaryRole === "metric") {
+    reasons.push(`값의 ${formatPercent(numericRatio * 100)}가 숫자 형식입니다.`);
+  } else if (primaryRole === "category") {
+    reasons.push(`${formatNumber(uniqueValues.length)}개의 반복 범주 값이 있습니다.`);
+  } else if (primaryRole === "identifier") {
+    reasons.push(`값의 ${formatPercent(uniqueRatio * 100)}가 서로 달라 식별자 가능성이 있습니다.`);
+  }
+
+  if (nameMatchesRole) {
+    reasons.push("컬럼명이 역할을 뒷받침합니다.");
+  }
+  if (aggregateMarkerCount > 0) {
+    reasons.push(`전체·합계 표기 ${formatNumber(aggregateMarkerCount)}개가 감지되었습니다.`);
+  }
 
   return {
+    column,
+    confidence,
+    primaryRole,
+    reasons,
+    roles: roles.length > 0 ? roles : ["unknown"],
+    statistics: {
+      aggregateMarkerCount,
+      nonEmptyCount: values.length,
+      numericRatio,
+      timeRatio,
+      uniqueCount: uniqueValues.length,
+      uniqueRatio,
+    },
+  };
+};
+
+const isAggregateLikeRow = (row: DataRow, categoryColumns: string[]) =>
+  categoryColumns.some((column) => isAggregateLikeValue(row[column] ?? ""));
+
+const buildAggregationStructure = (
+  rows: DataRow[],
+  categoryColumns: string[],
+): DataAggregationStructure => {
+  const levelCounts = new Map<number, number>();
+  let aggregateRowCount = 0;
+
+  rows.forEach((row) => {
+    const nonAggregateDimensionCount = categoryColumns.filter((column) => {
+      const value = (row[column] ?? "").trim();
+      return Boolean(value) && !isAggregateLikeValue(value);
+    }).length;
+
+    levelCounts.set(
+      nonAggregateDimensionCount,
+      (levelCounts.get(nonAggregateDimensionCount) ?? 0) + 1,
+    );
+
+    if (isAggregateLikeRow(row, categoryColumns)) {
+      aggregateRowCount += 1;
+    }
+  });
+
+  return {
+    aggregateRowCount,
+    categoryColumns,
+    levels: Array.from(levelCounts.entries())
+      .map(([level, rowCount]) => ({ level, rowCount }))
+      .sort((left, right) => left.level - right.level),
+  };
+};
+
+const buildColumnOptions = (rows: DataRow[], columns: string[]): DataColumnOptions => {
+  const profiles = columns.map((column) => buildColumnProfile(rows, column));
+  const profileByColumn = new Map(profiles.map((profile) => [profile.column, profile]));
+  const metricColumns = profiles
+    .filter((profile) => profile.roles.includes("metric") && profile.primaryRole !== "time")
+    .map((profile) => profile.column);
+  const timeColumns = profiles
+    .filter((profile) => profile.roles.includes("time"))
+    .map((profile) => profile.column);
+  const groupColumns = profiles
+    .filter((profile) => profile.roles.includes("category") && profile.primaryRole !== "identifier" && profile.primaryRole !== "time")
+    .map((profile) => profile.column);
+  const aggregationStructure = buildAggregationStructure(rows, groupColumns);
+  const recommendedMetric = [...metricColumns].sort((left, right) => {
+    const leftProfile = profileByColumn.get(left);
+    const rightProfile = profileByColumn.get(right);
+    const leftScore = columnNameScore(left, metricNamePatterns) + (leftProfile?.confidence === "high" ? 2 : leftProfile?.confidence === "medium" ? 1 : 0);
+    const rightScore = columnNameScore(right, metricNamePatterns) + (rightProfile?.confidence === "high" ? 2 : rightProfile?.confidence === "medium" ? 1 : 0);
+    return rightScore - leftScore || columns.indexOf(left) - columns.indexOf(right);
+  })[0];
+  const recommendedTime = [...timeColumns].sort((left, right) => {
+    const leftScore = columnNameScore(left, timeNamePatterns);
+    const rightScore = columnNameScore(right, timeNamePatterns);
+    return rightScore - leftScore || columns.indexOf(left) - columns.indexOf(right);
+  })[0];
+  const recommendedGroup = [...groupColumns].sort((left, right) => {
+    const leftScore = columnNameScore(left, groupNamePatterns);
+    const rightScore = columnNameScore(right, groupNamePatterns);
+    return rightScore - leftScore || columns.indexOf(left) - columns.indexOf(right);
+  })[0];
+  const questionSuggestions: string[] = [];
+
+  if (recommendedMetric && recommendedTime && recommendedGroup) {
+    questionSuggestions.push(`${recommendedMetric}의 기간별 변화는 어떤 ${recommendedGroup}에서 주로 발생했습니까?`);
+    questionSuggestions.push(`${recommendedGroup}별 ${recommendedMetric} 차이는 최근 기간에 어떻게 달라졌습니까?`);
+  } else if (recommendedMetric && recommendedTime) {
+    questionSuggestions.push(`${recommendedMetric}은 기간에 따라 어떤 흐름을 보입니까?`);
+  } else if (recommendedMetric && recommendedGroup) {
+    questionSuggestions.push(`${recommendedGroup}별 ${recommendedMetric} 차이는 어떻습니까?`);
+  } else if (recommendedMetric) {
+    questionSuggestions.push(`${recommendedMetric}의 분포와 큰 값·작은 값을 먼저 확인합니다.`);
+  }
+
+  const planWarnings: string[] = [];
+
+  if (!recommendedMetric) {
+    planWarnings.push("숫자 지표를 확신 있게 감지하지 못했습니다. 분석 기준에서 지표 컬럼을 직접 선택하세요.");
+  }
+  if (aggregationStructure.aggregateRowCount > 0) {
+    planWarnings.push("전체·합계 표기가 감지되었습니다. 범주 컬럼의 상위 집계 행은 중복 비교를 막기 위해 자동으로 분리합니다.");
+  }
+  const editableMetricColumns = profiles
+    .filter((profile) => profile.statistics.numericRatio > 0)
+    .map((profile) => profile.column);
+  const editableTimeColumns = profiles
+    .filter((profile) => profile.statistics.nonEmptyCount >= 2)
+    .map((profile) => profile.column);
+  const editableGroupColumns = profiles
+    .filter((profile) => profile.statistics.uniqueCount >= 2)
+    .map((profile) => profile.column);
+
+  return {
+    analysisPlan: {
+      aggregationStructure,
+      groupCandidates: groupColumns,
+      metricCandidates: metricColumns,
+      questionSuggestions,
+      recommendedGroupColumn: recommendedGroup,
+      recommendedMetricColumn: recommendedMetric,
+      recommendedTimeColumn: recommendedTime,
+      warnings: planWarnings,
+    },
+    editable: {
+      groupColumns: editableGroupColumns,
+      metricColumns: editableMetricColumns,
+      timeColumns: editableTimeColumns,
+    },
     groupColumns,
     metricColumns,
+    profiles,
     recommended: {
       groupColumn: recommendedGroup,
       metricColumn: recommendedMetric,
@@ -787,6 +1090,135 @@ const buildComparisons = (
   return comparisons;
 };
 
+const buildChangeContributions = (
+  rows: Array<{
+    group?: string;
+    period?: NonNullable<ReturnType<typeof normalizePeriod>>;
+    value: number;
+  }>,
+  trend: ComputedTrend | undefined,
+  groupColumn: string | undefined,
+  warnings: string[],
+  facts: ComputedFact[],
+) => {
+  if (!trend || !groupColumn) {
+    return {
+      contributions: [],
+      basis: undefined,
+    };
+  }
+
+  const groups = new Map<string, {
+    currentFound: boolean;
+    currentValue: number;
+    previousFound: boolean;
+    previousValue: number;
+  }>();
+
+  rows.forEach((row) => {
+    if (!row.period || (row.period.label !== trend.currentPeriod && row.period.label !== trend.previousPeriod)) {
+      return;
+    }
+
+    const group = row.group?.trim() || "(값 없음)";
+    const entry = groups.get(group) ?? {
+      currentFound: false,
+      currentValue: 0,
+      previousFound: false,
+      previousValue: 0,
+    };
+
+    if (row.period.label === trend.currentPeriod) {
+      entry.currentFound = true;
+      entry.currentValue += row.value;
+    } else {
+      entry.previousFound = true;
+      entry.previousValue += row.value;
+    }
+
+    groups.set(group, entry);
+  });
+
+  const comparableGroups = Array.from(groups.entries())
+    .filter(([, value]) => value.currentFound && value.previousFound)
+    .map(([group, value]) => ({
+      currentValue: value.currentValue,
+      group,
+      previousValue: value.previousValue,
+      valueChange: value.currentValue - value.previousValue,
+    }));
+  const skippedIncompleteGroupCount = groups.size - comparableGroups.length;
+  const totalChange = trend.currentValue - trend.previousValue;
+
+  if (comparableGroups.length < 2 || totalChange === 0) {
+    return {
+      contributions: [],
+      basis: undefined,
+    };
+  }
+
+  const valueCoverage: ComputedCrossAnalysisBasis["valueCoverage"] = skippedIncompleteGroupCount === 0
+    ? "complete"
+    : "partial";
+
+  if (valueCoverage === "partial") {
+    warnings.push("기간×그룹 변화 기여도는 두 기간에 모두 기록된 그룹만 비교했습니다. 누락된 그룹이 있어 전체 변화와 완전히 일치하지 않을 수 있습니다.");
+  }
+
+  const sameDirection = comparableGroups.filter((group) => totalChange > 0 ? group.valueChange > 0 : group.valueChange < 0);
+  const rankedGroups = (sameDirection.length > 0 ? sameDirection : comparableGroups)
+    .sort((left, right) => totalChange > 0
+      ? right.valueChange - left.valueChange || left.group.localeCompare(right.group)
+      : left.valueChange - right.valueChange || left.group.localeCompare(right.group))
+    .slice(0, MAX_COMPARISON_ITEMS);
+  const contributions = rankedGroups.map((group, index) => {
+    const factId = `contribution-${index + 1}`;
+    const contributionRate = (group.valueChange / totalChange) * 100;
+    const scope = valueCoverage === "complete"
+      ? "전체 순변화"
+      : "비교 가능한 그룹의 순변화";
+    const changeLabel = group.valueChange > 0 ? "증가" : "감소";
+
+    facts.push({
+      category: "contribution",
+      id: factId,
+      label: `${group.group} 변화 기여도`,
+      source: "mechanical_calculation",
+      statement: `${trend.previousPeriod}~${trend.currentPeriod} ${scope} 중 ${group.group}의 변화는 ${formatNumber(Math.abs(group.valueChange))} ${changeLabel}이며, 순변화 대비 ${formatPercent(Math.abs(contributionRate))}입니다.`,
+      values: {
+        contributionRate,
+        currentPeriod: trend.currentPeriod,
+        currentValue: group.currentValue,
+        group: group.group,
+        previousPeriod: trend.previousPeriod,
+        previousValue: group.previousValue,
+        valueChange: group.valueChange,
+      },
+    });
+
+    return {
+      contributionRate,
+      currentValue: group.currentValue,
+      factId,
+      group: group.group,
+      previousValue: group.previousValue,
+      valueChange: group.valueChange,
+    } satisfies ComputedChangeContribution;
+  });
+
+  return {
+    contributions,
+    basis: {
+      aggregation: "sum_by_period_and_group",
+      comparableGroupCount: comparableGroups.length,
+      currentPeriod: trend.currentPeriod,
+      previousPeriod: trend.previousPeriod,
+      skippedIncompleteGroupCount,
+      valueCoverage,
+    } satisfies ComputedCrossAnalysisBasis,
+  };
+};
+
 const buildOutliers = (
   rows: Array<{ group?: string; period?: string; rowNumber: number; value: number }>,
   average: number,
@@ -872,7 +1304,7 @@ const buildTimeCalculationBasis = (
   rows: Array<{ period?: NonNullable<ReturnType<typeof normalizePeriod>> }>,
 ) => {
   const periods = new Map<string, {
-    granularity: "day" | "month";
+    granularity: "day" | "month" | "year";
     label: string;
     sortValue: number;
   }>();
@@ -932,6 +1364,7 @@ const buildComparisonCalculationBasis = (
 const buildInsightCandidates = (
   trend: ComputedTrend | undefined,
   comparisons: ComputedComparison[],
+  changeContributions: ComputedChangeContribution[],
   outliers: ComputedOutlierCandidate[],
 ) => {
   const candidates: ComputedInsightCandidate[] = [];
@@ -969,6 +1402,24 @@ const buildInsightCandidates = (
       importanceScore: Math.round(score),
       title: titleMap[trend.pattern],
       type: "trend",
+    });
+  }
+
+  const leadingContribution = changeContributions[0];
+
+  if (leadingContribution && Math.abs(leadingContribution.contributionRate) >= 25) {
+    const score = Math.min(100, 35 + Math.min(55, Math.abs(leadingContribution.contributionRate)));
+    candidates.push({
+      evidenceFactIds: [leadingContribution.factId],
+      id: "candidate-contribution",
+      importance: importanceFromScore(score),
+      importanceReasons: [
+        "두 기간에 모두 기록된 그룹의 변화량을 기계식으로 비교했습니다.",
+        "전체 또는 비교 가능한 그룹의 순변화에서 비중이 큰 그룹이 계산되었습니다.",
+      ],
+      importanceScore: Math.round(score),
+      title: "기간 변화 기여도",
+      type: "contribution",
     });
   }
 
@@ -1013,6 +1464,113 @@ const buildInsightCandidates = (
   return candidates
     .sort((left, right) => right.importanceScore - left.importanceScore || left.id.localeCompare(right.id))
     .slice(0, 8);
+};
+
+const reportFindingTitle = (type: ComputedInsightCandidate["type"]) => {
+  if (type === "trend") {
+    return "주요 변화";
+  }
+
+  if (type === "contribution") {
+    return "변화 기여도";
+  }
+
+  if (type === "comparison") {
+    return "비교 결과";
+  }
+
+  return "추가 확인 항목";
+};
+
+const reportOutlierStatement = (outlier: ComputedOutlierCandidate) => {
+  const qualifier = [outlier.period, outlier.group].filter(Boolean).join(" / ");
+  const subject = qualifier ? `${qualifier}의 값 ${formatNumber(outlier.value)}` : `값 ${formatNumber(outlier.value)}`;
+
+  return `${subject}은 프로그램의 통계 기준에서 일반 범위와 차이가 확인되어 추가 확인 대상으로 정리했습니다. 원인은 데이터만으로 단정할 수 없습니다.`;
+};
+
+const buildReportFindings = (
+  facts: ComputedFact[],
+  candidates: ComputedInsightCandidate[],
+  outliers: ComputedOutlierCandidate[],
+) => {
+  const factMap = new Map(facts.map((fact) => [fact.id, fact]));
+  const outlierMap = new Map(outliers.map((outlier) => [outlier.factId, outlier]));
+
+  return candidates.flatMap((candidate) => {
+    const statements = candidate.type === "outlier"
+      ? candidate.evidenceFactIds
+        .map((factId) => outlierMap.get(factId))
+        .filter((outlier): outlier is ComputedOutlierCandidate => Boolean(outlier))
+        .map(reportOutlierStatement)
+      : candidate.evidenceFactIds
+        .map((factId) => factMap.get(factId)?.statement)
+        .filter((statement): statement is string => Boolean(statement));
+
+    if (statements.length === 0) {
+      return [];
+    }
+
+    return [{
+      evidenceFactIds: candidate.evidenceFactIds,
+      id: candidate.id,
+      statements,
+      title: reportFindingTitle(candidate.type),
+      type: candidate.type === "outlier" ? "review" : candidate.type,
+    } satisfies ComputedReportFinding];
+  });
+};
+
+const buildFollowUpQuestions = (
+  analysisPlan: DataAnalysisPlan,
+  config: ComputedAnalysisConfig,
+  trend: ComputedTrend | undefined,
+  comparisons: ComputedComparison[],
+  changeContributions: ComputedChangeContribution[],
+  outliers: ComputedOutlierCandidate[],
+) => {
+  const questions: ComputedFollowUpQuestion[] = [];
+  const alternateGroup = analysisPlan.groupCandidates.find((column) => column !== config.groupColumn);
+
+  if (trend && !config.groupColumn && analysisPlan.recommendedGroupColumn) {
+    questions.push({
+      id: "follow-up-trend-group",
+      question: `기간별 변화는 어떤 ${analysisPlan.recommendedGroupColumn}에서 발생했습니까?`,
+      rationale: "기간별 합계 변화가 계산되어 비교 기준별 분해가 가능합니다.",
+    });
+  }
+
+  if (changeContributions.length > 0 && alternateGroup) {
+    questions.push({
+      id: "follow-up-contribution-drilldown",
+      question: `변화 기여도가 큰 그룹을 ${alternateGroup} 기준으로 다시 나누면 차이가 어디에서 나타납니까?`,
+      rationale: "기간×그룹 변화 기여도를 계산했으며 다른 범주로 세부 분해할 수 있습니다.",
+    });
+  }
+
+  if (comparisons.length >= 2 && config.timeColumn) {
+    questions.push({
+      id: "follow-up-comparison-over-time",
+      question: "상위와 하위 그룹의 차이는 기간에 따라 유지되었습니까?",
+      rationale: "그룹별 합계 차이와 기간 컬럼이 모두 확인되었습니다.",
+    });
+  }
+
+  if (outliers.length > 0) {
+    questions.push({
+      id: "follow-up-review-values",
+      question: "추가 확인 항목은 입력 오류가 아닌 특정 조건이나 집계 수준 차이로 설명될 수 있습니까?",
+      rationale: "통계 기준과 차이가 있는 값이 계산되어 원인 확인이 필요합니다.",
+    });
+  }
+
+  return questions.length > 0
+    ? questions.slice(0, 3)
+    : analysisPlan.questionSuggestions.slice(0, 2).map((question, index) => ({
+      id: `follow-up-plan-${index + 1}`,
+      question,
+      rationale: "자동 감지한 컬럼 역할을 기준으로 제안한 분석 질문입니다.",
+    }));
 };
 
 export const calculateComputedAnalysis = (
@@ -1062,6 +1620,10 @@ export const calculateComputedAnalysis = (
 
     return [{
       group,
+      isAggregateLike: isAggregateLikeRow(
+        row,
+        inspection.columnOptions.analysisPlan.aggregationStructure.categoryColumns,
+      ) || Boolean(normalizedConfig.groupColumn && group && isAggregateLikeValue(group)),
       period,
       rowNumber: index + 2,
       value,
@@ -1082,15 +1644,27 @@ export const calculateComputedAnalysis = (
     };
   }
 
+  const aggregateLikeRows = numericRows.filter((row) => row.isAggregateLike);
+  const analysisRows = aggregateLikeRows.length > 0 && aggregateLikeRows.length < numericRows.length
+    ? numericRows.filter((row) => !row.isAggregateLike)
+    : numericRows;
+  const excludedAggregateRowCount = numericRows.length - analysisRows.length;
+
+  if (excludedAggregateRowCount > 0) {
+    warnings.push(`${excludedAggregateRowCount}행은 감지된 범주 컬럼에서 전체·합계로 해석되어 요약, 비교, 이상치 계산에서 제외했습니다.`);
+  } else if (aggregateLikeRows.length === numericRows.length && aggregateLikeRows.length > 0) {
+    warnings.push("선택한 그룹 컬럼의 모든 값이 전체·합계로 해석되어 자동 제외하지 않았습니다. 원본 집계 수준을 확인하세요.");
+  }
+
   const invalidPeriodRowCount = normalizedConfig.timeColumn
-    ? numericRows.filter((row) => !row.period).length
+    ? analysisRows.filter((row) => !row.period).length
     : undefined;
 
   if (invalidPeriodRowCount && invalidPeriodRowCount > 0) {
     warnings.push(`${invalidPeriodRowCount}행은 시간 형식을 해석하지 못해 추세 계산에서 제외될 수 있습니다.`);
   }
 
-  const values = numericRows.map((row) => row.value);
+  const values = analysisRows.map((row) => row.value);
   const total = values.reduce((sum, value) => sum + value, 0);
   const average = total / values.length;
   const max = Math.max(...values);
@@ -1152,14 +1726,21 @@ export const calculateComputedAnalysis = (
     } satisfies ComputedSummaryMetric;
   });
   const timeCalculationBasis = normalizedConfig.timeColumn
-    ? buildTimeCalculationBasis(numericRows)
+    ? buildTimeCalculationBasis(analysisRows)
     : undefined;
   const trend = normalizedConfig.timeColumn
-    ? buildTrend(numericRows, warnings, facts)
+    ? buildTrend(analysisRows, warnings, facts)
     : undefined;
-  const comparisons = buildComparisons(numericRows, normalizedConfig.groupColumn, total, warnings, facts);
+  const comparisons = buildComparisons(analysisRows, normalizedConfig.groupColumn, total, warnings, facts);
+  const changeContributionResult = buildChangeContributions(
+    analysisRows,
+    trend,
+    normalizedConfig.groupColumn,
+    warnings,
+    facts,
+  );
   const outliers = buildOutliers(
-    numericRows.map((row) => ({
+    analysisRows.map((row) => ({
       group: row.group,
       period: row.period?.label,
       rowNumber: row.rowNumber,
@@ -1170,16 +1751,18 @@ export const calculateComputedAnalysis = (
     facts,
   );
   const calculationBasis: ComputedCalculationBasis = {
-    comparison: buildComparisonCalculationBasis(numericRows, normalizedConfig.groupColumn, comparisons),
+    comparison: buildComparisonCalculationBasis(analysisRows, normalizedConfig.groupColumn, comparisons),
+    ...(changeContributionResult.basis ? { crossAnalysis: changeContributionResult.basis } : {}),
     dataQuality: {
+      ...(excludedAggregateRowCount > 0 ? { excludedAggregateRowCount } : {}),
       excludedMetricRowCount: invalidMetricCount,
       inputRowCount: inspection.rows.length,
       ...(invalidPeriodRowCount !== undefined ? { invalidPeriodRowCount } : {}),
-      validMetricRowCount: numericRows.length,
+      validMetricRowCount: analysisRows.length,
     },
     outlierDetection: {
       candidateCount: outliers.length,
-      evaluatedRowCount: numericRows.length,
+      evaluatedRowCount: analysisRows.length,
       iqrMultiplier: IQR_MULTIPLIER,
       methods: ["iqr", "z_score"],
       zScoreThreshold: Z_SCORE_THRESHOLD,
@@ -1192,7 +1775,21 @@ export const calculateComputedAnalysis = (
     },
     ...(timeCalculationBasis ? { time: timeCalculationBasis } : {}),
   };
-  const insightCandidates = buildInsightCandidates(trend, comparisons, outliers);
+  const insightCandidates = buildInsightCandidates(
+    trend,
+    comparisons,
+    changeContributionResult.contributions,
+    outliers,
+  );
+  const reportFindings = buildReportFindings(facts, insightCandidates, outliers);
+  const followUpQuestions = buildFollowUpQuestions(
+    inspection.columnOptions.analysisPlan,
+    normalizedConfig,
+    trend,
+    comparisons,
+    changeContributionResult.contributions,
+    outliers,
+  );
 
   if (insightCandidates.length === 0) {
     warnings.push("계산 기준을 넘는 추세·그룹 차이·이상치 후보가 없어 AI 인사이트를 강제로 만들지 않습니다.");
@@ -1201,13 +1798,17 @@ export const calculateComputedAnalysis = (
   return {
     ok: true,
     result: {
+      analysisPlan: inspection.columnOptions.analysisPlan,
       calculationBasis,
+      changeContributions: changeContributionResult.contributions,
       comparisons,
       config: normalizedConfig,
       contractVersion: COMPUTED_ANALYSIS_CONTRACT_VERSION,
       facts,
+      followUpQuestions,
       insightCandidates,
       outliers,
+      reportFindings,
       scope: {
         columnCount: inspection.columns.length,
         datasetName: normalizedConfig.datasetName,
@@ -1215,7 +1816,7 @@ export const calculateComputedAnalysis = (
         metricColumn: normalizedConfig.metricColumn,
         rowCount: inspection.rows.length,
         timeColumn: normalizedConfig.timeColumn,
-        validMetricRowCount: numericRows.length,
+        validMetricRowCount: analysisRows.length,
       },
       summary,
       trend,

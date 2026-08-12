@@ -1184,7 +1184,15 @@ assert.equal(dataCalculation.result.comparisons[0]?.group, "A");
 assert.ok(dataCalculation.result.outliers.some((outlier) => outlier.value === 182 && outlier.method === "iqr"));
 assert.ok(dataCalculation.result.insightCandidates.some((candidate) => candidate.type === "trend"));
 assert.ok(dataCalculation.result.insightCandidates.some((candidate) => candidate.type === "comparison"));
+assert.ok(dataCalculation.result.insightCandidates.some((candidate) => candidate.type === "contribution"));
 assert.ok(dataCalculation.result.insightCandidates.some((candidate) => candidate.type === "outlier"));
+assert.equal(dataCalculation.result.reportFindings.length, 4);
+assert.ok(dataCalculation.result.reportFindings.some((finding) => finding.type === "trend"));
+assert.ok(dataCalculation.result.reportFindings.some((finding) => finding.type === "comparison"));
+assert.ok(dataCalculation.result.reportFindings.some((finding) => finding.type === "contribution"));
+assert.ok(dataCalculation.result.reportFindings.some((finding) => finding.type === "review"));
+assert.ok(dataCalculation.result.reportFindings.some((finding) => /추가 확인 대상으로 정리/.test(finding.statements.join(" "))));
+assert.equal(dataCalculation.result.changeContributions[0]?.group, "A");
 assert.equal("rows" in dataCalculation.result, false);
 assert.ok(dataCalculation.result.facts.every((fact) => fact.source === "mechanical_calculation"));
 
@@ -1205,6 +1213,59 @@ assert.equal(dataQualityCalculation.result.calculationBasis.time?.startPeriod, "
 assert.equal(dataQualityCalculation.result.calculationBasis.time?.endPeriod, "2026-03");
 assert.equal(dataQualityCalculation.result.calculationBasis.time?.periodCount, 2);
 assert.equal(dataQualityCalculation.result.calculationBasis.comparison?.groupCount, 2);
+
+const yearlyAggregateInspection = inspectDataInput(readFixture("data-analysis-yearly-aggregate.csv"));
+assert.equal(yearlyAggregateInspection.ok, true);
+assert.equal(yearlyAggregateInspection.columnOptions.analysisPlan.recommendedTimeColumn, "연도");
+assert.equal(yearlyAggregateInspection.columnOptions.analysisPlan.recommendedMetricColumn, "티켓판매액");
+assert.equal(yearlyAggregateInspection.columnOptions.analysisPlan.recommendedGroupColumn, "지역");
+assert.equal(
+  yearlyAggregateInspection.columnOptions.profiles.find((profile) => profile.column === "연도")?.primaryRole,
+  "time",
+);
+assert.ok(yearlyAggregateInspection.columnOptions.analysisPlan.questionSuggestions.some((question) => /기간별 변화/.test(question)));
+assert.ok(yearlyAggregateInspection.columnOptions.analysisPlan.warnings.some((warning) => /전체·합계/.test(warning)));
+
+const yearlyAggregateCalculation = calculateComputedAnalysis(yearlyAggregateInspection, {
+  groupColumn: yearlyAggregateInspection.columnOptions.analysisPlan.recommendedGroupColumn,
+  metricColumn: yearlyAggregateInspection.columnOptions.analysisPlan.recommendedMetricColumn,
+  timeColumn: yearlyAggregateInspection.columnOptions.analysisPlan.recommendedTimeColumn,
+});
+assert.equal(yearlyAggregateCalculation.ok, true);
+assert.equal(yearlyAggregateCalculation.result.summary.find((metric) => metric.id === "total")?.value, 650);
+assert.equal(yearlyAggregateCalculation.result.calculationBasis.dataQuality.excludedAggregateRowCount, 3);
+assert.equal(yearlyAggregateCalculation.result.calculationBasis.dataQuality.validMetricRowCount, 6);
+assert.equal(yearlyAggregateCalculation.result.calculationBasis.time?.granularity, "year");
+assert.equal(yearlyAggregateCalculation.result.calculationBasis.time?.startPeriod, "2023");
+assert.equal(yearlyAggregateCalculation.result.calculationBasis.time?.endPeriod, "2025");
+assert.equal(yearlyAggregateCalculation.result.comparisons.some((comparison) => comparison.group === "전체"), false);
+assert.equal(yearlyAggregateCalculation.result.calculationBasis.crossAnalysis?.valueCoverage, "complete");
+assert.equal(yearlyAggregateCalculation.result.changeContributions[0]?.group, "경기");
+assert.ok(yearlyAggregateCalculation.result.reportFindings.some((finding) => finding.type === "contribution"));
+assert.ok(yearlyAggregateCalculation.result.followUpQuestions.some((item) => /장르/.test(item.question)));
+assert.ok(yearlyAggregateCalculation.result.warnings.some((warning) => /전체·합계/.test(warning)));
+
+const mixedAggregationInspection = inspectDataInput(readFixture("data-analysis-mixed-aggregation.csv"));
+assert.equal(mixedAggregationInspection.ok, true);
+assert.deepEqual(mixedAggregationInspection.columnOptions.analysisPlan.aggregationStructure.categoryColumns, ["region", "genre"]);
+assert.equal(mixedAggregationInspection.columnOptions.analysisPlan.aggregationStructure.aggregateRowCount, 6);
+assert.deepEqual(mixedAggregationInspection.columnOptions.analysisPlan.aggregationStructure.levels, [
+  { level: 0, rowCount: 2 },
+  { level: 1, rowCount: 4 },
+  { level: 2, rowCount: 4 },
+]);
+assert.ok(mixedAggregationInspection.columnOptions.editable.groupColumns.includes("region"));
+
+const mixedAggregationCalculation = calculateComputedAnalysis(mixedAggregationInspection, {
+  groupColumn: "region",
+  metricColumn: "value",
+  timeColumn: "year",
+});
+assert.equal(mixedAggregationCalculation.ok, true);
+assert.equal(mixedAggregationCalculation.result.calculationBasis.dataQuality.excludedAggregateRowCount, 6);
+assert.equal(mixedAggregationCalculation.result.summary.find((metric) => metric.id === "total")?.value, 340);
+assert.equal(mixedAggregationCalculation.result.comparisons.some((comparison) => comparison.group === "All"), false);
+assert.equal(mixedAggregationCalculation.result.calculationBasis.outlierDetection.evaluatedRowCount, 4);
 
 const singlePeriodInspection = inspectDataInput(readFixture("data-analysis-single-period.csv"));
 const singlePeriodCalculation = calculateComputedAnalysis(singlePeriodInspection, {
@@ -1265,6 +1326,8 @@ assert.doesNotMatch(serializedDataInsightsPayload, /customer_email/);
 assert.match(serializedDataInsightsPayload, /그룹 1/);
 assert.equal("rows" in dataInsightsPayload.computedAnalysis, false);
 assert.equal(dataInsightsPayload.computedAnalysis.contractVersion, COMPUTED_ANALYSIS_CONTRACT_VERSION);
+assert.ok(dataInsightsPayload.computedAnalysis.changeContributions.length > 0);
+assert.ok(dataInsightsPayload.computedAnalysis.changeContributions.every((item) => /^그룹/.test(item.group)));
 assert.equal(dataInsightsPayload.computedAnalysis.calculationBasis.time?.recurrenceAssessment, "not_evaluated");
 
 const normalizedDataInsights = normalizeAiDataInsights({
@@ -1296,20 +1359,21 @@ const normalizedDataInsights = normalizeAiDataInsights({
 }, dataCalculation.result);
 assert.equal(normalizedDataInsights.insights.length, 2);
 assert.equal(normalizedDataInsights.insights[1]?.interpretation.length, 0);
-assert.ok(normalizedDataInsights.validationWarnings.some((warning) => /없는 인사이트 후보|숫자 표현/.test(warning)));
+assert.ok(normalizedDataInsights.validationWarnings.some((warning) => /계산 근거가 확인되지 않은 항목|숫자 표현/.test(warning)));
 
 const dataInsightReport = buildDataInsightMarkdownReport(
   dataCalculation.result,
   normalizedDataInsights,
 );
 assert.match(dataInsightReport, /## 분석 개요/);
-assert.match(dataInsightReport, /## 계산 기준 및 데이터 범위/);
+assert.match(dataInsightReport, /## 계산 기준 및 주의 사항/);
 assert.match(dataInsightReport, /기간 범위: 2026-05 ~ 2026-08/);
 assert.match(dataInsightReport, /## 핵심 지표/);
-assert.match(dataInsightReport, /## 주요 인사이트/);
-assert.match(dataInsightReport, /## 기계식 분석 근거/);
+assert.match(dataInsightReport, /## 주요 결과/);
 assert.match(dataInsightReport, /관찰된 사실/);
 assert.match(dataInsightReport, /확인 필요 사항/);
+assert.doesNotMatch(dataInsightReport, /중요도:/);
+assert.doesNotMatch(dataInsightReport, /이상치 후보/);
 
 const missingDataCalculationRoute = await handleAiDataInsightsRequest(
   {},

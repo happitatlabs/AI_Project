@@ -1,5 +1,4 @@
 import {
-  computedInsightLabel,
   formatComputedNumber,
   type ComputedAnalysisResult,
 } from "./computedAnalysis.js";
@@ -22,7 +21,6 @@ export const buildDataInsightMarkdownReport = (
     ].join("\n");
   }
 
-  const factMap = new Map(analysis.facts.map((fact) => [fact.id, fact]));
   const summaryLines = analysis.summary.map(
     (metric) => `- ${metric.label}: ${formatComputedNumber(metric.value)}`,
   );
@@ -32,14 +30,20 @@ export const buildDataInsightMarkdownReport = (
     `- 숫자 계산 행: ${formatComputedNumber(basis.dataQuality.validMetricRowCount)}건`,
     `- 숫자값 제외 행: ${formatComputedNumber(basis.dataQuality.excludedMetricRowCount)}건`,
     `- 요약 계산: 합계, 산술 평균, 최대값, 최소값을 기계식으로 계산`,
-    `- 이상치 후보 기준: IQR ${basis.outlierDetection.iqrMultiplier}배 또는 Z-score ${basis.outlierDetection.zScoreThreshold} 이상`,
+    `- 추가 확인 값 기준: IQR ${basis.outlierDetection.iqrMultiplier}배 또는 Z-score ${basis.outlierDetection.zScoreThreshold} 이상`,
   ];
+
+  if (basis.dataQuality.excludedAggregateRowCount) {
+    basisLines.push(`- 전체·합계 행 분리: ${formatComputedNumber(basis.dataQuality.excludedAggregateRowCount)}건은 중복 비교를 막기 위해 계산에서 제외`);
+  }
 
   if (basis.time) {
     const granularityLabel = basis.time.granularity === "day"
       ? "일 단위"
       : basis.time.granularity === "month"
         ? "월 단위"
+        : basis.time.granularity === "year"
+          ? "연도 단위"
         : "혼합 단위";
     basisLines.push(
       `- 기간 범위: ${basis.time.startPeriod} ~ ${basis.time.endPeriod} (${formatComputedNumber(basis.time.periodCount)}개 기간, ${granularityLabel})`,
@@ -55,43 +59,54 @@ export const buildDataInsightMarkdownReport = (
     );
   }
 
+  if (basis.crossAnalysis) {
+    basisLines.push(
+      `- 기간×그룹 변화 분해: ${basis.crossAnalysis.previousPeriod} → ${basis.crossAnalysis.currentPeriod}, 비교 가능 그룹 ${formatComputedNumber(basis.crossAnalysis.comparableGroupCount)}개`,
+      `- 변화 분해 범위: ${basis.crossAnalysis.valueCoverage === "complete" ? "두 기간의 그룹 값이 모두 있어 전체 변화 기준으로 비교" : "일부 그룹의 기간 값이 누락되어 비교 가능한 그룹 기준으로만 비교"}`,
+    );
+  }
+
   if (basis.dataQuality.invalidPeriodRowCount !== undefined) {
     basisLines.push(`- 시간 형식 제외 행: ${formatComputedNumber(basis.dataQuality.invalidPeriodRowCount)}건`);
   }
-  const trendLines = analysis.trend
-    ? analysis.trend.evidenceFactIds
-      .map((factId) => factMap.get(factId)?.statement)
-      .filter((statement): statement is string => Boolean(statement))
-    : [];
-  const comparisonLines = analysis.comparisons
-    .slice(0, 10)
-    .map((comparison) => factMap.get(comparison.factId)?.statement)
-    .filter((statement): statement is string => Boolean(statement));
-  const outlierLines = analysis.outliers
-    .map((outlier) => factMap.get(outlier.factId)?.statement)
-    .filter((statement): statement is string => Boolean(statement));
-  const insightLines = aiInsights?.insights.flatMap((insight, index) => {
-    const candidate = analysis.insightCandidates.find((item) => item.id === insight.candidateId);
-    const facts = candidate?.evidenceFactIds
-      .map((factId) => factMap.get(factId)?.statement)
-      .filter((statement): statement is string => Boolean(statement)) ?? [];
+  const aiInsightByCandidateId = new Map(
+    (aiInsights?.insights ?? []).map((insight) => [insight.candidateId, insight]),
+  );
+  const selectedFindingIds = Array.from(new Set([
+    ...(aiInsights?.insights ?? []).map((insight) => insight.candidateId),
+    ...analysis.reportFindings.map((finding) => finding.id),
+  ])).slice(0, 3);
+  const reportFindings = selectedFindingIds
+    .map((findingId) => analysis.reportFindings.find((finding) => finding.id === findingId))
+    .filter((finding): finding is ComputedAnalysisResult["reportFindings"][number] => Boolean(finding));
+  const resultLines = reportFindings.flatMap((finding, index) => {
+    const aiInsight = aiInsightByCandidateId.get(finding.id);
 
     return [
-      `### 인사이트 ${index + 1}. ${insight.title}`,
-      `- 중요도: ${candidate ? computedInsightLabel(candidate.importance) : "계산 결과 확인 필요"}${candidate ? ` (${candidate.importanceScore}점)` : ""}`,
-      "- 중요도 근거:",
-      ...(candidate?.importanceReasons.map((reason) => `  - ${reason}`) ?? ["  - 계산 근거를 확인하세요."]),
+      `### 결과 ${index + 1}. ${aiInsight?.title || finding.title}`,
       "- 관찰된 사실:",
-      ...(facts.length > 0 ? facts.map((fact) => `  - ${fact}`) : ["  - 연결된 기계식 사실이 없습니다."]),
+      ...finding.statements.map((statement) => `  - ${statement}`),
       "- 해석:",
-      ...(insight.interpretation.length > 0 ? insight.interpretation.map((item) => `  - ${item}`) : ["  - AI 해석이 없습니다."]),
+      ...(aiInsight
+        ? aiInsight.interpretation.length > 0
+          ? aiInsight.interpretation.map((item) => `  - ${item}`)
+          : ["  - AI 해석이 없습니다."]
+        : ["  - 기계식 계산 결과만 정리했습니다. AI 해석 보강을 실행하면 해석을 추가할 수 있습니다."]),
       "- 확인 필요 사항:",
-      ...(insight.checks.length > 0 ? insight.checks.map((item) => `  - ${item}`) : ["  - 추가 확인 항목이 없습니다."]),
+      ...(aiInsight
+        ? aiInsight.checks.length > 0
+          ? aiInsight.checks.map((item) => `  - ${item}`)
+          : ["  - 추가 확인 항목이 없습니다."]
+        : ["  - AI 해석 보강 전에는 별도 확인 항목을 생성하지 않습니다."]),
       "- 제안:",
-      ...(insight.proposals.length > 0 ? insight.proposals.map((item) => `  - ${item}`) : ["  - 별도 제안이 없습니다."]),
+      ...(aiInsight
+        ? aiInsight.proposals.length > 0
+          ? aiInsight.proposals.map((item) => `  - ${item}`)
+          : ["  - 별도 제안이 없습니다."]
+        : ["  - AI 해석 보강 전에는 별도 제안을 생성하지 않습니다."]),
       "",
     ];
-  }) ?? [];
+  });
 
   return [
     "# 데이터 분석 보고서",
@@ -103,30 +118,21 @@ export const buildDataInsightMarkdownReport = (
     `- 시간 컬럼: ${analysis.scope.timeColumn || "미선택"}`,
     `- 그룹 컬럼: ${analysis.scope.groupColumn || "미선택"}`,
     "",
-    "## 계산 기준 및 데이터 범위",
-    markdownList(basisLines, "계산 기준 정보가 없습니다."),
-    "",
     "## 핵심 지표",
     markdownList(summaryLines, "계산된 핵심 지표가 없습니다."),
     "",
-    "## 주요 인사이트",
-    ...(insightLines.length > 0
-      ? insightLines
-      : ["- AI 인사이트는 선택 실행 기능입니다. 현재는 기계식 계산 결과만 표시합니다."]),
-    "## 기계식 분석 근거",
-    "### 추세",
-    markdownList(trendLines, "시간 컬럼 또는 기간 데이터가 부족해 추세를 계산하지 않았습니다."),
-    "",
-    "### 그룹 비교",
-    markdownList(comparisonLines, "그룹 비교 결과가 없습니다."),
-    "",
-    "### 이상치 후보",
-    markdownList(outlierLines, "계산 기준을 벗어난 이상치 후보가 없습니다."),
+    "## 주요 결과",
+    ...(resultLines.length > 0
+      ? resultLines
+      : ["- 계산 기준을 넘는 뚜렷한 변화, 비교 결과 또는 추가 확인 항목이 없어 핵심 결과를 별도로 만들지 않았습니다."]),
     "",
     "## 결론",
-    aiInsights?.conclusion || "기계식 계산 결과를 우선 확인하고, 필요할 때 AI 해석을 실행하세요.",
+    aiInsights?.conclusion || "핵심 지표와 주요 결과를 우선 확인하고, 필요할 때 AI 해석 보강을 실행하세요.",
     "",
-    "## 주의 사항",
+    "## 계산 기준 및 주의 사항",
+    markdownList(basisLines, "계산 기준 정보가 없습니다."),
+    "",
+    "### 주의 사항",
     markdownList(
       [
         ...analysis.warnings,
