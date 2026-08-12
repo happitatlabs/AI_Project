@@ -60,18 +60,49 @@ import {
   buildTableAssetMap,
   type TableAssetProfile,
 } from "./tableAssetMap";
+import {
+  buildMultiSqlNarrative,
+  buildSingleSqlNarrative,
+  type DiagnosticNarrative,
+} from "./diagnosticNarrative";
 
 const isDemoMode = import.meta.env.VITE_DEMO_MODE === "true";
 const buildAiFeatureEnabled = import.meta.env.VITE_ENABLE_AI_FEATURES !== "false";
 
 type ResultSectionProps = {
+  collapsible?: boolean;
   title: string;
   children: ReactNode;
   className?: string;
+  defaultOpen?: boolean;
+  description?: string;
   variant?: "wide";
 };
 
-function ResultSection({ title, children, className, variant }: ResultSectionProps) {
+function ResultSection({
+  title,
+  children,
+  className,
+  variant,
+  collapsible = false,
+  defaultOpen = false,
+  description,
+}: ResultSectionProps) {
+  if (collapsible) {
+    return (
+      <details
+        className={`collapsible-section result-section-collapsible ${variant ?? ""} ${className ?? ""}`.trim()}
+        open={defaultOpen}
+      >
+        <summary>
+          <span>{title}</span>
+          {description ? <small>{description}</small> : null}
+        </summary>
+        <div className="collapsible-content">{children}</div>
+      </details>
+    );
+  }
+
   return (
     <section className={`result-section ${variant ?? ""} ${className ?? ""}`.trim()}>
       <h2>{title}</h2>
@@ -80,7 +111,60 @@ function ResultSection({ title, children, className, variant }: ResultSectionPro
   );
 }
 
+function DiagnosticNarrativeSections({
+  narrative,
+}: {
+  narrative: DiagnosticNarrative;
+}) {
+  return (
+    <>
+      <ResultSection title={narrative.title} className="diagnostic-narrative-section" variant="wide">
+        <div className="diagnostic-key-findings">
+          {narrative.keyFindings.map((finding) => (
+            <article className={`diagnostic-finding ${finding.severity}`} key={finding.id}>
+              <span>{finding.label}</span>
+              <p>{finding.statement}</p>
+            </article>
+          ))}
+        </div>
+      </ResultSection>
+
+      <ResultSection title="그래서 무엇이 중요한가" className="diagnostic-narrative-section" variant="wide">
+        <div className="diagnostic-so-what">
+          {narrative.soWhat.rationale ? <span>{narrative.soWhat.rationale}</span> : null}
+          <p>{narrative.soWhat.statement}</p>
+        </div>
+      </ResultSection>
+
+      {narrative.priorityTargets.length > 0 ? (
+        <ResultSection title="우선 확인 대상" className="diagnostic-narrative-section" variant="wide">
+          <ol className="diagnostic-priority-targets">
+            {narrative.priorityTargets.map((target) => (
+              <li className={target.severity} key={target.id}>
+                <strong>{target.label}</strong>
+                <span>{target.reasons.join(" / ")}</span>
+              </li>
+            ))}
+          </ol>
+        </ResultSection>
+      ) : null}
+
+      <ResultSection title="다음으로 확인할 질문" className="diagnostic-narrative-section" variant="wide">
+        <ol className="diagnostic-next-questions">
+          {narrative.nextQuestions.map((question) => (
+            <li key={question.id}>
+              <strong>{question.question}</strong>
+              <span>{question.reason}</span>
+            </li>
+          ))}
+        </ol>
+      </ResultSection>
+    </>
+  );
+}
+
 type CollapsibleSectionProps = {
+  className?: string;
   title: string;
   children: ReactNode;
   defaultOpen?: boolean;
@@ -92,9 +176,10 @@ function CollapsibleSection({
   children,
   defaultOpen = false,
   description,
+  className,
 }: CollapsibleSectionProps) {
   return (
-    <details className="collapsible-section rule-detail-toggle" open={defaultOpen}>
+    <details className={`collapsible-section rule-detail-toggle ${className ?? ""}`.trim()} open={defaultOpen}>
       <summary>
         <span>{title}</span>
         {description ? <small>{description}</small> : null}
@@ -116,14 +201,16 @@ const confidenceLevelLabel = (level: SqlExplanation["confidence"]["level"]) => {
   return "낮음";
 };
 
-const joinOrNone = (items: string[]) => items.length > 0 ? items.join(", ") : "없음";
-
 function SingleRuleAnalysisDetails({ analysis }: { analysis: SqlExplanation }) {
   return (
     <div className="detail-summary-grid">
       <section className="detail-summary-block wide">
         <h3>룰 기반 한 줄 설명</h3>
         <p>{analysis.summary}</p>
+      </section>
+      <section className="detail-summary-block wide">
+        <h3>최종 결과 설명</h3>
+        <p>{analysis.finalResult}</p>
       </section>
       <section className="detail-summary-block">
         <h3>신뢰도</h3>
@@ -138,7 +225,20 @@ function SingleRuleAnalysisDetails({ analysis }: { analysis: SqlExplanation }) {
       </section>
       <section className="detail-summary-block">
         <h3>사용 테이블</h3>
-        <p>{joinOrNone(analysis.tables.map((table) => table.rawName))}</p>
+        {analysis.tables.length > 0 ? (
+          <ul>
+            {analysis.tables.map((table) => (
+              <li key={`${table.rawName}-${table.alias ?? ""}`}>
+                <strong>{table.rawName}</strong>
+                {table.description}
+                {table.alias ? ` / 별칭: ${table.alias}` : ""}
+                {table.source === "subquery" ? " / 서브쿼리 출처" : ""}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p>없음</p>
+        )}
       </section>
       <section className="detail-summary-block">
         <h3>JOIN 관계</h3>
@@ -146,7 +246,8 @@ function SingleRuleAnalysisDetails({ analysis }: { analysis: SqlExplanation }) {
           {analysis.relations.length > 0 ? (
             analysis.relations.map((relation) => (
               <li key={`${relation.left}-${relation.right}`}>
-                {relation.left} -&gt; {relation.right}
+                <strong>{relation.left} -&gt; {relation.right}</strong>
+                {relation.explanation ? ` / ${relation.explanation}` : ""}
               </li>
             ))
           ) : (
@@ -160,7 +261,8 @@ function SingleRuleAnalysisDetails({ analysis }: { analysis: SqlExplanation }) {
           {[...analysis.filters, ...analysis.havingConditions].length > 0 ? (
             [...analysis.filters, ...analysis.havingConditions].map((filter) => (
               <li key={`${filter.stage}-${filter.condition}`}>
-                {filter.stage}: {filter.condition}
+                <strong>{filter.stage}: {filter.condition}</strong>
+                {filter.description ? ` / ${filter.description}` : ""}
               </li>
             ))
           ) : (
@@ -180,6 +282,74 @@ function SingleRuleAnalysisDetails({ analysis }: { analysis: SqlExplanation }) {
           <li>SET 연산 {analysis.setOperations.length}개</li>
         </ul>
       </section>
+      <section className="detail-summary-block wide">
+        <h3>CTE·서브쿼리·SET 연산 상세</h3>
+        {analysis.ctes.length > 0 || analysis.subqueries.length > 0 || analysis.setOperations.length > 0 ? (
+          <ul>
+            {analysis.ctes.map((cte) => (
+              <li key={`cte-${cte.name}`}>
+                <strong>CTE {cte.name}</strong>
+                {cte.role}
+                {cte.dependencies.length > 0 ? ` / 의존: ${cte.dependencies.join(", ")}` : ""}
+              </li>
+            ))}
+            {analysis.subqueries.map((subquery) => (
+              <li key={`subquery-${subquery.type}-${subquery.sql}`}>
+                <strong>{subquery.type}</strong>
+                {subquery.description}
+                {subquery.tables.length > 0 ? ` / 테이블: ${subquery.tables.join(", ")}` : ""}
+              </li>
+            ))}
+            {analysis.setOperations.map((operation) => (
+              <li key={`set-${operation.operator}`}>
+                <strong>{operation.operator}</strong>
+                {operation.description}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p>CTE, 서브쿼리, SET 연산이 없습니다.</p>
+        )}
+      </section>
+      <section className="detail-summary-block wide">
+        <h3>집계·윈도우·CASE·파생 컬럼 상세</h3>
+        {analysis.groupBy.length > 0 || analysis.aggregations.length > 0 || analysis.windowFunctions.length > 0 || analysis.caseExpressions.length > 0 || analysis.derivedColumns.length > 0 ? (
+          <ul>
+            {analysis.groupBy.map((group) => (
+              <li key={`group-${group.stage}-${group.columns.join("-")}`}>
+                <strong>{group.stage} GROUP BY</strong>
+                {group.columns.join(", ")}
+              </li>
+            ))}
+            {analysis.aggregations.map((aggregation) => (
+              <li key={`aggregation-${aggregation.stage}-${aggregation.expression}`}>
+                <strong>{aggregation.alias ?? aggregation.expression}</strong>
+                {aggregation.description}
+              </li>
+            ))}
+            {analysis.windowFunctions.map((windowFunction) => (
+              <li key={`window-${windowFunction.stage}-${windowFunction.expression}`}>
+                <strong>{windowFunction.alias ?? windowFunction.functionName}</strong>
+                {windowFunction.description}
+              </li>
+            ))}
+            {analysis.caseExpressions.map((caseExpression) => (
+              <li key={`case-${caseExpression.stage}-${caseExpression.alias ?? "case"}`}>
+                <strong>{caseExpression.alias ?? "CASE"}</strong>
+                {caseExpression.description}
+              </li>
+            ))}
+            {analysis.derivedColumns.map((column) => (
+              <li key={`derived-${column.stage}-${column.alias}`}>
+                <strong>{column.alias}</strong>
+                {column.description}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p>집계, 윈도우 함수, CASE, 파생 컬럼이 없습니다.</p>
+        )}
+      </section>
       <section className="detail-summary-block">
         <h3>업무 추정 근거</h3>
         <ul>
@@ -191,6 +361,20 @@ function SingleRuleAnalysisDetails({ analysis }: { analysis: SqlExplanation }) {
             <li>없음</li>
           )}
         </ul>
+      </section>
+      <section className="detail-summary-block">
+        <h3>업무 추정</h3>
+        <ul>
+          {analysis.businessGuesses.length > 0 ? (
+            analysis.businessGuesses.map((guess) => <li key={guess}>{guess}</li>)
+          ) : (
+            <li>없음</li>
+          )}
+        </ul>
+      </section>
+      <section className="detail-summary-block wide">
+        <h3>신규 개발자 설명</h3>
+        <p>{analysis.developerExplanation}</p>
       </section>
       <section className="detail-summary-block wide">
         <h3>주의 사항</h3>
@@ -555,6 +739,7 @@ function App() {
   const [demoLogoutState, setDemoLogoutState] = useState<"idle" | "loading" | "error">("idle");
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>("single");
   const [sql, setSql] = useState(DEFAULT_SQL);
+  const [analyzedSingleSql, setAnalyzedSingleSql] = useState(DEFAULT_SQL);
   const [multiSql, setMultiSql] = useState(DEFAULT_MULTI_SQL);
   const [selectedPresetId, setSelectedPresetId] = useState("");
   const [analysis, setAnalysis] = useState<SqlExplanation>(() =>
@@ -641,11 +826,6 @@ function App() {
   useEffect(() => {
     void refreshDemoRuntimeConfig();
   }, [refreshDemoRuntimeConfig]);
-  const hasSingleAiRepresentative =
-    aiState.status === "success" || aiDocumentDraftState.status === "success";
-  const hasMultiAiRepresentative =
-    multiAiState.status === "success" || multiAiDocumentDraftState.status === "success";
-
   const tableAssetMap = useMemo(
     () => buildTableAssetMap(multiAnalysis),
     [multiAnalysis],
@@ -660,6 +840,14 @@ function App() {
   const sqlRiskAnalysis = useMemo(
     () => analyzeSqlRisks(multiAnalysis),
     [multiAnalysis],
+  );
+  const singleNarrative = useMemo(
+    () => buildSingleSqlNarrative(analyzedSingleSql, analysis),
+    [analysis, analyzedSingleSql],
+  );
+  const multiNarrative = useMemo(
+    () => buildMultiSqlNarrative(multiAnalysis, tableAssetMap, sqlRiskAnalysis),
+    [multiAnalysis, sqlRiskAnalysis, tableAssetMap],
   );
   const filteredRiskFindings = useMemo(
     () =>
@@ -930,6 +1118,7 @@ function App() {
 
   const runAnalysis = () => {
     setAnalysis(explainSql(sql));
+    setAnalyzedSingleSql(sql);
     setAiState(idleAiExplanationState());
     setAiDocumentDraftState({ status: "idle" });
     setDocumentDraftCopyStatus("idle");
@@ -1604,9 +1793,11 @@ function App() {
         ) : null}
 
         <section
-          className={`result-grid ${hasSingleAiRepresentative ? "ai-representative-mode" : ""}`.trim()}
+          className="result-grid single-result-mode"
           aria-live="polite"
         >
+          <DiagnosticNarrativeSections narrative={singleNarrative} />
+
           <ResultSection title="한 줄 설명" className="rule-analysis-section" variant="wide">
             <p className="summary-text">{analysis.summary}</p>
           </ResultSection>
@@ -1840,7 +2031,7 @@ function App() {
             <p className="developer-text">{analysis.developerExplanation}</p>
           </ResultSection>
 
-          <ResultSection title="AI 설명 보강" className="ai-output-section" variant="wide">
+          <ResultSection title="AI 보충 해석" className="ai-output-section single-ai-explanation" variant="wide">
             {aiState.status === "idle" ? (
               <p className="empty-text">
                 필요할 때만 AI 설명 보강을 요청할 수 있습니다. 룰 기반 분석
@@ -1852,7 +2043,12 @@ function App() {
             ) : null}
             {aiState.status === "error" ? (
               <div className="ai-error">
-                <p>{aiState.errorMessage}</p>
+                <div>
+                  <p>{aiState.errorMessage}</p>
+                  <p className="ai-fallback-note">
+                    룰 기반 핵심 결과와 다음으로 확인할 질문은 계속 제공됩니다.
+                  </p>
+                </div>
                 <button
                   className="secondary-button"
                   type="button"
@@ -1865,11 +2061,7 @@ function App() {
             {aiState.status === "success" ? (
               <div className="ai-explanation">
                 <section>
-                  <h3>AI 한 줄 요약</h3>
-                  <p>{aiState.explanation.summary}</p>
-                </section>
-                <section>
-                  <h3>AI 데이터 흐름 설명</h3>
+                  <h3>AI 연결 설명</h3>
                   <p>{aiState.explanation.dataFlowExplanation}</p>
                 </section>
                 <section>
@@ -1917,7 +2109,7 @@ function App() {
             ) : null}
           </ResultSection>
 
-          <ResultSection title="AI 문서 초안" className="ai-output-section" variant="wide">
+          <ResultSection title="AI 문서 초안" className="ai-output-section single-ai-document" variant="wide">
             <div className="document-draft-toolbar">
               <label className="input-label compact" htmlFor="ai-document-type">
                 문서 유형
@@ -2064,14 +2256,13 @@ function App() {
             ) : null}
           </ResultSection>
 
-          {hasSingleAiRepresentative ? (
-            <CollapsibleSection
-              title="상세 분석 근거"
-              description="룰 기반 파서가 추출한 구조 값"
-            >
-              <SingleRuleAnalysisDetails analysis={analysis} />
-            </CollapsibleSection>
-          ) : null}
+          <CollapsibleSection
+            className="single-rule-details"
+            title="구조 분석 상세"
+            description="사용 테이블, JOIN, 조건, CTE, 집계, 신뢰도와 주의 사항"
+          >
+            <SingleRuleAnalysisDetails analysis={analysis} />
+          </CollapsibleSection>
 
           <ResultSection title="추정 근거" className="rule-analysis-section" variant="wide">
             <ul className="analysis-list compact">
@@ -2177,10 +2368,18 @@ function App() {
             ) : null}
 
             <section
-              className={`result-grid multi-result-mode ${hasMultiAiRepresentative ? "ai-representative-mode" : ""}`.trim()}
+              className="result-grid multi-result-mode"
               aria-live="polite"
             >
-              <ResultSection title="다건 분석 요약" className="summary-section" variant="wide">
+              <DiagnosticNarrativeSections narrative={multiNarrative} />
+
+              <ResultSection
+                collapsible
+                description="SQL 수, 테이블 수, JOIN 수, 조건 패턴 수"
+                title="자산 통계 상세"
+                className="summary-section sql-detail-section"
+                variant="wide"
+              >
                 <div className="summary-metrics">
                   <div>
                     <strong>{multiAnalysis.statements.length}</strong>
@@ -2209,7 +2408,7 @@ function App() {
                 </div>
               </ResultSection>
 
-              <ResultSection title="AI 다건 설명 보강" className="ai-output-section" variant="wide">
+              <ResultSection title="AI 보충 해석" className="ai-output-section multi-ai-explanation" variant="wide">
                 {multiAiState.status === "idle" ? (
                   <p className="empty-text">
                     필요할 때만 다건 AI 설명 보강을 요청할 수 있습니다. 여러
@@ -2222,7 +2421,12 @@ function App() {
                 ) : null}
                 {multiAiState.status === "error" ? (
                   <div className="ai-error">
-                    <p>{multiAiState.errorMessage}</p>
+                    <div>
+                      <p>{multiAiState.errorMessage}</p>
+                      <p className="ai-fallback-note">
+                        룰 기반 핵심 결과와 다음으로 확인할 질문은 계속 제공됩니다.
+                      </p>
+                    </div>
                     <button
                       className="secondary-button"
                       type="button"
@@ -2235,11 +2439,7 @@ function App() {
                 {multiAiState.status === "success" ? (
                   <div className="ai-explanation">
                     <section>
-                      <h3>AI 한 줄 요약</h3>
-                      <p>{multiAiState.explanation.summary}</p>
-                    </section>
-                    <section>
-                      <h3>AI 업무 흐름 설명</h3>
+                      <h3>AI 연결 설명</h3>
                       <p>{multiAiState.explanation.dataFlowExplanation}</p>
                     </section>
                     <section>
@@ -2284,7 +2484,13 @@ function App() {
                 ) : null}
               </ResultSection>
 
-              <ResultSection title="핵심 테이블 후보" className="asset-section" variant="wide">
+              <ResultSection
+                collapsible
+                description="테이블 사용·JOIN·업무 목적을 기준으로 계산한 후보"
+                title="핵심 테이블 후보 상세"
+                className="asset-section sql-detail-section"
+                variant="wide"
+              >
                 {tableAssetMap.coreTables.length > 0 ? (
                   <div className="core-table-strip">
                     {tableAssetMap.coreTables.slice(0, 6).map((table) => (
@@ -2310,7 +2516,13 @@ function App() {
                 )}
               </ResultSection>
 
-              <ResultSection title="테이블 자산 지도" className="asset-section" variant="wide">
+              <ResultSection
+                collapsible
+                description="테이블별 사용 SQL, JOIN 대상, 조건, 업무 추정"
+                title="테이블 자산 지도 상세"
+                className="asset-section sql-detail-section"
+                variant="wide"
+              >
                 {tableAssetMap.tables.length > 0 ? (
                   <div className="asset-map-layout">
                     <div className="asset-table-list" aria-label="테이블 목록">
@@ -2448,7 +2660,13 @@ function App() {
                 )}
               </ResultSection>
 
-              <ResultSection title="시스템 지도 / 영향도 분석" className="asset-section" variant="wide">
+              <ResultSection
+                collapsible
+                description="테이블·SQL·CTE·적재 흐름과 영향도"
+                title="시스템 지도 / 영향도 상세"
+                className="asset-section sql-detail-section"
+                variant="wide"
+              >
                 <div className="system-map-toolbar">
                   <div className="graph-mode-toggle" aria-label="시스템 지도 보기 방식">
                     {systemGraphModes.map((mode) => (
@@ -2629,7 +2847,13 @@ function App() {
                 </div>
               </ResultSection>
 
-              <ResultSection title="리스크 / 개선 포인트" className="risk-section" variant="wide">
+              <ResultSection
+                collapsible
+                description="룰 기반 리스크 finding과 개선 권고"
+                title="리스크 / 개선 포인트 상세"
+                className="risk-section sql-detail-section"
+                variant="wide"
+              >
                 <div className="risk-analysis-panel">
                   <div className="risk-summary-grid">
                     <div className="critical">
@@ -2706,7 +2930,13 @@ function App() {
                 </div>
               </ResultSection>
 
-              <ResultSection title="SQL별 분석 결과" className="rule-analysis-section" variant="wide">
+              <ResultSection
+                collapsible
+                description="SQL별 목적, 구조, 업무 추정"
+                title="SQL별 분석 상세"
+                className="rule-analysis-section sql-detail-section"
+                variant="wide"
+              >
                 {multiAnalysis.statements.length > 0 ? (
                   <ol className="analysis-list">
                     {multiAnalysis.statements.map((statement) => (
@@ -2724,7 +2954,12 @@ function App() {
                 )}
               </ResultSection>
 
-              <ResultSection title="테이블 사용 현황" className="rule-analysis-section">
+              <ResultSection
+                collapsible
+                description="테이블별 참조 SQL과 업무 목적"
+                title="테이블 사용 현황 상세"
+                className="rule-analysis-section sql-detail-section"
+              >
                 {multiAnalysis.tableUsage.length > 0 ? (
                   <ul className="analysis-list compact">
                     {multiAnalysis.tableUsage.map((table) => (
@@ -2743,7 +2978,12 @@ function App() {
                 )}
               </ResultSection>
 
-              <ResultSection title="반복 JOIN 관계" className="rule-analysis-section">
+              <ResultSection
+                collapsible
+                description="여러 SQL에서 반복되는 테이블 연결"
+                title="반복 JOIN 관계 상세"
+                className="rule-analysis-section sql-detail-section"
+              >
                 {multiAnalysis.joinUsage.length > 0 ? (
                   <ul className="analysis-list compact">
                     {multiAnalysis.joinUsage.map((join) => (
@@ -2761,7 +3001,12 @@ function App() {
                 )}
               </ResultSection>
 
-              <ResultSection title="반복 조건 패턴" className="rule-analysis-section">
+              <ResultSection
+                collapsible
+                description="WHERE/HAVING 정규화 조건의 반복 사용"
+                title="반복 조건 패턴 상세"
+                className="rule-analysis-section sql-detail-section"
+              >
                 {multiAnalysis.conditionUsage.length > 0 ? (
                   <ul className="analysis-list compact">
                     {multiAnalysis.conditionUsage.map((condition) => (
@@ -2777,7 +3022,12 @@ function App() {
                 )}
               </ResultSection>
 
-              <ResultSection title="업무 목적 분포" className="rule-analysis-section">
+              <ResultSection
+                collapsible
+                description="룰 기반으로 분류한 SQL 목적 분포"
+                title="업무 목적 분포 상세"
+                className="rule-analysis-section sql-detail-section"
+              >
                 {Object.keys(multiAnalysis.businessIntentSummary).length > 0 ? (
                   <ul className="business-list">
                     {Object.entries(multiAnalysis.businessIntentSummary)
@@ -2791,7 +3041,13 @@ function App() {
                 )}
               </ResultSection>
 
-              <ResultSection title="다건 분석 주의 사항" className="rule-analysis-section" variant="wide">
+              <ResultSection
+                collapsible
+                description="파서 한계와 SQL별 분석 warning"
+                title="다건 분석 주의 사항 상세"
+                className="rule-analysis-section sql-detail-section"
+                variant="wide"
+              >
                 {multiAnalysis.warnings.length > 0 ? (
                   <ul className="analysis-list compact">
                     {multiAnalysis.warnings.map((warning) => (
@@ -2803,16 +3059,15 @@ function App() {
                 )}
               </ResultSection>
 
-              {hasMultiAiRepresentative ? (
-                <CollapsibleSection
-                  title="상세 분석 근거"
-                  description="SQL별 룰 기반 분석과 반복 패턴"
-                >
-                  <MultiRuleAnalysisDetails multiAnalysis={multiAnalysis} />
-                </CollapsibleSection>
-              ) : null}
+              <CollapsibleSection
+                className="multi-rule-details sql-detail-section"
+                title="룰 기반 집계 근거"
+                description="SQL별 요약, 테이블·JOIN·조건·업무 목적 집계"
+              >
+                <MultiRuleAnalysisDetails multiAnalysis={multiAnalysis} />
+              </CollapsibleSection>
 
-              <ResultSection title="AI 다건 문서 초안" className="ai-output-section" variant="wide">
+              <ResultSection title="AI 다건 문서 초안" className="ai-output-section multi-ai-document" variant="wide">
                 <div className="document-draft-toolbar">
                   <label className="input-label compact" htmlFor="multi-ai-document-type">
                     문서 유형
