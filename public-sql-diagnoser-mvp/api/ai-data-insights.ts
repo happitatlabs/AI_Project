@@ -36,7 +36,7 @@ export const handleAiDataInsightsRequest = async (
 
   if (!isComputedAnalysisResult(body.computedAnalysis)) {
     return {
-      body: { error: "기계식 계산 결과가 필요합니다. 원본 행 데이터는 AI 요청에 사용할 수 없습니다." },
+      body: { error: "기계식 계산 결과 계약이 유효하지 않습니다. 최신 계산을 다시 실행하세요. 원본 행 데이터는 AI 요청에 사용할 수 없습니다." },
       status: 400,
     };
   }

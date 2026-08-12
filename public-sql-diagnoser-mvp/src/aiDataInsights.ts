@@ -1,3 +1,4 @@
+import { COMPUTED_ANALYSIS_CONTRACT_VERSION } from "./computedAnalysis.js";
 import type {
   ComputedAnalysisResult,
   ComputedInsightCandidate,
@@ -22,6 +23,7 @@ export type AiDataInsightsResult = {
 
 export type AiDataInsightsPayload = {
   computedAnalysis: {
+    calculationBasis: ComputedAnalysisResult["calculationBasis"];
     comparisons: Array<{
       differenceFromAverage: number;
       factId: string;
@@ -30,6 +32,7 @@ export type AiDataInsightsPayload = {
       ratio: number;
       value: number;
     }>;
+    contractVersion: ComputedAnalysisResult["contractVersion"];
     facts: Array<{
       category: string;
       id: string;
@@ -92,6 +95,8 @@ export const AI_DATA_INSIGHTS_SCHEMA = {
 const AI_DATA_INSIGHTS_INSTRUCTIONS = `너는 기계식 계산 결과를 해석하는 데이터 분석 보조자다.
 입력의 computedAnalysis는 프로그램이 계산한 검증 가능한 수치 결과다.
 원본 행 데이터는 제공되지 않았으며, 계산 결과를 대체하거나 재계산해서는 안 된다.
+calculationBasis는 집계, 비교, 이상치 후보, 기간 범위를 어떤 기계식 기준으로 만들었는지 설명한다. 해당 기준을 바꾸거나 그 밖의 통계 검정을 했다고 말하지 마라.
+time.recurrenceAssessment가 not_evaluated이면 반복 주기나 계절성을 추정하지 마라.
 insightCandidates에 있는 후보만 선택하고 candidateId를 그대로 사용하라.
 facts는 프로그램이 출력할 관찰 사실의 근거 ID다. AI는 사실, 숫자, 날짜, 비율, 건수를 새로 쓰지 말고 candidateId와 해석 문장만 작성하라.
 제공되지 않은 숫자를 생성하지 않는다.
@@ -102,6 +107,7 @@ facts는 프로그램이 출력할 관찰 사실의 근거 ID다. AI는 사실, 
 의미 있는 인사이트가 없으면 insights를 빈 배열로 반환한다.
 insights는 최대 3개로 제한한다.
 importance와 importanceReasons는 기계식 후보에 이미 계산되어 있으므로 AI가 새로 평가하거나 변경하지 않는다.
+해석은 계산 결과에서 읽을 수 있는 패턴만, 확인 필요 사항은 원인 검증에 필요한 항목만, 제안은 후속 검토 행동만 작성하라.
 해석, 확인 필요 사항, 제안, 결론에는 숫자 또는 날짜를 쓰지 않는다. 수치는 프로그램의 사실 섹션에서만 표시된다.
 sqlContext가 있더라도 실제 실행 결과, 데이터 분포, 인덱스, 장애 이력은 알 수 없다고 전제한다.
 한국어로 작성하고 반드시 지정된 JSON 스키마에 맞춰 응답하라.`;
@@ -163,10 +169,12 @@ const toSafeComputedAnalysis = (
     ) as Record<string, number | string>;
 
   return {
+    calculationBasis: analysis.calculationBasis,
     comparisons: analysis.comparisons.slice(0, 12).map((comparison) => ({
       ...comparison,
       group: safeGroup(comparison.group) ?? "그룹",
     })),
+    contractVersion: analysis.contractVersion,
     facts: analysis.facts.map((fact) => ({
       category: fact.category,
       id: fact.id,
@@ -223,6 +231,8 @@ export const isComputedAnalysisResult = (value: unknown): value is ComputedAnaly
   const record = value && typeof value === "object" ? value as Record<string, unknown> : {};
 
   return (
+    record.contractVersion === COMPUTED_ANALYSIS_CONTRACT_VERSION &&
+    Boolean(record.calculationBasis && typeof record.calculationBasis === "object") &&
     Array.isArray(record.summary) &&
     Array.isArray(record.facts) &&
     Array.isArray(record.insightCandidates) &&

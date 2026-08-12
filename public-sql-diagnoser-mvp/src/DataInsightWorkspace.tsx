@@ -380,6 +380,56 @@ export function DataInsightWorkspace({
             </div>
           </section>
 
+          <section className="result-section data-result-section wide">
+            <h2>계산 기준 및 데이터 범위</h2>
+            <p className="report-help">
+              아래 기준은 프로그램이 적용한 계산 범위입니다. AI 해석은 이 기준과 근거 사실을 벗어나지 않습니다.
+            </p>
+            <ul className="analysis-list compact">
+              <li>
+                <strong>계산 대상</strong>
+                <span>
+                  입력 {formatComputedNumber(analysis.calculationBasis.dataQuality.inputRowCount)}행 / 숫자 계산 {formatComputedNumber(analysis.calculationBasis.dataQuality.validMetricRowCount)}행 / 제외 {formatComputedNumber(analysis.calculationBasis.dataQuality.excludedMetricRowCount)}행
+                </span>
+              </li>
+              {analysis.calculationBasis.time ? (
+                <li>
+                  <strong>기간별 추세</strong>
+                  <span>
+                    {analysis.calculationBasis.time.startPeriod} ~ {analysis.calculationBasis.time.endPeriod} / {formatComputedNumber(analysis.calculationBasis.time.periodCount)}개 기간 / {analysis.calculationBasis.time.granularity === "day" ? "일 단위" : analysis.calculationBasis.time.granularity === "month" ? "월 단위" : "혼합 단위"}
+                    {analysis.calculationBasis.time.trendAvailability === "insufficient_periods" ? " / 비교 가능한 기간 부족" : ""}
+                  </span>
+                </li>
+              ) : null}
+              {analysis.calculationBasis.dataQuality.invalidPeriodRowCount !== undefined ? (
+                <li>
+                  <strong>시간 형식 제외</strong>
+                  <span>{formatComputedNumber(analysis.calculationBasis.dataQuality.invalidPeriodRowCount)}행</span>
+                </li>
+              ) : null}
+              {analysis.calculationBasis.comparison ? (
+                <li>
+                  <strong>그룹 비교</strong>
+                  <span>
+                    {formatComputedNumber(analysis.calculationBasis.comparison.groupCount)}개 그룹 합계를 그룹 평균과 비교 / 표시 {formatComputedNumber(analysis.calculationBasis.comparison.displayedGroupCount)}개
+                  </span>
+                </li>
+              ) : null}
+              <li>
+                <strong>이상치 후보</strong>
+                <span>
+                  IQR {analysis.calculationBasis.outlierDetection.iqrMultiplier}배 또는 Z-score {analysis.calculationBasis.outlierDetection.zScoreThreshold} 이상 / 후보 {formatComputedNumber(analysis.calculationBasis.outlierDetection.candidateCount)}건
+                </span>
+              </li>
+              {analysis.calculationBasis.time ? (
+                <li>
+                  <strong>반복 주기</strong>
+                  <span>현재 계산에서는 반복 주기나 계절성을 평가하지 않습니다.</span>
+                </li>
+              ) : null}
+            </ul>
+          </section>
+
           <section className="result-section data-result-section">
             <h2>추세</h2>
             {analysis.trend ? (
@@ -449,6 +499,9 @@ export function DataInsightWorkspace({
 
           <section className="result-section data-result-section wide ai-output-section" aria-live="polite">
             <h2>AI 인사이트</h2>
+            <p className="report-help">
+              AI는 기계식 후보의 해석, 확인 필요 사항, 제안만 작성합니다. 사실과 수치는 프로그램 계산 결과를 그대로 표시합니다.
+            </p>
             {!aiFeatureEnabled ? (
               <p className="empty-text">현재 환경에서는 AI 기능이 비활성화되어 있습니다.</p>
             ) : aiState.status === "idle" ? (
