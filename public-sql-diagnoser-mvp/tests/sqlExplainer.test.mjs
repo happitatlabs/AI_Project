@@ -23,7 +23,7 @@ const compiledMasking = ts.transpileModule(maskingSource, {
   },
 });
 const maskingModuleUrl = `data:text/javascript;base64,${Buffer.from(compiledMasking.outputText).toString("base64")}`;
-const { maskSensitiveSql } = await import(maskingModuleUrl);
+const { maskSensitiveSql, maskSensitiveText } = await import(maskingModuleUrl);
 
 const compileTsFile = (inputPath, outputPath) => {
   const input = fs.readFileSync(path.resolve(inputPath), "utf8");
@@ -41,6 +41,10 @@ const compileTsFile = (inputPath, outputPath) => {
 const tempModuleRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sql-explainer-ai-"));
 compileTsFile("src/sqlExplainer.ts", path.join(tempModuleRoot, "src/sqlExplainer.js"));
 compileTsFile("src/sqlMasking.ts", path.join(tempModuleRoot, "src/sqlMasking.js"));
+compileTsFile("src/computedAnalysis.ts", path.join(tempModuleRoot, "src/computedAnalysis.js"));
+compileTsFile("src/aiDataInsights.ts", path.join(tempModuleRoot, "src/aiDataInsights.js"));
+compileTsFile("src/aiDataInsightsState.ts", path.join(tempModuleRoot, "src/aiDataInsightsState.js"));
+compileTsFile("src/dataInsightReport.ts", path.join(tempModuleRoot, "src/dataInsightReport.js"));
 compileTsFile("src/aiExplanation.ts", path.join(tempModuleRoot, "src/aiExplanation.js"));
 compileTsFile("src/aiDocumentDraft.ts", path.join(tempModuleRoot, "src/aiDocumentDraft.js"));
 compileTsFile("src/aiMultiDocumentDraft.ts", path.join(tempModuleRoot, "src/aiMultiDocumentDraft.js"));
@@ -55,10 +59,23 @@ compileTsFile("api/ai-provider.ts", path.join(tempModuleRoot, "api/ai-provider.j
 compileTsFile("api/ai-explain.ts", path.join(tempModuleRoot, "api/ai-explain.js"));
 compileTsFile("api/ai-document-draft.ts", path.join(tempModuleRoot, "api/ai-document-draft.js"));
 compileTsFile("api/ai-multi-document-draft.ts", path.join(tempModuleRoot, "api/ai-multi-document-draft.js"));
+compileTsFile("api/ai-data-insights.ts", path.join(tempModuleRoot, "api/ai-data-insights.js"));
+compileTsFile("src/cloudflareWorker.ts", path.join(tempModuleRoot, "src/cloudflareWorker.js"));
 
 const { buildAiSqlExplanationPayload } = await import(
   pathToFileURL(path.join(tempModuleRoot, "src/aiExplanation.js")).href
 );
+const {
+  calculateComputedAnalysis,
+  inspectDataInput,
+} = await import(pathToFileURL(path.join(tempModuleRoot, "src/computedAnalysis.js")).href);
+const {
+  buildAiDataInsightsPayload,
+  normalizeAiDataInsights,
+} = await import(pathToFileURL(path.join(tempModuleRoot, "src/aiDataInsights.js")).href);
+const {
+  buildDataInsightMarkdownReport,
+} = await import(pathToFileURL(path.join(tempModuleRoot, "src/dataInsightReport.js")).href);
 const {
   buildAiSqlDocumentDraftPayload,
 } = await import(pathToFileURL(path.join(tempModuleRoot, "src/aiDocumentDraft.js")).href);
@@ -76,6 +93,12 @@ const { handleAiDocumentDraftRequest } = await import(
 );
 const { handleAiMultiDocumentDraftRequest } = await import(
   pathToFileURL(path.join(tempModuleRoot, "api/ai-multi-document-draft.js")).href
+);
+const { handleAiDataInsightsRequest } = await import(
+  pathToFileURL(path.join(tempModuleRoot, "api/ai-data-insights.js")).href
+);
+const { default: cloudflareWorker } = await import(
+  pathToFileURL(path.join(tempModuleRoot, "src/cloudflareWorker.js")).href
 );
 const {
   analyzeMultipleSql,
@@ -137,6 +160,7 @@ const renderExplanationText = (analysis) =>
       ...analysis.derivedColumns.map((column) => `${column.alias} ${column.description}`),
       ...analysis.subqueries.map((subquery) => `${subquery.type} ${subquery.description} ${subquery.tables.join(", ")}`),
       ...analysis.setOperations.map((operation) => `${operation.operator} ${operation.description}`),
+      ...analysis.advancedFeatures.map((feature) => `${feature.type} ${feature.evidence} ${feature.dialect ?? ""} ${feature.description}`),
       ...analysis.businessGuesses,
       ...analysis.notes,
       ...analysis.warnings,
@@ -188,6 +212,10 @@ assert.match(normalizedMaskedSql, /status = 'PAID'/);
 
 const fallbackMaskedSql = maskSensitiveSql(`SELECT * FROM users WHERE password = 'plain-secret';`);
 assert.match(fallbackMaskedSql, /password = '\[REDACTED_VALUE\]'/);
+assert.equal(
+  maskSensitiveText("alice@example.com / 010-1234-5678 / 12345678-1234-4123-8123-123456789abc"),
+  "[REDACTED_EMAIL] / [REDACTED_PHONE] / [REDACTED_UUID]",
+);
 
 const sensitiveAnalysisSql = `SELECT customer_email, phone
 FROM customers
@@ -999,6 +1027,72 @@ assert.equal(unionOrders.setOperations[0].operator, "UNION ALL");
 assertIncludesAll(unionText, ["UNION ALL", "중복 제거 없이", "여러 SELECT 결과"]);
 assertIncludesNone(unionText, ["CRM", "VIP"]);
 
+const recursiveCte = analyzeSql(readFixture("recursive-cte-org.sql"));
+assert.ok(recursiveCte.advancedFeatures.some((feature) => feature.type === "recursive_cte"));
+assert.ok(recursiveCte.advancedFeatures.some((feature) => feature.type === "dialect_specific" && feature.dialect?.includes("PostgreSQL")) === false);
+assertIncludesAll(renderExplanationText(recursiveCte), ["WITH RECURSIVE", "재귀 CTE", "고급 문법"]);
+
+const mergeSnapshot = analyzeSql(readFixture("merge-customer-snapshot.sql"));
+assert.ok(mergeSnapshot.advancedFeatures.some((feature) => feature.type === "merge"));
+assertIncludesAll(renderExplanationText(mergeSnapshot), ["MERGE INTO", "UPDATE 또는 INSERT"]);
+
+const updateFrom = analyzeSql(readFixture("update-from-customer-segment.sql"));
+assert.ok(updateFrom.advancedFeatures.some((feature) => feature.type === "update_from"));
+assertIncludesAll(renderExplanationText(updateFrom), ["UPDATE ... FROM", "갱신"]);
+
+const deleteUsing = analyzeSql(readFixture("delete-using-order-errors.sql"));
+assert.ok(deleteUsing.advancedFeatures.some((feature) => feature.type === "delete_using"));
+assertIncludesAll(renderExplanationText(deleteUsing), ["DELETE FROM ... USING", "삭제"]);
+
+const pivotSales = analyzeSql(readFixture("pivot-monthly-sales.sql"));
+assert.ok(pivotSales.advancedFeatures.some((feature) => feature.type === "pivot"));
+assertIncludesAll(renderExplanationText(pivotSales), ["PIVOT", "교차 집계"]);
+
+const unpivotStatus = analyzeSql(readFixture("unpivot-status-counts.sql"));
+assert.ok(unpivotStatus.advancedFeatures.some((feature) => feature.type === "unpivot"));
+assertIncludesAll(renderExplanationText(unpivotStatus), ["UNPIVOT", "행 형태"]);
+
+const lateralJsonArray = analyzeSql(readFixture("lateral-json-array.sql"));
+assert.ok(lateralJsonArray.advancedFeatures.some((feature) => feature.type === "lateral"));
+assert.ok(lateralJsonArray.advancedFeatures.some((feature) => feature.type === "json"));
+assert.ok(lateralJsonArray.advancedFeatures.some((feature) => feature.type === "array"));
+assertIncludesAll(renderExplanationText(lateralJsonArray), ["LATERAL", "JSON", "배열"]);
+
+const applyJson = analyzeSql(readFixture("apply-json.sql"));
+assert.ok(applyJson.advancedFeatures.some((feature) => feature.type === "apply"));
+assert.ok(applyJson.advancedFeatures.some((feature) => feature.type === "json"));
+assertIncludesAll(renderExplanationText(applyJson), ["APPLY", "OPENJSON", "SQL Server"]);
+
+const dynamicSql = analyzeSql(readFixture("dynamic-sql.sql"));
+assert.ok(dynamicSql.advancedFeatures.some((feature) => feature.type === "dynamic_sql"));
+assert.ok(dynamicSql.warnings.some((warning) => /동적 SQL/.test(warning)));
+assertIncludesAll(renderExplanationText(dynamicSql), ["동적 SQL", "최종 문장"]);
+
+const deeplyNested = analyzeSql(readFixture("deeply-nested.sql"));
+assert.ok(deeplyNested.advancedFeatures.some((feature) => feature.type === "deep_nesting"));
+assert.ok(deeplyNested.confidence.reasons.some((reason) => /중첩 괄호/.test(reason)));
+assert.ok(deeplyNested.warnings.some((warning) => /중첩 깊이/.test(warning)));
+
+const postgresDialect = analyzeSql(readFixture("dialect-postgresql.sql"));
+assert.ok(postgresDialect.advancedFeatures.some((feature) => feature.type === "dialect_specific" && feature.dialect?.includes("PostgreSQL")));
+assert.ok(postgresDialect.advancedFeatures.some((feature) => feature.type === "json"));
+
+const oracleDialect = analyzeSql(readFixture("dialect-oracle.sql"));
+assert.ok(oracleDialect.advancedFeatures.some((feature) => feature.type === "dialect_specific" && feature.dialect?.includes("Oracle")));
+
+const sqlServerDialect = analyzeSql(readFixture("dialect-sqlserver.sql"));
+assert.ok(sqlServerDialect.advancedFeatures.some((feature) => feature.type === "dialect_specific" && feature.dialect?.includes("SQL Server")));
+
+const mysqlDialect = analyzeSql(readFixture("dialect-mysql.sql"));
+assert.ok(mysqlDialect.advancedFeatures.some((feature) => feature.type === "dialect_specific" && feature.dialect?.includes("MySQL")));
+assert.ok(mysqlDialect.advancedFeatures.some((feature) => feature.type === "json"));
+
+const quotedKeywordLiteral = analyzeSql(`SELECT order_id FROM sales.orders WHERE status = 'PIVOT JOIN SELECT -- not syntax';`);
+assert.equal(quotedKeywordLiteral.advancedFeatures.some((feature) => ["pivot", "dynamic_sql"].includes(feature.type)), false);
+
+const advancedCommentsIgnored = analyzeSql(readFixture("advanced-comments-ignored.sql"));
+assert.equal(advancedCommentsIgnored.advancedFeatures.length, 0);
+
 const groupOnly = analyzeSql(`SELECT customer_id, COUNT(*) AS order_count, SUM(total_amount) AS monthly_sales
 FROM orders
 GROUP BY customer_id;`);
@@ -1039,5 +1133,280 @@ JOIN tb_codes cd ON cd.code_id = m.code_id
 JOIN tb_meta mt ON mt.meta_id = m.meta_id;`);
 assert.ok(genericTables.tables.some((table) => /추정/.test(table.description)));
 assertIncludesAll(renderExplanationText(genericTables), ["추정"]);
+
+const dataInspection = inspectDataInput(readFixture("data-analysis-sample.csv"));
+assert.equal(dataInspection.ok, true);
+assert.ok(dataInspection.columnOptions.metricColumns.includes("processed_count"));
+assert.ok(dataInspection.columnOptions.timeColumns.includes("period"));
+assert.ok(dataInspection.columnOptions.groupColumns.includes("team"));
+
+const dataCalculation = calculateComputedAnalysis(dataInspection, {
+  datasetName: "처리량 샘플",
+  groupColumn: "team",
+  metricColumn: "processed_count",
+  timeColumn: "period",
+});
+assert.equal(dataCalculation.ok, true);
+assert.equal(dataCalculation.result.scope.rowCount, 8);
+assert.equal(dataCalculation.result.scope.validMetricRowCount, 8);
+assert.equal(dataCalculation.result.summary.find((metric) => metric.id === "total")?.value, 755);
+assert.equal(dataCalculation.result.summary.find((metric) => metric.id === "max")?.value, 182);
+assert.equal(dataCalculation.result.summary.find((metric) => metric.id === "min")?.value, 65);
+assert.equal(dataCalculation.result.trend?.pattern, "sustained_increase");
+assert.equal(Math.round(dataCalculation.result.trend?.changeRate ?? 0), 47);
+assert.equal(dataCalculation.result.comparisons[0]?.group, "A");
+assert.ok(dataCalculation.result.outliers.some((outlier) => outlier.value === 182 && outlier.method === "iqr"));
+assert.ok(dataCalculation.result.insightCandidates.some((candidate) => candidate.type === "trend"));
+assert.ok(dataCalculation.result.insightCandidates.some((candidate) => candidate.type === "comparison"));
+assert.ok(dataCalculation.result.insightCandidates.some((candidate) => candidate.type === "outlier"));
+assert.equal("rows" in dataCalculation.result, false);
+assert.ok(dataCalculation.result.facts.every((fact) => fact.source === "mechanical_calculation"));
+
+const jsonDataInspection = inspectDataInput(JSON.stringify([
+  { period: "2026-01", team: "A", value: 10 },
+  { period: "2026-02", team: "A", value: 12 },
+]));
+assert.equal(jsonDataInspection.ok, true);
+assert.equal(jsonDataInspection.format, "json");
+
+const stableDataInspection = inspectDataInput(`period,value
+2026-01,10
+2026-02,10
+2026-03,10
+2026-04,10`);
+const stableDataCalculation = calculateComputedAnalysis(stableDataInspection, {
+  metricColumn: "value",
+  timeColumn: "period",
+});
+assert.equal(stableDataCalculation.ok, true);
+assert.equal(stableDataCalculation.result.insightCandidates.length, 0);
+assert.ok(stableDataCalculation.result.warnings.some((warning) => /강제로 만들지 않습니다/.test(warning)));
+
+const sensitiveDataInspection = inspectDataInput(`period,customer_email,amount
+2026-01,alice@example.com,10
+2026-01,bob@example.com,8
+2026-02,alice@example.com,20
+2026-02,bob@example.com,9
+2026-03,alice@example.com,30
+2026-03,bob@example.com,11
+2026-04,alice@example.com,90
+2026-04,bob@example.com,12`);
+const sensitiveDataCalculation = calculateComputedAnalysis(sensitiveDataInspection, {
+  groupColumn: "customer_email",
+  metricColumn: "amount",
+  timeColumn: "period",
+});
+assert.equal(sensitiveDataCalculation.ok, true);
+const dataInsightsPayload = buildAiDataInsightsPayload(
+  sensitiveDataCalculation.result,
+  sensitiveAnalysis,
+);
+const serializedDataInsightsPayload = JSON.stringify(dataInsightsPayload);
+assert.match(dataInsightsPayload.instructions, /원본 행 데이터는 제공되지 않았으며/);
+assert.match(dataInsightsPayload.instructions, /제공되지 않은 숫자를 생성하지 않는다/);
+assert.doesNotMatch(serializedDataInsightsPayload, /alice@example\.com/);
+assert.doesNotMatch(serializedDataInsightsPayload, /bob@example\.com/);
+assert.doesNotMatch(serializedDataInsightsPayload, /customer_email/);
+assert.match(serializedDataInsightsPayload, /그룹 1/);
+assert.equal("rows" in dataInsightsPayload.computedAnalysis, false);
+
+const normalizedDataInsights = normalizeAiDataInsights({
+  conclusion: "계산 결과를 우선 확인하세요.",
+  insights: [
+    {
+      candidateId: "candidate-trend",
+      checks: ["업무 환경 변화 여부를 추가 확인하세요."],
+      interpretation: ["최근 흐름의 지속 여부를 확인할 필요가 있습니다."],
+      proposals: ["다음 기간에도 같은 기준으로 모니터링하세요."],
+      title: "처리 흐름 변화",
+    },
+    {
+      candidateId: "candidate-not-found",
+      checks: [],
+      interpretation: ["제외되어야 합니다."],
+      proposals: [],
+      title: "근거 없는 후보",
+    },
+    {
+      candidateId: "candidate-comparison",
+      checks: [],
+      interpretation: ["50% 증가했습니다."],
+      proposals: [],
+      title: "숫자 50 포함",
+    },
+  ],
+  uncertaintyNotes: ["원인은 추가 확인이 필요합니다."],
+}, dataCalculation.result);
+assert.equal(normalizedDataInsights.insights.length, 2);
+assert.equal(normalizedDataInsights.insights[1]?.interpretation.length, 0);
+assert.ok(normalizedDataInsights.validationWarnings.some((warning) => /없는 인사이트 후보|숫자 표현/.test(warning)));
+
+const dataInsightReport = buildDataInsightMarkdownReport(
+  dataCalculation.result,
+  normalizedDataInsights,
+);
+assert.match(dataInsightReport, /## 분석 개요/);
+assert.match(dataInsightReport, /## 핵심 지표/);
+assert.match(dataInsightReport, /## 주요 인사이트/);
+assert.match(dataInsightReport, /관찰된 사실/);
+assert.match(dataInsightReport, /확인 필요 사항/);
+
+const missingDataCalculationRoute = await handleAiDataInsightsRequest(
+  {},
+  {
+    env: {
+      OPENAI_API_KEY: "test-key",
+      OPENAI_MODEL: "test-model",
+    },
+    fetcher: async () => {
+      throw new Error("invalid data must not call provider");
+    },
+  },
+);
+assert.equal(missingDataCalculationRoute.status, 400);
+assert.match(missingDataCalculationRoute.body.error, /기계식 계산 결과/);
+
+const rawRowsDataRoute = await handleAiDataInsightsRequest(
+  {
+    computedAnalysis: {
+      ...dataCalculation.result,
+      rows: [{ processed_count: "999", team: "not-for-ai" }],
+    },
+  },
+  {
+    env: {},
+    fetcher: async () => {
+      throw new Error("raw rows must not call provider");
+    },
+  },
+);
+assert.equal(rawRowsDataRoute.status, 400);
+assert.match(rawRowsDataRoute.body.error, /원본 행 데이터는 AI 요청에 포함할 수 없습니다/);
+
+const noCandidateRoute = await handleAiDataInsightsRequest(
+  { computedAnalysis: stableDataCalculation.result },
+  {
+    env: {
+      OPENAI_API_KEY: "test-key",
+      OPENAI_MODEL: "test-model",
+    },
+    fetcher: async () => {
+      throw new Error("empty candidates must not call provider");
+    },
+  },
+);
+assert.equal(noCandidateRoute.status, 400);
+assert.match(noCandidateRoute.body.error, /인사이트 후보가 없습니다/);
+
+let sentDataInsightsRequest = "";
+const mockDataInsightsRoute = await handleAiDataInsightsRequest(
+  { computedAnalysis: sensitiveDataCalculation.result, sqlAnalysis: sensitiveAnalysis },
+  {
+    env: {
+      OPENAI_API_KEY: "test-key",
+      OPENAI_MODEL: "test-model",
+    },
+    fetcher: async (_url, init) => {
+      sentDataInsightsRequest = String(init?.body ?? "");
+      return new Response(
+        JSON.stringify({
+          output_text: JSON.stringify({
+            conclusion: "기계식 계산 결과와 함께 변화 요인을 확인하세요.",
+            insights: [
+              {
+                candidateId: "candidate-trend",
+                checks: ["업무 조건 변화 여부를 확인하세요."],
+                interpretation: ["최근 변화 흐름은 운영 관점에서 확인할 가치가 있습니다."],
+                proposals: ["같은 기준으로 다음 기간을 점검하세요."],
+                title: "최근 변화 흐름",
+              },
+            ],
+            uncertaintyNotes: ["원인은 계산 결과만으로 확정할 수 없습니다."],
+          }),
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+    },
+  },
+);
+assert.equal(mockDataInsightsRoute.status, 200);
+assert.equal(mockDataInsightsRoute.body.insights.insights.length, 1);
+assert.doesNotMatch(sentDataInsightsRequest, /alice@example\.com/);
+assert.doesNotMatch(sentDataInsightsRequest, /bob@example\.com/);
+assert.doesNotMatch(sentDataInsightsRequest, /"rows"/);
+
+const workerAssets = {
+  fetch: async () => new Response("asset response", { status: 200 }),
+};
+const unconfiguredWorkerRuntime = await cloudflareWorker.fetch(
+  new Request("https://sql-diagnoser-demo.example/api/runtime-config"),
+  { ASSETS: workerAssets },
+);
+assert.equal(unconfiguredWorkerRuntime.status, 200);
+assert.equal((await unconfiguredWorkerRuntime.json()).aiEnabled, false);
+
+const protectedWorkerEnv = {
+  AI_PROVIDER: "openai",
+  ASSETS: workerAssets,
+  DEMO_PASSWORD: "demo-password",
+  DEMO_USERNAME: "demo-user",
+  OPENAI_API_KEY: "test-key",
+  OPENAI_MODEL: "test-model",
+};
+const unauthorizedWorkerResponse = await cloudflareWorker.fetch(
+  new Request("https://sql-diagnoser-demo.example/"),
+  protectedWorkerEnv,
+);
+assert.equal(unauthorizedWorkerResponse.status, 401);
+assert.match(unauthorizedWorkerResponse.headers.get("WWW-Authenticate") ?? "", /Basic/);
+
+const workerAuthorization = `Basic ${Buffer.from("demo-user:demo-password").toString("base64")}`;
+const configuredWorkerRuntime = await cloudflareWorker.fetch(
+  new Request("https://sql-diagnoser-demo.example/api/runtime-config", {
+    headers: { Authorization: workerAuthorization },
+  }),
+  protectedWorkerEnv,
+);
+assert.equal((await configuredWorkerRuntime.json()).aiEnabled, true);
+
+const protectedWorkerInvalidAiRequest = await cloudflareWorker.fetch(
+  new Request("https://sql-diagnoser-demo.example/api/ai-explain", {
+    body: "{}",
+    headers: {
+      Authorization: workerAuthorization,
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  }),
+  protectedWorkerEnv,
+);
+assert.equal(protectedWorkerInvalidAiRequest.status, 400);
+assert.match((await protectedWorkerInvalidAiRequest.json()).error, /분석할 SQL/);
+
+const protectedWorkerAssetResponse = await cloudflareWorker.fetch(
+  new Request("https://sql-diagnoser-demo.example/products/sql-diagnoser", {
+    headers: { Authorization: workerAuthorization },
+  }),
+  protectedWorkerEnv,
+);
+assert.equal(await protectedWorkerAssetResponse.text(), "asset response");
+
+const localOllamaWorkerRuntime = await cloudflareWorker.fetch(
+  new Request("https://sql-diagnoser-demo.example/api/runtime-config", {
+    headers: { Authorization: workerAuthorization },
+  }),
+  {
+    AI_PROVIDER: "ollama",
+    ASSETS: workerAssets,
+    DEMO_PASSWORD: "demo-password",
+    DEMO_USERNAME: "demo-user",
+    OLLAMA_BASE_URL: "http://localhost:11434",
+    OLLAMA_MODEL: "qwen3:14b",
+  },
+);
+assert.equal((await localOllamaWorkerRuntime.json()).aiEnabled, false);
 
 console.log("sqlExplainer tests passed");

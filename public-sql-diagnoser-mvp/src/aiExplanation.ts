@@ -15,6 +15,7 @@ export type AiSqlExplanation = {
 export type AiSqlAnalysisPayload = Pick<
   SqlAnalysisResult,
   | "aggregations"
+  | "advancedFeatures"
   | "businessIntent"
   | "caseExpressions"
   | "confidence"
@@ -142,6 +143,7 @@ const buildAnalysisPayload = (
       : defaultConfidence;
 
   return {
+    advancedFeatures: arrayValue(input.advancedFeatures),
     aggregations: arrayValue(input.aggregations),
     businessIntent,
     caseExpressions: arrayValue(input.caseExpressions),
