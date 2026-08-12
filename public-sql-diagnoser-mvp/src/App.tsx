@@ -1,4 +1,5 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { DataInsightWorkspace } from "./DataInsightWorkspace";
 import {
   AI_SQL_DOCUMENT_TYPE_OPTIONS,
   type AiSqlDocumentDraft,
@@ -54,8 +55,7 @@ import {
 } from "./tableAssetMap";
 
 const isDemoMode = import.meta.env.VITE_DEMO_MODE === "true";
-const isAiFeatureEnabled =
-  !isDemoMode && import.meta.env.VITE_ENABLE_AI_FEATURES !== "false";
+const buildAiFeatureEnabled = import.meta.env.VITE_ENABLE_AI_FEATURES !== "false";
 
 type ResultSectionProps = {
   title: string;
@@ -295,7 +295,7 @@ function MultiRuleAnalysisDetails({
   );
 }
 
-type AnalysisMode = "single" | "multi";
+type AnalysisMode = "single" | "multi" | "data";
 type CopyResult = "copied" | "selected" | "failed";
 type CopyStatus = "idle" | CopyResult;
 type RiskFilter = "all" | SqlRiskSeverity;
@@ -421,6 +421,8 @@ const DEFAULT_MULTI_SQL = SQL_PRESETS
   .join("\n\n");
 
 function App() {
+  const [runtimeAiFeatureEnabled, setRuntimeAiFeatureEnabled] =
+    useState(buildAiFeatureEnabled);
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>("single");
   const [sql, setSql] = useState(DEFAULT_SQL);
   const [multiSql, setMultiSql] = useState(DEFAULT_MULTI_SQL);
@@ -460,6 +462,38 @@ function App() {
   const [systemGraphMode, setSystemGraphMode] = useState<SystemGraphMode>("overview");
   const [selectedSystemNodeId, setSelectedSystemNodeId] = useState("");
   const [riskFilter, setRiskFilter] = useState<RiskFilter>("all");
+  const isAiFeatureEnabled = runtimeAiFeatureEnabled;
+
+  useEffect(() => {
+    let active = true;
+
+    void fetch("/api/runtime-config")
+      .then(async (response) => {
+        if (!response.ok) {
+          return undefined;
+        }
+
+        return response.json() as Promise<unknown>;
+      })
+      .then((config) => {
+        if (!active || !config || typeof config !== "object") {
+          return;
+        }
+
+        const aiEnabled = (config as { aiEnabled?: unknown }).aiEnabled;
+
+        if (typeof aiEnabled === "boolean") {
+          setRuntimeAiFeatureEnabled(aiEnabled);
+        }
+      })
+      .catch(() => {
+        // Static-only deployments retain the build-time feature setting.
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
   const hasSingleAiRepresentative =
     aiState.status === "success" || aiDocumentDraftState.status === "success";
   const hasMultiAiRepresentative =
@@ -1219,8 +1253,8 @@ function App() {
             <strong>보호된 데모 환경</strong>
             <p>
               이 화면은 승인된 테스트 계정에서만 사용합니다. SQL을 실행하지 않고 브라우저에
-              저장하지 않지만, 실제 운영 SQL·개인정보·고객 식별값은 입력하지 마세요. 이 데모에서는
-              기본 룰 기반 분석만 제공하며 AI 전송은 비활성화되어 있습니다.
+              저장하지 않지만, 실제 운영 SQL·개인정보·고객 식별값은 입력하지 마세요. AI 보강은
+              데모 서버에 설정된 provider와 접근 계정이 있는 경우에만 사용할 수 있습니다.
             </p>
           </aside>
         ) : null}
@@ -1243,6 +1277,15 @@ function App() {
             onClick={() => changeAnalysisMode("multi")}
           >
             다건 SQL
+          </button>
+          <button
+            aria-selected={analysisMode === "data"}
+            className={analysisMode === "data" ? "mode-button active" : "mode-button"}
+            role="tab"
+            type="button"
+            onClick={() => changeAnalysisMode("data")}
+          >
+            데이터 인사이트
           </button>
         </div>
 
@@ -1820,6 +1863,8 @@ function App() {
           </ResultSection>
         </section>
           </>
+        ) : analysisMode === "data" ? (
+          <DataInsightWorkspace aiFeatureEnabled={isAiFeatureEnabled} />
         ) : (
           <>
             <section className="sql-input-panel" aria-label="다건 SQL 입력">

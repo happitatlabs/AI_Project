@@ -2,6 +2,7 @@ import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { handleAiDocumentDraftRequest } from "./api/ai-document-draft";
+import { handleAiDataInsightsRequest } from "./api/ai-data-insights";
 import { handleAiExplainRequest } from "./api/ai-explain";
 import { handleAiMultiDocumentDraftRequest } from "./api/ai-multi-document-draft";
 import { pickAiProviderEnv } from "./api/ai-provider";
@@ -61,6 +62,27 @@ const aiExplainLocalApiPlugin = (
         const result = await handleAiExplainRequest(body as Parameters<typeof handleAiExplainRequest>[0], {
           env: mergedAiEnv(),
         });
+
+        sendJson(res, result.status, result.body);
+      } catch {
+        sendJson(res, 400, { error: "요청 JSON을 해석하지 못했습니다." });
+      }
+    });
+
+    server.middlewares.use("/api/ai-data-insights", async (req, res) => {
+      if (req.method !== "POST") {
+        sendJson(res, 405, { error: "POST 요청만 지원합니다." });
+        return;
+      }
+
+      try {
+        const body = await readJsonBody(req);
+        const result = await handleAiDataInsightsRequest(
+          body as Parameters<typeof handleAiDataInsightsRequest>[0],
+          {
+            env: mergedAiEnv(),
+          },
+        );
 
         sendJson(res, result.status, result.body);
       } catch {
