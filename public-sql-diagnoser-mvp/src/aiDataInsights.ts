@@ -24,6 +24,14 @@ export type AiDataInsightsResult = {
 export type AiDataInsightsPayload = {
   computedAnalysis: {
     calculationBasis: ComputedAnalysisResult["calculationBasis"];
+    changeContributions: Array<{
+      contributionRate: number;
+      currentValue: number;
+      factId: string;
+      group: string;
+      previousValue: number;
+      valueChange: number;
+    }>;
     comparisons: Array<{
       differenceFromAverage: number;
       factId: string;
@@ -96,6 +104,7 @@ const AI_DATA_INSIGHTS_INSTRUCTIONS = `너는 기계식 계산 결과를 해석�
 입력의 computedAnalysis는 프로그램이 계산한 검증 가능한 수치 결과다.
 원본 행 데이터는 제공되지 않았으며, 계산 결과를 대체하거나 재계산해서는 안 된다.
 calculationBasis는 집계, 비교, 이상치 후보, 기간 범위를 어떤 기계식 기준으로 만들었는지 설명한다. 해당 기준을 바꾸거나 그 밖의 통계 검정을 했다고 말하지 마라.
+changeContributions는 기간×그룹의 기계식 변화 분해 결과다. valueCoverage가 partial이면 전체 변화의 완전한 원인 분해라고 단정하지 마라.
 time.recurrenceAssessment가 not_evaluated이면 반복 주기나 계절성을 추정하지 마라.
 insightCandidates에 있는 후보만 선택하고 candidateId를 그대로 사용하라.
 facts는 프로그램이 출력할 관찰 사실의 근거 ID다. AI는 사실, 숫자, 날짜, 비율, 건수를 새로 쓰지 말고 candidateId와 해석 문장만 작성하라.
@@ -149,6 +158,13 @@ const buildGroupAliasMap = (analysis: ComputedAnalysisResult) => {
     }
   });
 
+  analysis.changeContributions.forEach((contribution) => {
+    if (!map.has(contribution.group)) {
+      map.set(contribution.group, `그룹 ${groupIndex}`);
+      groupIndex += 1;
+    }
+  });
+
   return map;
 };
 
@@ -170,6 +186,10 @@ const toSafeComputedAnalysis = (
 
   return {
     calculationBasis: analysis.calculationBasis,
+    changeContributions: analysis.changeContributions.slice(0, 12).map((contribution) => ({
+      ...contribution,
+      group: safeGroup(contribution.group) ?? "그룹",
+    })),
     comparisons: analysis.comparisons.slice(0, 12).map((comparison) => ({
       ...comparison,
       group: safeGroup(comparison.group) ?? "그룹",
@@ -234,8 +254,10 @@ export const isComputedAnalysisResult = (value: unknown): value is ComputedAnaly
     record.contractVersion === COMPUTED_ANALYSIS_CONTRACT_VERSION &&
     Boolean(record.calculationBasis && typeof record.calculationBasis === "object") &&
     Array.isArray(record.summary) &&
+    Array.isArray(record.changeContributions) &&
     Array.isArray(record.facts) &&
     Array.isArray(record.insightCandidates) &&
+    Array.isArray(record.reportFindings) &&
     Array.isArray(record.warnings) &&
     Boolean(record.scope && typeof record.scope === "object")
   );
@@ -258,7 +280,7 @@ export const normalizeAiDataInsights = (
       const candidate = candidateMap.get(candidateId);
 
       if (!candidate || selectedCandidateIds.has(candidateId)) {
-        validationWarnings.push("AI가 계산 결과에 없는 인사이트 후보를 반환해 제외했습니다.");
+        validationWarnings.push("AI 응답에 계산 근거가 확인되지 않은 항목이 있어 보고서에서 제외했습니다.");
         return [];
       }
 

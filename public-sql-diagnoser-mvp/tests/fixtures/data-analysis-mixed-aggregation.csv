@@ -1,0 +1,11 @@
+year,region,genre,value
+2023,Seoul,Pop,100
+2023,Gyeonggi,Play,50
+2023,Seoul,Total,100
+2023,Gyeonggi,Total,50
+2023,All,Total,150
+2024,Seoul,Pop,110
+2024,Gyeonggi,Play,80
+2024,Seoul,Total,110
+2024,Gyeonggi,Total,80
+2024,All,Total,190

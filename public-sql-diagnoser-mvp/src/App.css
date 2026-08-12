@@ -293,6 +293,128 @@ h3 {
   margin: 12px 0 0;
 }
 
+.data-recommendation-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.data-recommendation-header h2 {
+  margin: 0;
+  color: #172033;
+  font-size: 1rem;
+}
+
+.data-recommendation-header p {
+  max-width: 760px;
+  margin: 6px 0 0;
+  color: #526071;
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.data-recommendation-header .secondary-button {
+  flex: 0 0 auto;
+}
+
+.data-role-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 18px;
+  margin-top: 16px;
+  border-top: 1px solid #e1e7ef;
+}
+
+.data-role-item {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border-bottom: 1px solid #e1e7ef;
+  border-left: 3px solid #2563eb;
+  padding: 12px 0 12px 11px;
+}
+
+.data-role-item:nth-child(2) {
+  border-left-color: #0f766e;
+}
+
+.data-role-item:nth-child(3) {
+  border-left-color: #b45309;
+}
+
+.data-role-item strong {
+  color: #475569;
+  font-size: 0.78rem;
+}
+
+.data-role-item > span {
+  overflow-wrap: anywhere;
+  color: #172033;
+  font-size: 1rem;
+  font-weight: 850;
+}
+
+.data-role-item small,
+.data-role-item p {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.79rem;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.data-aggregation-note {
+  margin: 12px 0 0;
+  border-left: 3px solid #b45309;
+  padding-left: 10px;
+  color: #5b6573;
+  font-size: 0.86rem;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.data-aggregation-note strong {
+  margin-right: 8px;
+  color: #7c3f00;
+}
+
+.data-question-plan {
+  margin-top: 14px;
+  border-top: 1px solid #e1e7ef;
+  padding-top: 12px;
+}
+
+.data-question-plan h3 {
+  margin: 0;
+  color: #172033;
+}
+
+.data-question-plan ul,
+.data-plan-warnings {
+  display: grid;
+  gap: 6px;
+  margin: 9px 0 0;
+  padding-left: 20px;
+  color: #334155;
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.data-plan-warnings {
+  color: #8a4b08;
+}
+
+.data-config-overrides {
+  margin-top: 14px;
+}
+
+.data-config-overrides summary {
+  box-shadow: none;
+}
+
 .data-result-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -301,6 +423,89 @@ h3 {
 
 .data-summary-metrics {
   margin-top: 12px;
+}
+
+.data-report-findings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0 18px;
+  margin-top: 14px;
+  border-top: 1px solid #e1e7ef;
+}
+
+.data-report-finding {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  align-content: start;
+  border-bottom: 1px solid #e1e7ef;
+  border-left: 3px solid #2563eb;
+  padding: 14px 0 14px 12px;
+}
+
+.data-report-finding.comparison {
+  border-left-color: #0f766e;
+}
+
+.data-report-finding.contribution {
+  border-left-color: #7c3f00;
+}
+
+.data-report-finding.review {
+  border-left-color: #b45309;
+}
+
+.data-report-finding > span {
+  color: #475569;
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.data-report-finding h3 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 1rem;
+}
+
+.data-report-finding ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  color: #334155;
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.data-verification-details {
+  margin-top: 2px;
+}
+
+.data-follow-up-questions {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 0;
+  padding-left: 22px;
+}
+
+.data-follow-up-questions li {
+  display: grid;
+  gap: 3px;
+  padding-left: 4px;
+  color: #172033;
+}
+
+.data-follow-up-questions strong {
+  font-size: 0.94rem;
+  line-height: 1.55;
+}
+
+.data-follow-up-questions span {
+  color: #64748b;
+  font-size: 0.84rem;
+  font-weight: 700;
+  line-height: 1.5;
 }
 
 .data-ai-insights {
@@ -1969,8 +2174,18 @@ code {
   }
 
   .data-config-grid,
-  .data-result-grid {
+  .data-result-grid,
+  .data-role-summary {
     grid-template-columns: 1fr;
+  }
+
+  .data-recommendation-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .data-recommendation-header .secondary-button {
+    width: 100%;
   }
 
   .data-input-actions {
