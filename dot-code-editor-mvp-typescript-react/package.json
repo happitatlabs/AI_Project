@@ -1,0 +1,36 @@
+{
+  "name": "dot-code-editor-mvp",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "build:workers": "tsc -b && vite build --base=/",
+    "workers:dev": "npm run build:workers && wrangler dev",
+    "deploy:workers": "npm run build:workers && wrangler deploy",
+    "build:happitat": "tsc -b && vite build --base=/products/dot-code-editor/",
+    "package:happitat": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-happitat-web.ps1",
+    "preview": "vite preview",
+    "android:sync": "npm run build && cap sync android",
+    "android:open": "cap open android",
+    "android:apk": "npm run build && cap sync android && cd android && gradlew.bat assembleDebug",
+    "android:apk:local": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-android-debug.ps1",
+    "android:install:local": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-android-debug.ps1"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/cli": "^8.4.1",
+    "@capacitor/core": "^8.4.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^6.0.2",
+    "typescript": "~5.9.0",
+    "vite": "^8.0.16",
+    "wrangler": "^4.118.0"
+  }
+}
