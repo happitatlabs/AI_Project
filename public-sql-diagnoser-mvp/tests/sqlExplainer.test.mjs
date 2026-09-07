@@ -55,6 +55,8 @@ compileTsFile("src/tableAssetMap.ts", path.join(tempModuleRoot, "src/tableAssetM
 compileTsFile("src/systemGraph.ts", path.join(tempModuleRoot, "src/systemGraph.js"));
 compileTsFile("src/riskDetector.ts", path.join(tempModuleRoot, "src/riskDetector.js"));
 compileTsFile("src/diagnosticNarrative.ts", path.join(tempModuleRoot, "src/diagnosticNarrative.js"));
+compileTsFile("src/sqlChangeReview.ts", path.join(tempModuleRoot, "src/sqlChangeReview.js"));
+compileTsFile("src/sqlChangeReviewCases.ts", path.join(tempModuleRoot, "src/sqlChangeReviewCases.js"));
 compileTsFile("src/reportModel.ts", path.join(tempModuleRoot, "src/reportModel.js"));
 compileTsFile("api/ai-provider.ts", path.join(tempModuleRoot, "api/ai-provider.js"));
 compileTsFile("api/ai-explain.ts", path.join(tempModuleRoot, "api/ai-explain.js"));
@@ -128,6 +130,13 @@ const {
   buildMultiSqlNarrative,
   buildSingleSqlNarrative,
 } = await import(pathToFileURL(path.join(tempModuleRoot, "src/diagnosticNarrative.js")).href);
+const {
+  buildSqlChangeReview,
+  buildSqlChangeReviewMarkdown,
+} = await import(pathToFileURL(path.join(tempModuleRoot, "src/sqlChangeReview.js")).href);
+const { SQL_CHANGE_REVIEW_CASES } = await import(
+  pathToFileURL(path.join(tempModuleRoot, "src/sqlChangeReviewCases.js")).href
+);
 const {
   buildMarkdownReport,
   buildPasteDocument,
@@ -837,7 +846,7 @@ assert.equal(documentationReport.aiDocumentDraft.title, "주문 시스템 자산
 assert.equal(documentationReport.aiExplanation.summary, "주문 데이터 기반 시스템 지도 보고서입니다.");
 
 const markdownDocumentationReport = buildMarkdownReport(documentationReport);
-assert.match(markdownDocumentationReport, /SQL Explainer 분석 보고서/);
+assert.match(markdownDocumentationReport, /SQL Diagnoser 분석 보고서/);
 assert.match(markdownDocumentationReport, /위험 SQL 목록/);
 assert.match(markdownDocumentationReport, /리스크 \/ 개선 포인트/);
 assert.match(markdownDocumentationReport, /신규 개발자 설명/);
@@ -856,13 +865,13 @@ assert.match(riskFindingsCsv, /severity,statement_id,category,title,evidence,rec
 assert.match(riskFindingsCsv, /unsafe_update_delete/);
 
 const notionDocument = buildPasteDocument(documentationReport, "notion");
-assert.match(notionDocument, /^# SQL Explainer 분석 보고서/);
+assert.match(notionDocument, /^# SQL Diagnoser 분석 보고서/);
 assert.match(notionDocument, /## 위험 SQL/);
 assert.match(notionDocument, /## 리스크 \/ 개선 포인트/);
 assert.match(notionDocument, /## AI 문서 초안/);
 
 const confluenceDocument = buildPasteDocument(documentationReport, "confluence");
-assert.match(confluenceDocument, /^h1\. SQL Explainer 분석 보고서/);
+assert.match(confluenceDocument, /^h1\. SQL Diagnoser 분석 보고서/);
 assert.match(confluenceDocument, /h2\. 위험 SQL/);
 assert.match(confluenceDocument, /h2\. 리스크 \/ 개선 포인트/);
 assert.match(confluenceDocument, /h2\. AI 문서 초안/);
@@ -1060,6 +1069,64 @@ const unsafeWriteNarrative = buildSingleSqlNarrative(
 assert.ok(unsafeWriteNarrative.keyFindings.some((finding) => finding.id.startsWith("single-risk-")));
 assert.ok(unsafeWriteNarrative.nextQuestions.some((question) => question.id === "single-write-row-count"));
 assert.ok(unsafeWriteNarrative.nextQuestions.some((question) => question.id === "single-write-rollback"));
+
+const selectChangeReview = buildSqlChangeReview(
+  `SELECT o.order_id, SUM(oi.quantity * oi.unit_price) AS amount
+FROM orders o
+JOIN order_items oi ON oi.order_id = o.order_id
+WHERE o.status = 'PAID'
+GROUP BY o.order_id;`,
+  `SELECT o.order_id, SUM(p.payment_amount) AS amount
+FROM orders o
+JOIN order_items oi ON oi.order_id = o.order_id
+LEFT JOIN payments p ON p.order_id = o.order_id
+WHERE o.created_at >= DATE '2026-01-01'
+GROUP BY o.order_id;`,
+);
+assert.ok(selectChangeReview.changeCount > 0);
+assert.ok(selectChangeReview.keyChanges.some((finding) => finding.id === "join-change"));
+assert.ok(selectChangeReview.keyChanges.some((finding) => finding.id === "filter-change"));
+assert.ok(selectChangeReview.nextQuestions.some((question) => question.id === "verify-join-cardinality"));
+assert.ok(selectChangeReview.changeGroups.find((group) => group.id === "tables")?.added.includes("payments"));
+assert.match(buildSqlChangeReviewMarkdown(selectChangeReview), /SQL 변경 검토/);
+assert.match(buildSqlChangeReviewMarkdown(selectChangeReview), /변경 검토 체크리스트/);
+
+const unsafeWriteChangeReview = buildSqlChangeReview(
+  "UPDATE orders SET status = 'CANCELLED' WHERE order_id = 100;",
+  "UPDATE orders SET status = 'CANCELLED';",
+);
+assert.equal(unsafeWriteChangeReview.severity, "critical");
+assert.ok(unsafeWriteChangeReview.keyChanges.some((finding) => finding.id === "write-filter-removed"));
+assert.ok(unsafeWriteChangeReview.nextQuestions.some((question) => question.id === "verify-write-scope"));
+assert.ok(unsafeWriteChangeReview.checklist.some((item) => item.id === "check-verify-write-scope"));
+
+const equivalentChangeReview = buildSqlChangeReview(
+  "SELECT order_id FROM orders WHERE status = 'PAID';",
+  "  SELECT order_id\nFROM orders\nWHERE status = 'PAID';  ",
+);
+assert.equal(equivalentChangeReview.changeCount, 0);
+assert.equal(equivalentChangeReview.keyChanges[0].id, "no-structural-change");
+
+for (const reviewCase of SQL_CHANGE_REVIEW_CASES) {
+  const review = buildSqlChangeReview(reviewCase.beforeSql, reviewCase.afterSql);
+
+  assert.equal(review.severity, reviewCase.expected.severity, `${reviewCase.id}: severity`);
+  assert.equal(review.changeCount > 0, reviewCase.expected.structuralChange, `${reviewCase.id}: change state`);
+
+  for (const findingId of reviewCase.expected.findingIds) {
+    assert.ok(
+      review.keyChanges.some((finding) => finding.id === findingId),
+      `${reviewCase.id}: expected finding ${findingId}`,
+    );
+  }
+
+  for (const questionId of reviewCase.expected.questionIds) {
+    assert.ok(
+      review.nextQuestions.some((question) => question.id === questionId),
+      `${reviewCase.id}: expected question ${questionId}`,
+    );
+  }
+}
 
 const schemaQualified = analyzeSql(readFixture("schema-qualified-tables.sql"));
 const schemaOrderTable = schemaQualified.tables.find((table) => table.rawName === "public.orders");

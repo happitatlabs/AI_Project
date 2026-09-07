@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { DataInsightWorkspace } from "./DataInsightWorkspace";
+import { SqlChangeReviewWorkspace } from "./SqlChangeReviewWorkspace";
 import {
   AI_SQL_DOCUMENT_TYPE_OPTIONS,
   type AiSqlDocumentDraft,
@@ -113,31 +114,63 @@ function ResultSection({
 
 function DiagnosticNarrativeSections({
   narrative,
+  reviewKey,
 }: {
   narrative: DiagnosticNarrative;
+  reviewKey: string;
 }) {
+  const [checkedQuestionIds, setCheckedQuestionIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    setCheckedQuestionIds([]);
+  }, [reviewKey]);
+
+  const toggleQuestion = (questionId: string) => {
+    setCheckedQuestionIds((current) =>
+      current.includes(questionId)
+        ? current.filter((id) => id !== questionId)
+        : [...current, questionId],
+    );
+  };
+
   return (
-    <>
-      <ResultSection title={narrative.title} className="diagnostic-narrative-section" variant="wide">
+    <ResultSection title={narrative.title} className="diagnostic-narrative-section" variant="wide">
+      <div className="diagnostic-source-row">
+        <span>룰 기반 검토</span>
+        <small>AI 호출 전에도 유지되는 결과</small>
+      </div>
+
+      <section className="diagnostic-narrative-block">
+        <h3>핵심 결과</h3>
         <div className="diagnostic-key-findings">
           {narrative.keyFindings.map((finding) => (
             <article className={`diagnostic-finding ${finding.severity}`} key={finding.id}>
               <span>{finding.label}</span>
               <p>{finding.statement}</p>
+              {finding.evidence.length > 0 ? (
+                <details className="diagnostic-evidence">
+                  <summary>판단 근거 {finding.evidence.length}개</summary>
+                  <ul>
+                    {finding.evidence.map((evidence) => <li key={evidence}>{evidence}</li>)}
+                  </ul>
+                </details>
+              ) : null}
             </article>
           ))}
         </div>
-      </ResultSection>
+      </section>
 
-      <ResultSection title="그래서 무엇이 중요한가" className="diagnostic-narrative-section" variant="wide">
+      <section className="diagnostic-narrative-block diagnostic-so-what-block">
+        <h3>그래서 무엇이 중요한가</h3>
         <div className="diagnostic-so-what">
           {narrative.soWhat.rationale ? <span>{narrative.soWhat.rationale}</span> : null}
           <p>{narrative.soWhat.statement}</p>
         </div>
-      </ResultSection>
+      </section>
 
       {narrative.priorityTargets.length > 0 ? (
-        <ResultSection title="우선 확인 대상" className="diagnostic-narrative-section" variant="wide">
+        <section className="diagnostic-narrative-block">
+          <h3>우선 확인 대상</h3>
           <ol className="diagnostic-priority-targets">
             {narrative.priorityTargets.map((target) => (
               <li className={target.severity} key={target.id}>
@@ -146,20 +179,31 @@ function DiagnosticNarrativeSections({
               </li>
             ))}
           </ol>
-        </ResultSection>
+        </section>
       ) : null}
 
-      <ResultSection title="다음으로 확인할 질문" className="diagnostic-narrative-section" variant="wide">
-        <ol className="diagnostic-next-questions">
+      <section className="diagnostic-narrative-block diagnostic-question-block">
+        <div className="diagnostic-question-header">
+          <h3>다음으로 확인할 질문</h3>
+          <span>{checkedQuestionIds.length}/{narrative.nextQuestions.length} 확인</span>
+        </div>
+        <div className="diagnostic-next-questions">
           {narrative.nextQuestions.map((question) => (
-            <li key={question.id}>
-              <strong>{question.question}</strong>
-              <span>{question.reason}</span>
-            </li>
+            <label className={checkedQuestionIds.includes(question.id) ? "checked" : ""} key={question.id}>
+              <input
+                type="checkbox"
+                checked={checkedQuestionIds.includes(question.id)}
+                onChange={() => toggleQuestion(question.id)}
+              />
+              <span>
+                <strong>{question.question}</strong>
+                <small>{question.reason}</small>
+              </span>
+            </label>
           ))}
-        </ol>
-      </ResultSection>
-    </>
+        </div>
+      </section>
+    </ResultSection>
   );
 }
 
@@ -486,7 +530,7 @@ function MultiRuleAnalysisDetails({
   );
 }
 
-type AnalysisMode = "single" | "multi" | "data";
+type AnalysisMode = "single" | "change" | "multi" | "data";
 type CopyResult = "copied" | "selected" | "failed";
 type CopyStatus = "idle" | CopyResult;
 type RiskFilter = "all" | SqlRiskSeverity;
@@ -720,6 +764,25 @@ const DEFAULT_MULTI_SQL = SQL_PRESETS
   )
   .map((preset) => preset.sql)
   .join("\n\n");
+
+const MODE_GUIDANCE: Record<AnalysisMode, { label: string; description: string }> = {
+  single: {
+    label: "SQL 한 건을 이해하고 검토합니다.",
+    description: "목적, 구조적 위험, 먼저 확인할 질문을 룰 기반으로 정리합니다.",
+  },
+  change: {
+    label: "배포 전 SQL 변경안을 비교합니다.",
+    description: "변경 전후의 테이블, JOIN, 조건, 집계와 쓰기 범위를 나란히 검토합니다.",
+  },
+  multi: {
+    label: "여러 SQL의 의존성과 변경 영향 범위를 봅니다.",
+    description: "핵심 테이블, 반복 조건, 위험이 집중된 SQL을 우선순위로 정리합니다.",
+  },
+  data: {
+    label: "SQL 실행 결과 데이터를 별도로 검증합니다.",
+    description: "CSV 또는 JSON에서 계산한 추세, 비교, 이상치 후보를 확인합니다.",
+  },
+};
 
 function App() {
   const [runtimeAiFeatureEnabled, setRuntimeAiFeatureEnabled] =
@@ -1656,29 +1719,39 @@ function App() {
     >
       <section className="workspace">
         <header className="app-header">
-          <div>
-            <p className="eyebrow">Legacy SQL Mapper</p>
-            <h1>SQL 설명기 MVP 0.1</h1>
+          <div className="app-header-copy">
+            <p className="eyebrow">Legacy SQL Change Review</p>
+            <h1>SQL Diagnoser</h1>
+            <p className="app-tagline">
+              레거시 SQL을 이해하고, 변경 전에 위험과 확인 근거를 남깁니다.
+            </p>
           </div>
-          {demoAccessState.status === "authenticated" ? (
-            <div className="demo-session-control">
-              <span>{demoAccessState.username ?? "테스트 사용자"} 로그인됨</span>
-              <button
-                className="text-button"
-                disabled={demoLogoutState === "loading"}
-                type="button"
-                onClick={() => void logoutDemo()}
-              >
-                {demoLogoutState === "loading" ? "로그아웃 중" : "로그아웃"}
-              </button>
-              {demoLogoutState === "error" ? (
-                <small role="alert">로그아웃 처리에 실패했습니다.</small>
-              ) : null}
-            </div>
-          ) : null}
+          <div className="app-header-actions">
+            {demoAccessState.status === "authenticated" ? (
+              <div className="demo-session-control">
+                <span>{demoAccessState.username ?? "테스트 사용자"} 로그인됨</span>
+                <button
+                  className="text-button"
+                  disabled={demoLogoutState === "loading"}
+                  type="button"
+                  onClick={() => void logoutDemo()}
+                >
+                  {demoLogoutState === "loading" ? "로그아웃 중" : "로그아웃"}
+                </button>
+                {demoLogoutState === "error" ? (
+                  <small role="alert">로그아웃 처리에 실패했습니다.</small>
+                ) : null}
+              </div>
+            ) : null}
+            <ul className="trust-indicators" aria-label="분석 원칙">
+              <li>SQL 실행 없음</li>
+              <li>룰 기반 우선</li>
+              <li>AI 선택 실행</li>
+            </ul>
+          </div>
         </header>
 
-        <details className="scope-notice" open>
+        <details className="scope-notice">
           <summary>지원 범위 / 한계</summary>
           <p>
             현재 버전은 정규식 기반 SQL 분석기입니다. 일반적인 SELECT,
@@ -1714,7 +1787,16 @@ function App() {
             type="button"
             onClick={() => changeAnalysisMode("single")}
           >
-            단건 SQL
+            SQL 진단
+          </button>
+          <button
+            aria-selected={analysisMode === "change"}
+            className={analysisMode === "change" ? "mode-button active" : "mode-button"}
+            role="tab"
+            type="button"
+            onClick={() => changeAnalysisMode("change")}
+          >
+            변경 비교
           </button>
           <button
             aria-selected={analysisMode === "multi"}
@@ -1723,7 +1805,7 @@ function App() {
             type="button"
             onClick={() => changeAnalysisMode("multi")}
           >
-            다건 SQL
+            자산 지도
           </button>
           <button
             aria-selected={analysisMode === "data"}
@@ -1732,9 +1814,14 @@ function App() {
             type="button"
             onClick={() => changeAnalysisMode("data")}
           >
-            데이터 인사이트
+            데이터 검증
           </button>
         </div>
+
+        <section className="mode-guidance" aria-live="polite">
+          <strong>{MODE_GUIDANCE[analysisMode].label}</strong>
+          <span>{MODE_GUIDANCE[analysisMode].description}</span>
+        </section>
 
         {analysisMode === "single" ? (
           <>
@@ -1796,7 +1883,7 @@ function App() {
           className="result-grid single-result-mode"
           aria-live="polite"
         >
-          <DiagnosticNarrativeSections narrative={singleNarrative} />
+          <DiagnosticNarrativeSections narrative={singleNarrative} reviewKey={analyzedSingleSql} />
 
           <ResultSection title="한 줄 설명" className="rule-analysis-section" variant="wide">
             <p className="summary-text">{analysis.summary}</p>
@@ -2031,7 +2118,14 @@ function App() {
             <p className="developer-text">{analysis.developerExplanation}</p>
           </ResultSection>
 
-          <ResultSection title="AI 보충 해석" className="ai-output-section single-ai-explanation" variant="wide">
+          <ResultSection
+            collapsible
+            defaultOpen={aiState.status !== "idle"}
+            description="룰 기반 결과를 바꾸지 않는 선택형 보충 설명"
+            title="AI 보충 해석"
+            className="ai-output-section single-ai-explanation"
+            variant="wide"
+          >
             {aiState.status === "idle" ? (
               <p className="empty-text">
                 필요할 때만 AI 설명 보강을 요청할 수 있습니다. 룰 기반 분석
@@ -2109,7 +2203,14 @@ function App() {
             ) : null}
           </ResultSection>
 
-          <ResultSection title="AI 문서 초안" className="ai-output-section single-ai-document" variant="wide">
+          <ResultSection
+            collapsible
+            defaultOpen={aiDocumentDraftState.status !== "idle"}
+            description="검토 결과를 팀 문서용 Markdown으로 정리"
+            title="AI 문서 초안"
+            className="ai-output-section single-ai-document"
+            variant="wide"
+          >
             <div className="document-draft-toolbar">
               <label className="input-label compact" htmlFor="ai-document-type">
                 문서 유형
@@ -2283,7 +2384,13 @@ function App() {
             </ul>
           </ResultSection>
 
-          <ResultSection title="복사 가능한 보고서" className="report-section" variant="wide">
+          <ResultSection
+            collapsible
+            description="현재 룰 기반 분석 결과 전체"
+            title="복사 가능한 보고서"
+            className="report-section"
+            variant="wide"
+          >
             <div className="report-header">
               <p className="report-help">
                 분석 결과를 문서나 메신저에 붙여넣기 쉬운 형태로 정리했습니다.
@@ -2312,6 +2419,8 @@ function App() {
           </ResultSection>
         </section>
           </>
+        ) : analysisMode === "change" ? (
+          <SqlChangeReviewWorkspace />
         ) : analysisMode === "data" ? (
           <DataInsightWorkspace aiFeatureEnabled={isAiFeatureEnabled} />
         ) : (
@@ -2371,7 +2480,10 @@ function App() {
               className="result-grid multi-result-mode"
               aria-live="polite"
             >
-              <DiagnosticNarrativeSections narrative={multiNarrative} />
+              <DiagnosticNarrativeSections
+                narrative={multiNarrative}
+                reviewKey={multiAnalysis.statements.map((statement) => statement.sql).join("\n")}
+              />
 
               <ResultSection
                 collapsible
@@ -2408,7 +2520,14 @@ function App() {
                 </div>
               </ResultSection>
 
-              <ResultSection title="AI 보충 해석" className="ai-output-section multi-ai-explanation" variant="wide">
+              <ResultSection
+                collapsible
+                defaultOpen={multiAiState.status !== "idle"}
+                description="자산 지도 결과를 연결하는 선택형 보충 설명"
+                title="AI 보충 해석"
+                className="ai-output-section multi-ai-explanation"
+                variant="wide"
+              >
                 {multiAiState.status === "idle" ? (
                   <p className="empty-text">
                     필요할 때만 다건 AI 설명 보강을 요청할 수 있습니다. 여러
@@ -3067,7 +3186,14 @@ function App() {
                 <MultiRuleAnalysisDetails multiAnalysis={multiAnalysis} />
               </CollapsibleSection>
 
-              <ResultSection title="AI 다건 문서 초안" className="ai-output-section multi-ai-document" variant="wide">
+              <ResultSection
+                collapsible
+                defaultOpen={multiAiDocumentDraftState.status !== "idle"}
+                description="SQL 자산 분석을 팀 문서용 Markdown으로 정리"
+                title="AI 다건 문서 초안"
+                className="ai-output-section multi-ai-document"
+                variant="wide"
+              >
                 <div className="document-draft-toolbar">
                   <label className="input-label compact" htmlFor="multi-ai-document-type">
                     문서 유형
@@ -3405,7 +3531,13 @@ function App() {
                 </div>
               </ResultSection>
 
-              <ResultSection title="복사 가능한 다건 분석 보고서" className="report-section" variant="wide">
+              <ResultSection
+                collapsible
+                description="다건 분석 결과 전체"
+                title="복사 가능한 다건 분석 보고서"
+                className="report-section"
+                variant="wide"
+              >
                 <div className="report-header">
                   <p className="report-help">
                     여러 SQL의 테이블 사용, 자산 지도, 시스템 의존성 지도를 Markdown으로 정리했습니다.
