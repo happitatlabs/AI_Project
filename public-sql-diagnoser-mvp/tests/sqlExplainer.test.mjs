@@ -227,6 +227,27 @@ assert.match(normalizedMaskedSql, /status = 'PAID'/);
 
 const fallbackMaskedSql = maskSensitiveSql(`SELECT * FROM users WHERE password = 'plain-secret';`);
 assert.match(fallbackMaskedSql, /password = '\[REDACTED_VALUE\]'/);
+
+const repeatedSensitiveTokenA = ["tok", "fixture", "a".repeat(24)].join("_");
+const repeatedSensitiveTokenB = ["secret", "fixture", "b".repeat(24)].join("_");
+const repeatedSensitiveSql = maskSensitiveSql(`-- owners: first@example.com, second@example.com / 010-1111-2222, 010-3333-4444
+SELECT *
+FROM audit_events
+WHERE customer_id IN (123456789012345, 987654321098765)
+  AND request_uuid IN (550e8400-e29b-41d4-a716-446655440000, 123e4567-e89b-42d3-a456-426614174000)
+  AND api_token IN (${repeatedSensitiveTokenA}, ${repeatedSensitiveTokenB});`);
+
+assert.doesNotMatch(repeatedSensitiveSql, /first@example\.com|second@example\.com/);
+assert.doesNotMatch(repeatedSensitiveSql, /010-(?:1111-2222|3333-4444)/);
+assert.doesNotMatch(repeatedSensitiveSql, /123456789012345|987654321098765/);
+assert.doesNotMatch(repeatedSensitiveSql, /550e8400-e29b-41d4-a716-446655440000|123e4567-e89b-42d3-a456-426614174000/);
+assert.ok(!repeatedSensitiveSql.includes(repeatedSensitiveTokenA));
+assert.ok(!repeatedSensitiveSql.includes(repeatedSensitiveTokenB));
+assert.equal((repeatedSensitiveSql.match(/\[REDACTED_EMAIL\]/g) ?? []).length, 2);
+assert.equal((repeatedSensitiveSql.match(/\[REDACTED_PHONE\]/g) ?? []).length, 2);
+assert.equal((repeatedSensitiveSql.match(/\[REDACTED_NUMBER\]/g) ?? []).length, 2);
+assert.equal((repeatedSensitiveSql.match(/\[REDACTED_UUID\]/g) ?? []).length, 2);
+assert.equal((repeatedSensitiveSql.match(/\[REDACTED_TOKEN\]/g) ?? []).length, 2);
 assert.equal(
   maskSensitiveText("alice@example.com / 010-1234-5678 / 12345678-1234-4123-8123-123456789abc"),
   "[REDACTED_EMAIL] / [REDACTED_PHONE] / [REDACTED_UUID]",
@@ -1062,13 +1083,23 @@ assert.ok(complexNarrative.nextQuestions.some((question) => question.id === "sin
 assert.ok(complexNarrative.nextQuestions.some((question) => question.id === "single-aggregation-grain"));
 
 const unsafeWriteNarrativeSql = "UPDATE orders SET status = 'CANCELLED';";
+const unsafeWriteAnalysis = analyzeSql(unsafeWriteNarrativeSql);
 const unsafeWriteNarrative = buildSingleSqlNarrative(
   unsafeWriteNarrativeSql,
-  analyzeSql(unsafeWriteNarrativeSql),
+  unsafeWriteAnalysis,
 );
+assert.equal(unsafeWriteAnalysis.businessIntent.type, "data_update");
+assert.match(unsafeWriteAnalysis.summary, /orders 테이블의 값을 변경하는 UPDATE SQL/);
+assert.match(unsafeWriteAnalysis.developerExplanation, /전체 행이 변경될 수 있습니다/);
 assert.ok(unsafeWriteNarrative.keyFindings.some((finding) => finding.id.startsWith("single-risk-")));
 assert.ok(unsafeWriteNarrative.nextQuestions.some((question) => question.id === "single-write-row-count"));
 assert.ok(unsafeWriteNarrative.nextQuestions.some((question) => question.id === "single-write-rollback"));
+
+const writeKeywordLiteralAnalysis = analyzeSql(
+  "SELECT 'DELETE FROM audit_logs' AS example_text FROM documentation_examples;",
+);
+assert.notEqual(writeKeywordLiteralAnalysis.businessIntent.type, "data_delete");
+assert.match(writeKeywordLiteralAnalysis.summary, /조회하는 SQL/);
 
 const selectChangeReview = buildSqlChangeReview(
   `SELECT o.order_id, SUM(oi.quantity * oi.unit_price) AS amount
@@ -1190,14 +1221,26 @@ assertIncludesAll(renderExplanationText(recursiveCte), ["WITH RECURSIVE", "재�
 
 const mergeSnapshot = analyzeSql(readFixture("merge-customer-snapshot.sql"));
 assert.ok(mergeSnapshot.advancedFeatures.some((feature) => feature.type === "merge"));
+assert.equal(mergeSnapshot.businessIntent.type, "data_merge");
+assert.match(mergeSnapshot.summary, /MERGE SQL/);
+assert.ok(mergeSnapshot.tables.some((table) => table.tableName === "customer_snapshot"));
+assert.ok(mergeSnapshot.tables.some((table) => table.tableName === "customers_delta"));
 assertIncludesAll(renderExplanationText(mergeSnapshot), ["MERGE INTO", "UPDATE 또는 INSERT"]);
 
 const updateFrom = analyzeSql(readFixture("update-from-customer-segment.sql"));
 assert.ok(updateFrom.advancedFeatures.some((feature) => feature.type === "update_from"));
+assert.equal(updateFrom.businessIntent.type, "data_update");
+assert.match(updateFrom.summary, /UPDATE SQL/);
+assert.ok(updateFrom.tables.some((table) => table.tableName === "orders"));
+assert.ok(updateFrom.tables.some((table) => table.tableName === "customers"));
 assertIncludesAll(renderExplanationText(updateFrom), ["UPDATE ... FROM", "갱신"]);
 
 const deleteUsing = analyzeSql(readFixture("delete-using-order-errors.sql"));
 assert.ok(deleteUsing.advancedFeatures.some((feature) => feature.type === "delete_using"));
+assert.equal(deleteUsing.businessIntent.type, "data_delete");
+assert.match(deleteUsing.summary, /DELETE SQL/);
+assert.ok(deleteUsing.tables.some((table) => table.tableName === "order_errors"));
+assert.ok(deleteUsing.tables.some((table) => table.tableName === "orders"));
 assertIncludesAll(renderExplanationText(deleteUsing), ["DELETE FROM ... USING", "삭제"]);
 
 const pivotSales = analyzeSql(readFixture("pivot-monthly-sales.sql"));
