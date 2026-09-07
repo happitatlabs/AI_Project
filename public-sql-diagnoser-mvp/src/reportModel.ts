@@ -354,7 +354,7 @@ export const buildSqlExplainerReport = ({
   riskAnalysis,
   systemGraph,
   tableAssetMap,
-  title = "SQL Explainer 분석 보고서",
+  title = "SQL Diagnoser 분석 보고서",
 }: {
   aiDocumentDraft?: AiDocumentDraftReportItem;
   aiExplanation?: AiSqlExplanation;
