@@ -5,7 +5,7 @@ import { handleAiDocumentDraftRequest } from "./api/ai-document-draft";
 import { handleAiDataInsightsRequest } from "./api/ai-data-insights";
 import { handleAiExplainRequest } from "./api/ai-explain";
 import { handleAiMultiDocumentDraftRequest } from "./api/ai-multi-document-draft";
-import { pickAiProviderEnv } from "./api/ai-provider";
+import { pickAiProviderEnv, resolveProviderConfig } from "./api/ai-provider";
 
 const MAX_DEV_REQUEST_BODY_LENGTH = 1024 * 1024;
 
@@ -15,6 +15,7 @@ const sendJson = (
   body: unknown,
 ) => {
   res.statusCode = status;
+  res.setHeader("Cache-Control", "no-store");
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.end(JSON.stringify(body));
 };
@@ -49,6 +50,23 @@ const aiExplainLocalApiPlugin = (
     const mergedAiEnv = () => pickAiProviderEnv({
       ...env,
       ...process.env,
+    });
+
+    server.middlewares.use("/api/runtime-config", (req, res) => {
+      if (req.method !== "GET") {
+        sendJson(res, 405, { error: "GET 요청만 지원합니다." });
+        return;
+      }
+
+      const providerConfig = resolveProviderConfig(mergedAiEnv());
+      const aiConfigured = !("error" in providerConfig);
+
+      sendJson(res, 200, {
+        aiConfigured,
+        aiEnabled: env.VITE_ENABLE_AI_FEATURES !== "false" && aiConfigured,
+        authenticated: false,
+        loginRequired: false,
+      });
     });
 
     server.middlewares.use("/api/ai-explain", async (req, res) => {

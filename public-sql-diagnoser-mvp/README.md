@@ -349,11 +349,11 @@ Ollama를 쓰는 경우:
 
 ```bash
 AI_PROVIDER=ollama
-AI_MODEL=llama3.1
+AI_MODEL=qwen2.5:7b
 OLLAMA_BASE_URL=http://localhost:11434
 ```
 
-`OLLAMA_BASE_URL`을 비워 두면 기본값으로 `http://localhost:11434`를 사용합니다. 모델만 별도로 바꾸고 싶으면 `AI_MODEL` 또는 `OLLAMA_MODEL`에 설치된 Ollama 모델명을 넣으면 됩니다.
+`ollama list`로 설치된 모델명을 확인합니다. `OLLAMA_BASE_URL`을 비워 두면 기본값으로 `http://localhost:11434`를 사용합니다. 모델만 별도로 바꾸고 싶으면 `AI_MODEL` 또는 `OLLAMA_MODEL`에 설치된 Ollama 모델명을 넣으면 됩니다. 두 변수를 모두 설정한 경우 `OLLAMA_MODEL`이 우선합니다.
 
 OpenAI를 쓰는 경우:
 
@@ -374,7 +374,7 @@ AZURE_OPENAI_MODEL=your_deployment_name_here
 
 Azure OpenAI의 `AZURE_OPENAI_MODEL`에는 일반 모델명이 아니라 Azure에 배포한 deployment name을 넣습니다.
 
-로컬 개발에서는 `npm run dev`로 실행되는 Vite 개발 서버가 `POST /api/ai-explain`, `/api/ai-document-draft`, `/api/ai-multi-document-draft`, `/api/ai-data-insights`를 함께 처리합니다. 별도 API 서버를 직접 띄우지 않아도 됩니다.
+로컬 개발에서는 `npm run dev`로 실행되는 Vite 개발 서버가 `GET /api/runtime-config`, `POST /api/ai-explain`, `/api/ai-document-draft`, `/api/ai-multi-document-draft`, `/api/ai-data-insights`를 함께 처리합니다. 별도 API 서버를 직접 띄우지 않아도 됩니다. provider 설정이 불완전하면 AI 요청 UI를 숨기고 룰 기반 기능만 유지합니다.
 
 Cloudflare Worker 배포에서는 `src/cloudflareWorker.ts`가 같은 origin의 `/api/auth/*`, `/api/runtime-config`, `/api/ai-*` endpoint를 처리합니다. provider별 키와 테스트 계정·세션 비밀값은 Worker secret으로 설정해야 합니다.
 
@@ -417,7 +417,7 @@ npm run dev
 
 Vite 개발 서버가 안내하는 로컬 URL에서 실행할 수 있습니다.
 
-AI 보강 기능까지 로컬에서 확인하려면 `.env`에 사용할 provider의 환경변수를 채운 뒤 같은 명령을 실행하면 됩니다. 설정이 비어 있거나 Ollama 서버가 내려가 있으면 AI 섹션에 오류가 표시되고, 룰 기반 분석 결과는 계속 사용할 수 있습니다.
+AI 보강 기능까지 로컬에서 확인하려면 `.env`에 사용할 provider의 환경변수를 채운 뒤 같은 명령을 실행하면 됩니다. 설정이 비어 있으면 AI 요청 UI를 숨기며, 설정 후 Ollama 서버가 내려가 있으면 AI 요청 영역에 연결 오류가 표시됩니다. 두 경우 모두 룰 기반 분석 결과는 계속 사용할 수 있습니다.
 
 ## 테스트 실행
 

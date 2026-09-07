@@ -155,6 +155,23 @@ input {
   line-height: 1.55;
 }
 
+.demo-login-connection-error {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  padding: 14px;
+  background: #fff7f7;
+}
+
+.demo-login-connection-error p {
+  margin: 0;
+  color: #9f1239;
+  font-size: 0.92rem;
+  font-weight: 750;
+  line-height: 1.6;
+}
+
 .demo-session-control {
   display: flex;
   flex-wrap: wrap;
@@ -2908,6 +2925,7 @@ code {
   background: #f8fafc;
 }
 
+.analysis-pending,
 .change-review-empty {
   display: grid;
   gap: 4px;
@@ -2919,6 +2937,7 @@ code {
   text-align: center;
 }
 
+.analysis-pending span,
 .change-review-empty span {
   color: #64748b;
   font-size: 0.84rem;

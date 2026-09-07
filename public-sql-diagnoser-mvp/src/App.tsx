@@ -556,7 +556,7 @@ type DemoAccessState = {
   aiConfigured: boolean;
   authenticated: boolean;
   loginRequired: boolean;
-  status: "checking" | "public" | "unauthenticated" | "authenticated";
+  status: "checking" | "error" | "public" | "unauthenticated" | "authenticated";
   username?: string;
 };
 type RuntimeConfig = {
@@ -594,10 +594,12 @@ const readRuntimeConfig = (value: unknown): RuntimeConfig | undefined => {
 };
 
 type DemoLoginScreenProps = {
+  connectionError?: boolean;
   errorMessage?: string;
   isChecking?: boolean;
   isSubmitting: boolean;
   onPasswordChange: (value: string) => void;
+  onRetryConnection: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onUsernameChange: (value: string) => void;
   password: string;
@@ -605,10 +607,12 @@ type DemoLoginScreenProps = {
 };
 
 function DemoLoginScreen({
+  connectionError = false,
   errorMessage,
   isChecking = false,
   isSubmitting,
   onPasswordChange,
+  onRetryConnection,
   onSubmit,
   onUsernameChange,
   password,
@@ -625,6 +629,13 @@ function DemoLoginScreen({
 
         {isChecking ? (
           <p className="demo-login-checking" role="status">접근 상태를 확인하고 있습니다.</p>
+        ) : connectionError ? (
+          <div className="demo-login-connection-error" role="alert">
+            <p>보호된 데모의 접근 상태를 확인하지 못했습니다.</p>
+            <button className="secondary-button" type="button" onClick={onRetryConnection}>
+              다시 확인
+            </button>
+          </div>
         ) : (
           <form className="demo-login-form" onSubmit={onSubmit}>
             <label htmlFor="demo-username">
@@ -804,6 +815,7 @@ function App() {
   const [sql, setSql] = useState(DEFAULT_SQL);
   const [analyzedSingleSql, setAnalyzedSingleSql] = useState(DEFAULT_SQL);
   const [multiSql, setMultiSql] = useState(DEFAULT_MULTI_SQL);
+  const [analyzedMultiSql, setAnalyzedMultiSql] = useState(DEFAULT_MULTI_SQL);
   const [selectedPresetId, setSelectedPresetId] = useState("");
   const [analysis, setAnalysis] = useState<SqlExplanation>(() =>
     explainSql(DEFAULT_SQL),
@@ -841,8 +853,25 @@ function App() {
   const [selectedSystemNodeId, setSelectedSystemNodeId] = useState("");
   const [riskFilter, setRiskFilter] = useState<RiskFilter>("all");
   const isAiFeatureEnabled = runtimeAiFeatureEnabled;
+  const hasSingleSqlInput = sql.trim().length > 0;
+  const hasMultiSqlInput = multiSql.trim().length > 0;
+  const isSingleAnalysisCurrent =
+    hasSingleSqlInput && sql.trim() === analyzedSingleSql.trim();
+  const isMultiAnalysisCurrent =
+    hasMultiSqlInput && multiSql.trim() === analyzedMultiSql.trim();
 
   const applyRuntimeConfig = useCallback((config: RuntimeConfig) => {
+    if (isDemoMode && !config.loginRequired) {
+      setRuntimeAiFeatureEnabled(false);
+      setDemoAccessState({
+        aiConfigured: config.aiConfigured,
+        authenticated: false,
+        loginRequired: false,
+        status: "error",
+      });
+      return;
+    }
+
     setRuntimeAiFeatureEnabled(config.aiEnabled);
     setDemoAccessState({
       aiConfigured: config.aiConfigured,
@@ -874,14 +903,24 @@ function App() {
       applyRuntimeConfig(config);
       return config;
     } catch {
-      // Static-only and local Vite deployments retain build-time AI behavior.
-      setRuntimeAiFeatureEnabled(buildAiFeatureEnabled);
-      setDemoAccessState({
-        aiConfigured: false,
-        authenticated: false,
-        loginRequired: false,
-        status: "public",
-      });
+      if (isDemoMode) {
+        setRuntimeAiFeatureEnabled(false);
+        setDemoAccessState({
+          aiConfigured: false,
+          authenticated: false,
+          loginRequired: false,
+          status: "error",
+        });
+      } else {
+        // Static-only local deployments retain build-time AI behavior.
+        setRuntimeAiFeatureEnabled(buildAiFeatureEnabled);
+        setDemoAccessState({
+          aiConfigured: false,
+          authenticated: false,
+          loginRequired: false,
+          status: "public",
+        });
+      }
       return undefined;
     }
   }, [applyRuntimeConfig]);
@@ -1180,8 +1219,14 @@ function App() {
   }, [aiDocumentDraftState, analysis, analysisMode, markdownReportText]);
 
   const runAnalysis = () => {
-    setAnalysis(explainSql(sql));
-    setAnalyzedSingleSql(sql);
+    const trimmedSql = sql.trim();
+
+    if (!trimmedSql) {
+      return;
+    }
+
+    setAnalysis(explainSql(trimmedSql));
+    setAnalyzedSingleSql(trimmedSql);
     setAiState(idleAiExplanationState());
     setAiDocumentDraftState({ status: "idle" });
     setDocumentDraftCopyStatus("idle");
@@ -1190,7 +1235,14 @@ function App() {
   };
 
   const runMultiAnalysis = () => {
-    setMultiAnalysis(analyzeMultipleSql(multiSql));
+    const trimmedSql = multiSql.trim();
+
+    if (!trimmedSql) {
+      return;
+    }
+
+    setMultiAnalysis(analyzeMultipleSql(trimmedSql));
+    setAnalyzedMultiSql(trimmedSql);
     setSelectedTableAssetKey("");
     setSelectedSystemNodeId("");
     setRiskFilter("all");
@@ -1222,6 +1274,7 @@ function App() {
 
   const loadMultiSample = () => {
     setMultiSql(DEFAULT_MULTI_SQL);
+    setAnalyzedMultiSql(DEFAULT_MULTI_SQL);
     setMultiAnalysis(analyzeMultipleSql(DEFAULT_MULTI_SQL));
     setSelectedTableAssetKey("");
     setSelectedSystemNodeId("");
@@ -1259,12 +1312,18 @@ function App() {
   const requestAiExplanation = async () => {
     const trimmedSql = sql.trim();
 
-    if (!isAiFeatureEnabled || !trimmedSql || aiState.status === "loading") {
+    if (
+      !isAiFeatureEnabled
+      || !trimmedSql
+      || !isSingleAnalysisCurrent
+      || aiState.status === "loading"
+    ) {
       return;
     }
 
     const latestAnalysis = explainSql(trimmedSql);
     setAnalysis(latestAnalysis);
+    setAnalyzedSingleSql(trimmedSql);
     setAiState(loadingAiExplanationState());
     setCopyStatus("idle");
     setReportActionStatus("idle");
@@ -1310,7 +1369,12 @@ function App() {
   const requestMultiAiExplanation = async () => {
     const trimmedSql = multiSql.trim();
 
-    if (!isAiFeatureEnabled || !trimmedSql || multiAiState.status === "loading") {
+    if (
+      !isAiFeatureEnabled
+      || !trimmedSql
+      || !isMultiAnalysisCurrent
+      || multiAiState.status === "loading"
+    ) {
       return;
     }
 
@@ -1319,6 +1383,7 @@ function App() {
     const aiAnalysis = buildMultiSqlAiAnalysis(latestMultiAnalysis, latestRiskAnalysis);
 
     setMultiAnalysis(latestMultiAnalysis);
+    setAnalyzedMultiSql(trimmedSql);
     setRiskFilter("all");
     setMultiAiState(loadingAiExplanationState());
     setCopyStatus("idle");
@@ -1363,12 +1428,18 @@ function App() {
   const requestAiDocumentDraft = async () => {
     const trimmedSql = sql.trim();
 
-    if (!isAiFeatureEnabled || !trimmedSql || aiDocumentDraftState.status === "loading") {
+    if (
+      !isAiFeatureEnabled
+      || !trimmedSql
+      || !isSingleAnalysisCurrent
+      || aiDocumentDraftState.status === "loading"
+    ) {
       return;
     }
 
     const latestAnalysis = explainSql(trimmedSql);
     setAnalysis(latestAnalysis);
+    setAnalyzedSingleSql(trimmedSql);
     setAiDocumentDraftState({ status: "loading" });
     setDocumentDraftCopyStatus("idle");
     setCopyStatus("idle");
@@ -1420,12 +1491,18 @@ function App() {
   const requestMultiAiDocumentDraft = async () => {
     const trimmedSql = multiSql.trim();
 
-    if (!isAiFeatureEnabled || !trimmedSql || multiAiDocumentDraftState.status === "loading") {
+    if (
+      !isAiFeatureEnabled
+      || !trimmedSql
+      || !isMultiAnalysisCurrent
+      || multiAiDocumentDraftState.status === "loading"
+    ) {
       return;
     }
 
     const latestMultiAnalysis = analyzeMultipleSql(trimmedSql);
     setMultiAnalysis(latestMultiAnalysis);
+    setAnalyzedMultiSql(trimmedSql);
     setRiskFilter("all");
     setMultiAiDocumentDraftState({ status: "loading" });
     setMultiDocumentDraftCopyStatus("idle");
@@ -1696,17 +1773,19 @@ function App() {
 
   const showDemoLogin =
     demoAccessState.status === "unauthenticated"
-    || (isDemoMode && demoAccessState.status === "checking");
+    || (isDemoMode && ["checking", "error"].includes(demoAccessState.status));
 
   if (showDemoLogin) {
     return (
       <DemoLoginScreen
+        connectionError={demoAccessState.status === "error"}
         errorMessage={demoLoginState.errorMessage}
         isChecking={demoAccessState.status === "checking"}
         isSubmitting={demoLoginState.status === "loading"}
         password={demoPassword}
         username={demoUsername}
         onPasswordChange={setDemoPassword}
+        onRetryConnection={() => void refreshDemoRuntimeConfig()}
         onSubmit={(event) => void submitDemoLogin(event)}
         onUsernameChange={setDemoUsername}
       />
@@ -1776,6 +1855,12 @@ function App() {
           <aside className="demo-provider-status" role="status">
             로그인은 완료되었지만 AI provider 설정이 아직 준비되지 않았습니다. Worker의 Azure OpenAI,
             OpenAI 또는 보호된 HTTPS Ollama 설정을 확인하세요.
+          </aside>
+        ) : null}
+
+        {!isDemoMode && demoAccessState.status === "public" && !isAiFeatureEnabled ? (
+          <aside className="demo-provider-status local-provider-status" role="status">
+            AI 보강 준비 안 됨 · 룰 기반 분석과 변경 비교는 정상적으로 사용할 수 있습니다.
           </aside>
         ) : null}
 
@@ -1856,14 +1941,19 @@ function App() {
         </section>
 
         <div className="action-row">
-          <button className="primary-button" type="button" onClick={runAnalysis}>
-            분석
+          <button
+            className="primary-button"
+            type="button"
+            disabled={!hasSingleSqlInput}
+            onClick={runAnalysis}
+          >
+            {isSingleAnalysisCurrent ? "다시 분석" : "분석"}
           </button>
           {isAiFeatureEnabled ? (
             <button
               className="secondary-button"
               type="button"
-              disabled={!sql.trim() || aiState.status === "loading"}
+              disabled={!isSingleAnalysisCurrent || aiState.status === "loading"}
               onClick={() => void requestAiExplanation()}
             >
               {aiState.status === "loading" ? "AI 설명 요청 중" : "AI로 설명 보강하기"}
@@ -1879,10 +1969,11 @@ function App() {
           </p>
         ) : null}
 
-        <section
-          className="result-grid single-result-mode"
-          aria-live="polite"
-        >
+        {isSingleAnalysisCurrent ? (
+          <section
+            className="result-grid single-result-mode"
+            aria-live="polite"
+          >
           <DiagnosticNarrativeSections narrative={singleNarrative} reviewKey={analyzedSingleSql} />
 
           <ResultSection title="한 줄 설명" className="rule-analysis-section" variant="wide">
@@ -2417,7 +2508,21 @@ function App() {
               aria-label="복사 가능한 보고서"
             />
           </ResultSection>
-        </section>
+          </section>
+        ) : (
+          <section className="analysis-pending" aria-live="polite">
+            <strong>
+              {hasSingleSqlInput
+                ? "입력이 변경되어 이전 분석 결과를 숨겼습니다."
+                : "분석할 SQL을 입력하세요."}
+            </strong>
+            <span>
+              {hasSingleSqlInput
+                ? "분석을 실행하면 현재 SQL 기준의 핵심 결과와 다음 질문이 표시됩니다."
+                : "SQL을 입력하면 룰 기반 분석을 실행할 수 있습니다."}
+            </span>
+          </section>
+        )}
           </>
         ) : analysisMode === "change" ? (
           <SqlChangeReviewWorkspace />
@@ -2450,15 +2555,16 @@ function App() {
               <button
                 className="primary-button"
                 type="button"
+                disabled={!hasMultiSqlInput}
                 onClick={runMultiAnalysis}
               >
-                다건 분석
+                {isMultiAnalysisCurrent ? "다시 분석" : "다건 분석"}
               </button>
               {isAiFeatureEnabled ? (
                 <button
                   className="secondary-button"
                   type="button"
-                  disabled={!multiSql.trim() || multiAiState.status === "loading"}
+                  disabled={!isMultiAnalysisCurrent || multiAiState.status === "loading"}
                   onClick={() => void requestMultiAiExplanation()}
                 >
                   {multiAiState.status === "loading"
@@ -2476,10 +2582,11 @@ function App() {
               </p>
             ) : null}
 
-            <section
-              className="result-grid multi-result-mode"
-              aria-live="polite"
-            >
+            {isMultiAnalysisCurrent ? (
+              <section
+                className="result-grid multi-result-mode"
+                aria-live="polite"
+              >
               <DiagnosticNarrativeSections
                 narrative={multiNarrative}
                 reviewKey={multiAnalysis.statements.map((statement) => statement.sql).join("\n")}
@@ -3564,7 +3671,21 @@ function App() {
                   aria-label="복사 가능한 다건 분석 보고서"
                 />
               </ResultSection>
-            </section>
+              </section>
+            ) : (
+              <section className="analysis-pending" aria-live="polite">
+                <strong>
+                  {hasMultiSqlInput
+                    ? "입력이 변경되어 이전 자산 분석 결과를 숨겼습니다."
+                    : "분석할 SQL 묶음을 입력하세요."}
+                </strong>
+                <span>
+                  {hasMultiSqlInput
+                    ? "다건 분석을 실행하면 현재 SQL 묶음 기준의 의존성과 우선 확인 대상이 표시됩니다."
+                    : "세미콜론으로 구분된 SQL을 입력하면 자산 지도를 만들 수 있습니다."}
+                </span>
+              </section>
+            )}
           </>
         )}
       </section>

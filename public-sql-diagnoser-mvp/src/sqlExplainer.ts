@@ -125,6 +125,9 @@ export type BusinessIntentType =
   | "staged_query"
   | "data_preparation"
   | "data_insert"
+  | "data_update"
+  | "data_delete"
+  | "data_merge"
   | "batch_etl"
   | "set_operation"
   | "combined_result";
@@ -134,6 +137,8 @@ export type BusinessIntent = {
   reasons: string[];
   type: BusinessIntentType;
 };
+
+type WriteBusinessIntent = "data_delete" | "data_merge" | "data_update";
 
 export type SqlExplanation = {
   advancedFeatures: AdvancedSqlFeature[];
@@ -1082,6 +1087,37 @@ const extractTableRefs = (
     seen.add(key);
     tableByKey.set(key, table);
   };
+
+  const updateTarget = normalized.match(
+    new RegExp(
+      `\\bUPDATE\\s+(${SQL_IDENTIFIER_PATTERN})(?:\\s+(?:AS\\s+)?(${SQL_IDENTIFIER_COMPONENT_PATTERN}))?\\s+SET\\b`,
+      "i",
+    ),
+  );
+  const mergeTarget = normalized.match(
+    new RegExp(
+      `\\bMERGE\\s+INTO\\s+(${SQL_IDENTIFIER_PATTERN})(?:\\s+(?:AS\\s+)?(${SQL_IDENTIFIER_COMPONENT_PATTERN}))?\\s+USING\\b`,
+      "i",
+    ),
+  );
+  const deleteUsingSource = normalized.match(
+    new RegExp(
+      `\\bUSING\\s+(${SQL_IDENTIFIER_PATTERN})(?:\\s+(?:AS\\s+)?(${SQL_IDENTIFIER_COMPONENT_PATTERN}))?(?:\\s+WHERE\\b|\\s+ON\\b|$)`,
+      "i",
+    ),
+  );
+
+  if (updateTarget) {
+    addTable(updateTarget[1], updateTarget[2]);
+  }
+
+  if (mergeTarget) {
+    addTable(mergeTarget[1], mergeTarget[2]);
+  }
+
+  if (deleteUsingSource && /\bDELETE\s+FROM\b/i.test(normalized)) {
+    addTable(deleteUsingSource[1], deleteUsingSource[2]);
+  }
 
   for (const match of normalized.matchAll(tableRefPattern())) {
     const tableName = cleanIdentifier(match[2] ?? "");
@@ -2147,6 +2183,36 @@ const extractInsertTarget = (sql: string) => {
   return match ? simpleTableName(match[1]) : undefined;
 };
 
+const detectWriteIntent = (sql: string): WriteBusinessIntent | undefined => {
+  const normalized = maskSqlLiterals(compactSql(sql));
+
+  if (/\bMERGE\s+INTO\b/i.test(normalized)) {
+    return "data_merge";
+  }
+
+  if (/\bUPDATE\b[\s\S]*\bSET\b/i.test(normalized)) {
+    return "data_update";
+  }
+
+  if (/\bDELETE\s+(?:FROM\s+)?/i.test(normalized)) {
+    return "data_delete";
+  }
+
+  return undefined;
+};
+
+const extractWriteTarget = (sql: string, intent: WriteBusinessIntent) => {
+  const normalized = compactSql(sql);
+  const patterns: Record<WriteBusinessIntent, RegExp> = {
+    data_delete: new RegExp(`\\bDELETE\\s+FROM\\s+(${SQL_IDENTIFIER_PATTERN})`, "i"),
+    data_merge: new RegExp(`\\bMERGE\\s+INTO\\s+(${SQL_IDENTIFIER_PATTERN})`, "i"),
+    data_update: new RegExp(`\\bUPDATE\\s+(${SQL_IDENTIFIER_PATTERN})`, "i"),
+  };
+  const match = patterns[intent]?.exec(normalized);
+
+  return match ? simpleTableName(match[1]) : undefined;
+};
+
 const isAnalyticsIntent = (businessIntent: BusinessIntent) =>
   [
     "analytics_report",
@@ -2221,6 +2287,21 @@ const buildBusinessIntent = (
 ): BusinessIntent => {
   const reasons: string[] = [];
   const categories = new Set(tables.map((table) => table.category));
+  const writeIntent = detectWriteIntent(sql);
+
+  if (writeIntent) {
+    const intentReasons: Record<"data_delete" | "data_merge" | "data_update", string> = {
+      data_delete: "DELETE 문으로 대상 테이블의 행을 삭제합니다.",
+      data_merge: "MERGE 문으로 일치 여부에 따라 대상 테이블을 갱신하거나 추가합니다.",
+      data_update: "UPDATE 문으로 대상 테이블의 값을 변경합니다.",
+    };
+
+    return {
+      confidence: 0.92,
+      reasons: [intentReasons[writeIntent]],
+      type: writeIntent,
+    };
+  }
 
   if (groupBy.length > 0) {
     reasons.push("GROUP BY가 있어 상세 목록보다 집계/분석 성격이 강합니다.");
@@ -2348,6 +2429,27 @@ const buildSummary = (
   caseExpressions: CaseExpressionAnalysis[],
   sql: string,
 ) => {
+  if (businessIntent.type === "data_update") {
+    const target = extractWriteTarget(sql, businessIntent.type);
+    return target
+      ? `${target} 테이블의 값을 변경하는 UPDATE SQL`
+      : "대상 테이블의 값을 변경하는 UPDATE SQL";
+  }
+
+  if (businessIntent.type === "data_delete") {
+    const target = extractWriteTarget(sql, businessIntent.type);
+    return target
+      ? `${target} 테이블의 행을 삭제하는 DELETE SQL`
+      : "대상 테이블의 행을 삭제하는 DELETE SQL";
+  }
+
+  if (businessIntent.type === "data_merge") {
+    const target = extractWriteTarget(sql, businessIntent.type);
+    return target
+      ? `${target} 테이블에 조건에 따라 데이터를 갱신하거나 추가하는 MERGE SQL`
+      : "대상 테이블에 조건에 따라 데이터를 갱신하거나 추가하는 MERGE SQL";
+  }
+
   if (tables.length === 0) {
     if (businessIntent.type === "batch_etl" || businessIntent.type === "data_insert") {
       const target = extractInsertTarget(sql);
@@ -2490,6 +2592,18 @@ const buildBusinessGuesses = (
     return ["배치 데이터 적재", "리포트 테이블 갱신", "ETL/데이터 마트 생성"];
   }
 
+  if (businessIntent.type === "data_update") {
+    return ["업무 데이터 갱신", "상태 또는 속성 변경", "운영 데이터 정비"];
+  }
+
+  if (businessIntent.type === "data_delete") {
+    return ["업무 데이터 삭제", "보존 대상 정리", "운영 데이터 정비"];
+  }
+
+  if (businessIntent.type === "data_merge") {
+    return ["데이터 동기화", "조건부 갱신 또는 추가", "배치 데이터 반영"];
+  }
+
   if (businessIntent.type === "sales_summary") {
     return ["상품별 매출 집계", "판매 실적 리포트", "정산/거래 관리 보조"];
   }
@@ -2562,6 +2676,23 @@ const buildDeveloperExplanation = (
     const targetText = target ? `${target} 테이블에 ` : "대상 테이블에 ";
 
     return `이 SQL은 단순 조회가 아니라 INSERT INTO SELECT 형태로 조회 결과를 ${targetText}적재하는 배치성 SQL입니다. SELECT 절과 WHERE 조건은 적재 대상 데이터를 선별하는 기준입니다.`;
+  }
+
+  if (businessIntent?.type === "data_update") {
+    const target = extractWriteTarget(sql, businessIntent.type) ?? "대상";
+    const scope = whereConditions.length > 0 ? "WHERE 조건으로 변경 행을 제한합니다." : "WHERE 조건이 없어 전체 행이 변경될 수 있습니다.";
+    return `이 SQL은 ${target} 테이블의 값을 변경하는 UPDATE SQL입니다. ${scope}`;
+  }
+
+  if (businessIntent?.type === "data_delete") {
+    const target = extractWriteTarget(sql, businessIntent.type) ?? "대상";
+    const scope = whereConditions.length > 0 ? "WHERE 조건으로 삭제 행을 제한합니다." : "WHERE 조건이 없어 전체 행이 삭제될 수 있습니다.";
+    return `이 SQL은 ${target} 테이블의 행을 삭제하는 DELETE SQL입니다. ${scope}`;
+  }
+
+  if (businessIntent?.type === "data_merge") {
+    const target = extractWriteTarget(sql, businessIntent.type) ?? "대상";
+    return `이 SQL은 소스와 대상의 일치 여부에 따라 ${target} 테이블의 행을 갱신하거나 추가하는 MERGE SQL입니다.`;
   }
 
   if (tables.length === 0) {
@@ -2649,6 +2780,18 @@ const buildFinalResultDescription = (
 
   if (businessIntent.type === "batch_etl" || businessIntent.type === "data_insert") {
     return "최종 결과는 SELECT로 선별된 데이터를 INSERT 대상 테이블에 적재하는 입력 데이터로 사용됩니다.";
+  }
+
+  if (businessIntent.type === "data_update") {
+    return "최종 결과는 조회 행이 아니라 UPDATE 조건에 해당하는 대상 행의 값 변경입니다.";
+  }
+
+  if (businessIntent.type === "data_delete") {
+    return "최종 결과는 조회 행이 아니라 DELETE 조건에 해당하는 대상 행의 삭제입니다.";
+  }
+
+  if (businessIntent.type === "data_merge") {
+    return "최종 결과는 MERGE 일치 조건에 따른 대상 행의 갱신 또는 추가입니다.";
   }
 
   if (businessIntent.type === "combined_result" || businessIntent.type === "set_operation") {

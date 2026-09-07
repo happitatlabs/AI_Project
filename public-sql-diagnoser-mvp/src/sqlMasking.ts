@@ -66,11 +66,16 @@ const maskStringLiterals = (sql: string) =>
     return `'${escapeSqlLiteral(replacement)}'`;
   });
 
+const globalPattern = (pattern: RegExp) =>
+  new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`);
+
 const maskBareSensitiveValues = (sql: string) =>
   sql
-    .replace(UUID_PATTERN, "[REDACTED_UUID]")
-    .replace(LONG_TOKEN_PATTERN, "[REDACTED_TOKEN]")
-    .replace(LONG_NUMBER_PATTERN, "[REDACTED_NUMBER]");
+    .replace(globalPattern(EMAIL_PATTERN), "[REDACTED_EMAIL]")
+    .replace(globalPattern(PHONE_PATTERN), "[REDACTED_PHONE]")
+    .replace(globalPattern(UUID_PATTERN), "[REDACTED_UUID]")
+    .replace(globalPattern(LONG_TOKEN_PATTERN), "[REDACTED_TOKEN]")
+    .replace(globalPattern(LONG_NUMBER_PATTERN), "[REDACTED_NUMBER]");
 
 export const maskSensitiveSql = (sql: string) =>
   maskBareSensitiveValues(maskStringLiterals(sql));
