@@ -281,7 +281,7 @@ AI 설명 보강은 사용자가 `AI로 설명 보강하기` 버튼을 클릭할
 
 지원 provider:
 
-- `ollama`: 로컬 Ollama 서버를 호출합니다.
+- `ollama`: 로컬 Ollama 서버에서 GGUF 모델을 호출합니다.
 - `openai`: OpenAI Responses API를 호출합니다.
 - `azure_openai`: Azure OpenAI Responses API를 호출합니다.
 
@@ -349,11 +349,13 @@ Ollama를 쓰는 경우:
 
 ```bash
 AI_PROVIDER=ollama
-AI_MODEL=qwen2.5:7b
 OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=your_installed_model_name
 ```
 
-`ollama list`로 설치된 모델명을 확인합니다. `OLLAMA_BASE_URL`을 비워 두면 기본값으로 `http://localhost:11434`를 사용합니다. 모델만 별도로 바꾸고 싶으면 `AI_MODEL` 또는 `OLLAMA_MODEL`에 설치된 Ollama 모델명을 넣으면 됩니다. 두 변수를 모두 설정한 경우 `OLLAMA_MODEL`이 우선합니다.
+이 프로젝트의 로컬 AI 운영 기준은 **Ollama가 로드하는 GGUF 모델**입니다. 정확한 Qwen 버전과 파라미터 크기는 설치 환경마다 달라질 수 있으므로 저장소에 특정 모델명을 고정하지 않습니다. `ollama list`에 표시되는 실제 모델명을 `AI_MODEL` 또는 `OLLAMA_MODEL`에 넣으며, 두 변수를 모두 설정하면 `OLLAMA_MODEL`이 우선합니다. `OLLAMA_BASE_URL`을 비워 두면 기본값으로 `http://localhost:11434`를 사용합니다.
+
+Ollama API에서 선택한 모델의 형식을 확인할 때는 `/api/show` 응답의 `details.format`이 `gguf`인지 확인합니다. 모델명은 이 형식과 별개의 실행 식별자이므로, 확인되지 않은 모델명을 기본값으로 가정하지 않습니다.
 
 OpenAI를 쓰는 경우:
 
