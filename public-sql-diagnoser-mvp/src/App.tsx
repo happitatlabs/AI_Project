@@ -125,12 +125,16 @@ function DiagnosticNarrativeSections({
   const [evidence, setEvidence] = useState<{ label: string; sql: string; match?: string }>();
   const evidenceRef = useRef<HTMLElement>(null);
   const showEvidence = (label: string, target?: DiagnosticNarrative["nextQuestions"][number]["target"]) => {
-    const statements = analyzeMultipleSql(reviewKey).statements;
-    const matching = target?.type === "sql" && target.id
-      ? statements.filter(statement => statement.id === target.id)
-      : target?.name && target.type !== "join"
-        ? statements.filter(statement => statement.sql.toLowerCase().includes(target.name!.toLowerCase()))
-        : statements;
+    const result = analyzeMultipleSql(reviewKey);
+    const statements = result.statements;
+    const name = target?.name?.toLowerCase();
+    const statementIds = target?.type === "sql" && target.id ? [target.id]
+      : target?.type === "table" && name
+        ? result.tableUsage.filter(table => table.tableName.toLowerCase() === name || table.rawNames.some(raw => raw.toLowerCase() === name)).flatMap(table => table.statementIds)
+        : target?.type === "condition" && name
+          ? result.conditionUsage.filter(condition => condition.normalizedCondition.toLowerCase() === name || condition.condition.toLowerCase() === name).flatMap(condition => condition.statementIds)
+          : undefined;
+    const matching = statementIds ? statements.filter(statement => statementIds.includes(statement.id)) : statements;
     const source = (matching.length ? matching : statements).map(statement => `-- ${statement.id}\n${statement.sql}`).join("\n\n") || reviewKey;
     setEvidence({ label, sql: source, match: target?.name });
   };
@@ -2676,7 +2680,7 @@ function App() {
               >
               <DiagnosticNarrativeSections
                 narrative={multiNarrative}
-                reviewKey={multiAnalysis.statements.map((statement) => statement.sql).join("\n")}
+                reviewKey={analyzedMultiSql}
               />
 
               <ResultSection
@@ -3396,8 +3400,8 @@ function App() {
                     id="multi-ai-document-type"
                     value={multiAiDocumentType}
                     onChange={(event) => {
-                  cancelAiRequests();
-                  setMultiAiDocumentType(event.target.value as AiSqlDocumentType);
+                      cancelAiRequests();
+                      setMultiAiDocumentType(event.target.value as AiSqlDocumentType);
                       setMultiAiDocumentDraftState({ status: "idle" });
                       setMultiDocumentDraftCopyStatus("idle");
                     }}
