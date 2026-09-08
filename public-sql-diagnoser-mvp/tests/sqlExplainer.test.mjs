@@ -14,6 +14,22 @@ const compiled = ts.transpileModule(source, {
 });
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(compiled.outputText).toString("base64")}`;
 const { analyzeSql, explainSql } = await import(moduleUrl);
+const { inspectCommandScope } = await import(moduleUrl);
+for (const sql of [
+  "UPDATE users SET status = 'WHERE';",
+  "UPDATE users SET status = (SELECT status FROM settings WHERE id = 1);",
+  "WITH selected AS (SELECT id FROM users WHERE active = 1) DELETE FROM users;",
+  'UPDATE users SET "WHERE" = 1;',
+  "UPDATE users SET status = $$WHERE$$;",
+  "UPDATE users SET status = 1 /* WHERE id = 1 */;",
+]) {
+  assert.equal(inspectCommandScope(sql).hasWhere, false, sql);
+}
+assert.equal(inspectCommandScope("SELECT 'UPDATE' FROM logs;").command, "SELECT");
+assert.equal(inspectCommandScope("/* DELETE */ SELECT id FROM logs;").command, "SELECT");
+assert.equal(inspectCommandScope("WITH a AS (SELECT id FROM users) UPDATE users SET active = 0 WHERE id IN (SELECT id FROM a);").hasWhere, true);
+assert.equal(inspectCommandScope("UPDATE users SET x = 'unfinished").supported, false);
+assert.equal(inspectCommandScope("SELECT 1; DELETE FROM users;").supported, false);
 
 const maskingSource = fs.readFileSync(path.resolve("src/sqlMasking.ts"), "utf8");
 const compiledMasking = ts.transpileModule(maskingSource, {
@@ -86,7 +102,7 @@ const {
 const {
   buildAiMultiSqlDocumentDraftPayload,
 } = await import(pathToFileURL(path.join(tempModuleRoot, "src/aiMultiDocumentDraft.js")).href);
-const { preserveAnalysisWithAiError } = await import(
+const { AiRequestCoordinator, preserveAnalysisWithAiError } = await import(
   pathToFileURL(path.join(tempModuleRoot, "src/aiExplanationState.js")).href
 );
 const { handleAiExplainRequest } = await import(
@@ -1819,4 +1835,30 @@ const localOllamaWorkerRuntime = await cloudflareWorker.fetch(
 );
 assert.equal((await localOllamaWorkerRuntime.json()).aiEnabled, false);
 
+for (const sql of [
+  "UPDATE users SET status = 'WHERE';",
+  "UPDATE users SET status = (SELECT status FROM settings WHERE id = 1);",
+  "WITH selected AS (SELECT id FROM users) DELETE FROM users;",
+]) {
+  const risks = analyzeSqlRisks(analyzeMultipleSql(sql));
+  assert.ok(risks.findings.some(finding => finding.category === "unsafe_update_delete"), sql);
+}
+for (const sql of ["SELECT 'UPDATE' FROM logs;", "SELECT id FROM logs /* DELETE */;"]) {
+  const narrative = buildSingleSqlNarrative(sql, explainSql(sql));
+  assert.ok(!narrative.keyFindings.some(finding => finding.id === "single-structure-write"));
+}
+const coordinator = new AiRequestCoordinator();
+const oldRequest = coordinator.begin("single");
+const newRequest = coordinator.begin("single");
+assert.equal(oldRequest.current(), false);
+assert.equal(oldRequest.signal.aborted, true);
+oldRequest.finish();
+assert.equal(newRequest.current(), true, "old response cannot remove newer request");
+coordinator.cancel();
+assert.equal(newRequest.current(), false, "input change/logout invalidates pending responses");
+const timedRequest = coordinator.begin("document", 5);
+await new Promise(resolve => setTimeout(resolve, 15));
+assert.equal(timedRequest.signal.reason.name, "TimeoutError");
+assert.equal(timedRequest.current(), true, "timeout must remain available for error feedback");
+timedRequest.finish();
 console.log("sqlExplainer tests passed");

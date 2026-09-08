@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
   type ReactNode,
@@ -20,6 +21,7 @@ import {
 } from "./aiMultiDocumentDraft";
 import type { AiSqlExplainResponse } from "./aiExplanation";
 import {
+  AiRequestCoordinator,
   errorAiExplanationState,
   idleAiExplanationState,
   loadingAiExplanationState,
@@ -120,9 +122,28 @@ function DiagnosticNarrativeSections({
   reviewKey: string;
 }) {
   const [checkedQuestionIds, setCheckedQuestionIds] = useState<string[]>([]);
+  const [evidence, setEvidence] = useState<{ label: string; sql: string; match?: string }>();
+  const evidenceRef = useRef<HTMLElement>(null);
+  const showEvidence = (label: string, target?: DiagnosticNarrative["nextQuestions"][number]["target"]) => {
+    const statements = analyzeMultipleSql(reviewKey).statements;
+    const matching = target?.type === "sql" && target.id
+      ? statements.filter(statement => statement.id === target.id)
+      : target?.name && target.type !== "join"
+        ? statements.filter(statement => statement.sql.toLowerCase().includes(target.name!.toLowerCase()))
+        : statements;
+    const source = (matching.length ? matching : statements).map(statement => `-- ${statement.id}\n${statement.sql}`).join("\n\n") || reviewKey;
+    setEvidence({ label, sql: source, match: target?.name });
+  };
+  useEffect(() => {
+    if (evidence) {
+      evidenceRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      evidenceRef.current?.focus({ preventScroll: true });
+    }
+  }, [evidence]);
 
   useEffect(() => {
     setCheckedQuestionIds([]);
+    setEvidence(undefined);
   }, [reviewKey]);
 
   const toggleQuestion = (questionId: string) => {
@@ -176,6 +197,7 @@ function DiagnosticNarrativeSections({
               <li className={target.severity} key={target.id}>
                 <strong>{target.label}</strong>
                 <span>{target.reasons.join(" / ")}</span>
+                <button type="button" className="text-button" onClick={() => showEvidence(target.label, target.target)}>근거 보기</button>
               </li>
             ))}
           </ol>
@@ -189,7 +211,8 @@ function DiagnosticNarrativeSections({
         </div>
         <div className="diagnostic-next-questions">
           {narrative.nextQuestions.map((question) => (
-            <label className={checkedQuestionIds.includes(question.id) ? "checked" : ""} key={question.id}>
+            <div key={question.id}>
+            <label className={checkedQuestionIds.includes(question.id) ? "checked" : ""}>
               <input
                 type="checkbox"
                 checked={checkedQuestionIds.includes(question.id)}
@@ -200,9 +223,21 @@ function DiagnosticNarrativeSections({
                 <small>{question.reason}</small>
               </span>
             </label>
+            <button type="button" className="text-button" onClick={() => showEvidence(question.question, question.target)}>근거 보기</button>
+            </div>
           ))}
         </div>
       </section>
+      {evidence ? (
+        <section className="diagnostic-source-evidence" ref={evidenceRef} tabIndex={-1} aria-label="선택한 진단의 SQL 근거">
+          <h3>{evidence.label}</h3>
+          <pre>{evidence.match && evidence.sql.toLowerCase().indexOf(evidence.match.toLowerCase()) >= 0 ? (() => {
+            const start = evidence.sql.toLowerCase().indexOf(evidence.match!.toLowerCase());
+            return <>{evidence.sql.slice(0, start)}<mark>{evidence.sql.slice(start, start + evidence.match!.length)}</mark>{evidence.sql.slice(start + evidence.match!.length)}</>;
+          })() : evidence.sql}</pre>
+          <button className="text-button" type="button" onClick={() => setEvidence(undefined)}>근거 닫기</button>
+        </section>
+      ) : null}
     </ResultSection>
   );
 }
@@ -796,6 +831,15 @@ const MODE_GUIDANCE: Record<AnalysisMode, { label: string; description: string }
 };
 
 function App() {
+  const aiRequests = useMemo(() => new AiRequestCoordinator(), []);
+  useEffect(() => () => aiRequests.cancel(), [aiRequests]);
+  const cancelAiRequests = () => {
+    aiRequests.cancel();
+    setAiState(idleAiExplanationState());
+    setMultiAiState(idleAiExplanationState());
+    setAiDocumentDraftState({ status: "idle" });
+    setMultiAiDocumentDraftState({ status: "idle" });
+  };
   const [runtimeAiFeatureEnabled, setRuntimeAiFeatureEnabled] =
     useState(buildAiFeatureEnabled);
   const [demoAccessState, setDemoAccessState] = useState<DemoAccessState>(() => ({
@@ -1219,6 +1263,7 @@ function App() {
   }, [aiDocumentDraftState, analysis, analysisMode, markdownReportText]);
 
   const runAnalysis = () => {
+    cancelAiRequests();
     const trimmedSql = sql.trim();
 
     if (!trimmedSql) {
@@ -1235,6 +1280,7 @@ function App() {
   };
 
   const runMultiAnalysis = () => {
+    cancelAiRequests();
     const trimmedSql = multiSql.trim();
 
     if (!trimmedSql) {
@@ -1254,6 +1300,7 @@ function App() {
   };
 
   const updateSingleSql = (nextSql: string) => {
+    cancelAiRequests();
     setSql(nextSql);
     setSelectedPresetId("");
     setAiState(idleAiExplanationState());
@@ -1264,6 +1311,7 @@ function App() {
   };
 
   const updateMultiSql = (nextSql: string) => {
+    cancelAiRequests();
     setMultiSql(nextSql);
     setMultiAiState(idleAiExplanationState());
     setMultiAiDocumentDraftState({ status: "idle" });
@@ -1273,6 +1321,7 @@ function App() {
   };
 
   const loadMultiSample = () => {
+    cancelAiRequests();
     setMultiSql(DEFAULT_MULTI_SQL);
     setAnalyzedMultiSql(DEFAULT_MULTI_SQL);
     setMultiAnalysis(analyzeMultipleSql(DEFAULT_MULTI_SQL));
@@ -1287,12 +1336,14 @@ function App() {
   };
 
   const changeAnalysisMode = (mode: AnalysisMode) => {
+    cancelAiRequests();
     setAnalysisMode(mode);
     setCopyStatus("idle");
     setReportActionStatus("idle");
   };
 
   const loadPreset = (presetId: string) => {
+    cancelAiRequests();
     setSelectedPresetId(presetId);
 
     const preset = SQL_PRESETS.find((candidate) => candidate.id === presetId);
@@ -1328,8 +1379,10 @@ function App() {
     setCopyStatus("idle");
     setReportActionStatus("idle");
 
+    const request = aiRequests.begin("single");
     try {
       const response = await fetch("/api/ai-explain", {
+        signal: request.signal,
         body: JSON.stringify({
           analysis: latestAnalysis,
           sql: trimmedSql,
@@ -1340,6 +1393,8 @@ function App() {
         method: "POST",
       });
       const responseBody = await response.json();
+      if (!request.current()) return;
+      request.signal.throwIfAborted();
 
       if (!response.ok) {
         const errorMessage =
@@ -1352,13 +1407,15 @@ function App() {
       const data = responseBody as AiSqlExplainResponse;
       setAiState(successAiExplanationState(data.explanation));
     } catch (error) {
+      if (!request.current()) return;
       const errorMessage = error instanceof Error
         ? error.message
         : "AI 설명 보강 요청에 실패했습니다.";
       const failedState = preserveAnalysisWithAiError(latestAnalysis, errorMessage);
 
-      setAnalysis(failedState.analysis);
       setAiState(failedState.aiState);
+    } finally {
+      request.finish();
     }
   };
 
@@ -1389,8 +1446,10 @@ function App() {
     setCopyStatus("idle");
     setReportActionStatus("idle");
 
+    const request = aiRequests.begin("multi");
     try {
       const response = await fetch("/api/ai-explain", {
+        signal: request.signal,
         body: JSON.stringify({
           analysis: aiAnalysis,
           sql: trimmedSql,
@@ -1401,6 +1460,8 @@ function App() {
         method: "POST",
       });
       const responseBody = await response.json();
+      if (!request.current()) return;
+      request.signal.throwIfAborted();
 
       if (!response.ok) {
         const errorMessage =
@@ -1413,11 +1474,14 @@ function App() {
       const data = responseBody as AiSqlExplainResponse;
       setMultiAiState(successAiExplanationState(data.explanation));
     } catch (error) {
+      if (!request.current()) return;
       const errorMessage = error instanceof Error
         ? error.message
         : "다건 AI 설명 보강 요청에 실패했습니다.";
 
       setMultiAiState(errorAiExplanationState(errorMessage));
+    } finally {
+      request.finish();
     }
   };
 
@@ -1445,8 +1509,10 @@ function App() {
     setCopyStatus("idle");
     setReportActionStatus("idle");
 
+    const request = aiRequests.begin("document");
     try {
       const response = await fetch("/api/ai-document-draft", {
+        signal: request.signal,
         body: JSON.stringify({
           analysis: latestAnalysis,
           documentType: aiDocumentType,
@@ -1458,6 +1524,8 @@ function App() {
         method: "POST",
       });
       const responseBody = await response.json();
+      if (!request.current()) return;
+      request.signal.throwIfAborted();
 
       if (!response.ok) {
         const errorMessage =
@@ -1473,6 +1541,7 @@ function App() {
         status: "success",
       });
     } catch (error) {
+      if (!request.current()) return;
       const errorMessage = error instanceof Error
         ? error.message
         : "AI 문서 초안 생성 요청에 실패했습니다.";
@@ -1481,6 +1550,8 @@ function App() {
         errorMessage,
         status: "error",
       });
+    } finally {
+      request.finish();
     }
   };
 
@@ -1509,8 +1580,10 @@ function App() {
     setCopyStatus("idle");
     setReportActionStatus("idle");
 
+    const request = aiRequests.begin("multi-document");
     try {
       const response = await fetch("/api/ai-multi-document-draft", {
+        signal: request.signal,
         body: JSON.stringify({
           documentType: multiAiDocumentType,
           sql: trimmedSql,
@@ -1521,6 +1594,8 @@ function App() {
         method: "POST",
       });
       const responseBody = await response.json();
+      if (!request.current()) return;
+      request.signal.throwIfAborted();
 
       if (!response.ok) {
         const errorMessage =
@@ -1536,6 +1611,7 @@ function App() {
         status: "success",
       });
     } catch (error) {
+      if (!request.current()) return;
       const errorMessage = error instanceof Error
         ? error.message
         : "AI 다건 문서 초안 생성 요청에 실패했습니다.";
@@ -1544,6 +1620,8 @@ function App() {
         errorMessage,
         status: "error",
       });
+    } finally {
+      request.finish();
     }
   };
 
@@ -1751,6 +1829,7 @@ function App() {
   };
 
   const logoutDemo = async () => {
+    cancelAiRequests();
     setDemoLogoutState("loading");
 
     try {
@@ -1800,6 +1879,7 @@ function App() {
         <header className="app-header">
           <div className="app-header-copy">
             <p className="eyebrow">Legacy SQL Change Review</p>
+            <small>버전 {import.meta.env.VITE_BUILD_REVISION || "local"}</small>
             <h1>SQL Diagnoser</h1>
             <p className="app-tagline">
               레거시 SQL을 이해하고, 변경 전에 위험과 확인 근거를 남깁니다.
@@ -1829,6 +1909,12 @@ function App() {
             </ul>
           </div>
         </header>
+        {[aiState.status, multiAiState.status, aiDocumentDraftState.status, multiAiDocumentDraftState.status].includes("loading") ? (
+          <div className="ai-request-control" role="status">
+            <span>AI 응답을 기다리고 있습니다.</span>
+            <button type="button" className="text-button" onClick={cancelAiRequests}>요청 취소</button>
+          </div>
+        ) : null}
 
         <details className="scope-notice">
           <summary>지원 범위 / 한계</summary>
@@ -2310,6 +2396,7 @@ function App() {
                 id="ai-document-type"
                 value={aiDocumentType}
                 onChange={(event) => {
+                  cancelAiRequests();
                   setAiDocumentType(event.target.value as AiSqlDocumentType);
                   setAiDocumentDraftState({ status: "idle" });
                   setDocumentDraftCopyStatus("idle");
@@ -3309,7 +3396,8 @@ function App() {
                     id="multi-ai-document-type"
                     value={multiAiDocumentType}
                     onChange={(event) => {
-                      setMultiAiDocumentType(event.target.value as AiSqlDocumentType);
+                  cancelAiRequests();
+                  setMultiAiDocumentType(event.target.value as AiSqlDocumentType);
                       setMultiAiDocumentDraftState({ status: "idle" });
                       setMultiDocumentDraftCopyStatus("idle");
                     }}
