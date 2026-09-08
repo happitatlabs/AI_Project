@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import { execFileSync } from "node:child_process";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { handleAiDocumentDraftRequest } from "./api/ai-document-draft";
 import { handleAiDataInsightsRequest } from "./api/ai-data-insights";
@@ -156,6 +157,12 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
 
   return {
+    define: {
+      "import.meta.env.VITE_BUILD_REVISION": JSON.stringify(process.env.WORKERS_CI_COMMIT_SHA?.slice(0, 8) || (() => {
+        try { return execFileSync("git", ["rev-parse", "--short", "HEAD"], { encoding: "utf8" }).trim(); }
+        catch { return "local"; }
+      })()),
+    },
     plugins: [react(), aiExplainLocalApiPlugin(env)],
   };
 });

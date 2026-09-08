@@ -421,6 +421,7 @@ export const callStructuredAiProvider = async (
   if (config.provider === "ollama") {
     const response = await fetcher(`${config.baseUrl}/api/chat`, {
       body: JSON.stringify(buildOllamaChatBody(payload, config.model, options)),
+      signal: AbortSignal.timeout(110_000),
       headers: jsonHeaders,
       method: "POST",
     });
@@ -431,6 +432,7 @@ export const callStructuredAiProvider = async (
   if (config.provider === "azure_openai") {
     const response = await fetcher(buildAzureResponsesUrl(config.endpoint), {
       body: JSON.stringify(buildResponsesApiBody(payload, config.model, options)),
+      signal: AbortSignal.timeout(110_000),
       headers: {
         ...jsonHeaders,
         "api-key": config.apiKey,
@@ -443,6 +445,7 @@ export const callStructuredAiProvider = async (
 
   const response = await fetcher("https://api.openai.com/v1/responses", {
     body: JSON.stringify(buildResponsesApiBody(payload, config.model, options)),
+    signal: AbortSignal.timeout(110_000),
     headers: {
       ...jsonHeaders,
       Authorization: `Bearer ${config.apiKey}`,

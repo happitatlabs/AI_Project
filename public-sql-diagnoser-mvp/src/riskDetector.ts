@@ -1,4 +1,5 @@
 import type { MultiSqlAnalysisResult, MultiSqlStatement } from "./multiSqlAnalysis.js";
+import { inspectCommandScope } from "./sqlExplainer.js";
 
 export type SqlRiskSeverity = "critical" | "high" | "medium" | "low";
 
@@ -141,7 +142,6 @@ const normalizeSqlPattern = (sql: string) =>
     .replace(/\s*;\s*$/g, "")
     .toUpperCase();
 
-const hasWhere = (sql: string) => /\bWHERE\b/i.test(sql);
 
 const extractSelectList = (sql: string) => {
   const normalized = compactSql(sql);
@@ -266,20 +266,23 @@ const detectSelectStar = (sql: string, findings: RiskDraft[], joinCount: number)
 const detectUnsafeUpdateDelete = (sql: string, findings: RiskDraft[]) => {
   const normalized = compactSql(sql);
 
-  if (!/^\s*(UPDATE|DELETE)\b/i.test(normalized) || hasWhere(normalized)) {
+  const scope = inspectCommandScope(sql);
+  if (!scope.command || !["UPDATE", "DELETE"].includes(scope.command) || (scope.supported && scope.hasWhere)) {
     return;
   }
 
-  const command = normalized.match(/^\s*(UPDATE|DELETE)\b/i)?.[1]?.toUpperCase() ?? "UPDATE/DELETE";
+  const command = scope.command;
 
   addFinding(findings, {
     category: "unsafe_update_delete",
     confidence: "high",
     evidence: normalized.slice(0, 160),
-    message: `${command} 문에 WHERE 조건이 없어 전체 데이터 변경 또는 삭제 위험이 있습니다.`,
+    message: scope.supported
+      ? `${command} 문에 WHERE 조건이 없어 전체 데이터 변경 또는 삭제 위험이 있습니다.`
+      : `${command} 문의 대상 범위를 확정하지 못했습니다. 실행 전 원문과 변경 조건을 확인해야 합니다.`,
     recommendation: "WHERE 조건을 추가하고 실행 전 영향 건수, 트랜잭션, 백업 여부를 확인하세요.",
     severity: "critical",
-    title: "WHERE 없는 UPDATE/DELETE",
+    title: scope.supported ? "WHERE 없는 UPDATE/DELETE" : "UPDATE/DELETE 대상 범위 확인 필요",
   });
 };
 
@@ -465,7 +468,7 @@ const analyzeStatementRisks = (statement: MultiSqlStatement): SqlRiskFinding[] =
   const drafts: RiskDraft[] = [];
 
   detectSelectStar(sql, drafts, joinCount);
-  detectUnsafeUpdateDelete(sql, drafts);
+  detectUnsafeUpdateDelete(statement.sql, drafts);
   detectImplicitJoin(sql, drafts);
   detectTooManyJoins(joinCount, drafts);
   detectDateFunctionOnColumn(sql, drafts);

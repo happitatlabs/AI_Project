@@ -1,6 +1,7 @@
 import type { MultiSqlAnalysisResult, MultiSqlStatement } from "./multiSqlAnalysis.js";
 import { analyzeSqlRisks, type SqlRiskAnalysisResult, type SqlRiskFinding } from "./riskDetector.js";
 import type { SqlAnalysisResult } from "./sqlExplainer.js";
+import { inspectCommandScope } from "./sqlExplainer.js";
 import type { TableAssetMap, TableAssetProfile } from "./tableAssetMap.js";
 
 export type DiagnosticTarget = {
@@ -72,8 +73,8 @@ const riskSeverity = (severity: SqlRiskFinding["severity"]): DiagnosticFindingSe
 };
 
 const writeOperation = (sql: string) => {
-  const match = sql.match(/\b(INSERT|UPDATE|DELETE|MERGE)\b/i);
-  return match?.[1]?.toUpperCase();
+  const { command } = inspectCommandScope(sql);
+  return command && command !== "SELECT" ? command : undefined;
 };
 
 const hasDateCondition = (analysis: SqlAnalysisResult) =>
@@ -399,7 +400,9 @@ export const buildSingleSqlNarrative = (
           id: "single-risk-none",
           label: "우선 확인 리스크",
           severity: "info",
-          statement: "현재 파서와 룰 기준으로 우선 확인이 필요한 명확한 구조 위험은 발견되지 않았습니다.",
+          statement: !inspectCommandScope(sql).supported || analysis.warnings.length > 0
+            ? "분석 범위에 제한이 있습니다. 감지된 위험이 없더라도 SQL 원문과 지원 문법을 추가 확인해야 합니다."
+            : "현재 파서와 룰 기준으로 우선 확인이 필요한 명확한 구조 위험은 발견되지 않았습니다.",
         },
   ];
 

@@ -176,6 +176,66 @@ type DomainRule = {
   businessGuesses: string[];
 };
 
+export const inspectCommandScope = (sql: string) => {
+  const words: Array<{ text: string; depth: number }> = [];
+  let depth = 0;
+  let valid = true;
+  let statementEnded = false;
+  for (let i = 0; i < sql.length;) {
+    if (/\s/.test(sql[i])) { i++; continue; }
+    if (sql.startsWith("--", i)) {
+      const end = sql.indexOf("\n", i + 2);
+      i = end < 0 ? sql.length : end + 1;
+      continue;
+    }
+    if (sql.startsWith("/*", i)) {
+      let comments = 1;
+      i += 2;
+      while (i < sql.length && comments) {
+        if (sql.startsWith("/*", i)) { comments++; i += 2; }
+        else if (sql.startsWith("*/", i)) { comments--; i += 2; }
+        else i++;
+      }
+      if (comments) valid = false;
+      continue;
+    }
+    if (statementEnded && sql[i] !== ";") valid = false;
+    const dollar = sql.slice(i).match(/^\$(?:[A-Za-z_][\w]*)?\$/)?.[0];
+    if (dollar) {
+      const end = sql.indexOf(dollar, i + dollar.length);
+      if (end < 0) { valid = false; break; }
+      i = end + dollar.length;
+      continue;
+    }
+    if ("'\"`[".includes(sql[i])) {
+      const quote = sql[i] === "[" ? "]" : sql[i];
+      let closed = false;
+      i++;
+      while (i < sql.length) {
+        if (sql[i] === "\\") { i += 2; continue; }
+        if (sql[i] === quote) {
+          if (sql[i + 1] === quote) { i += 2; continue; }
+          i++; closed = true; break;
+        }
+        i++;
+      }
+      if (!closed) valid = false;
+      continue;
+    }
+    if (sql[i] === "(") { depth++; i++; continue; }
+    if (sql[i] === ")") { depth--; if (depth < 0) valid = false; i++; continue; }
+    if (sql[i] === ";" && depth === 0) { statementEnded = true; i++; continue; }
+    const word = sql.slice(i).match(/^[A-Za-z_][\w$#]*/)?.[0];
+    if (word) { words.push({ text: word.toUpperCase(), depth }); i += word.length; }
+    else i++;
+  }
+  const top = words.filter(word => word.depth === 0).map(word => word.text);
+  const commands = ["SELECT", "INSERT", "UPDATE", "DELETE", "MERGE"];
+  const commandIndex = top[0] === "WITH" ? top.findIndex(word => commands.includes(word)) : 0;
+  const command = commands.includes(top[commandIndex]) ? top[commandIndex] : undefined;
+  return { command, hasWhere: top.slice(commandIndex + 1).includes("WHERE"), supported: valid && depth === 0 && Boolean(command) };
+};
+
 export const DEFAULT_SQL = `SELECT A.EMP_NO
      , A.EMP_NM
      , B.DEPT_NM
@@ -2184,17 +2244,17 @@ const extractInsertTarget = (sql: string) => {
 };
 
 const detectWriteIntent = (sql: string): WriteBusinessIntent | undefined => {
-  const normalized = maskSqlLiterals(compactSql(sql));
+  const { command } = inspectCommandScope(sql);
 
-  if (/\bMERGE\s+INTO\b/i.test(normalized)) {
+  if (command === "MERGE") {
     return "data_merge";
   }
 
-  if (/\bUPDATE\b[\s\S]*\bSET\b/i.test(normalized)) {
+  if (command === "UPDATE") {
     return "data_update";
   }
 
-  if (/\bDELETE\s+(?:FROM\s+)?/i.test(normalized)) {
+  if (command === "DELETE") {
     return "data_delete";
   }
 

@@ -3203,3 +3203,29 @@ code {
     width: fit-content;
   }
 }
+.diagnostic-source-evidence {
+  margin-top: 16px;
+  padding: 16px 0;
+  border-top: 1px solid #cbd5e1;
+  min-width: 0;
+}
+
+.diagnostic-source-evidence pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.diagnostic-source-evidence:focus {
+  outline: 2px solid #18776b;
+  outline-offset: 4px;
+}
+
+.ai-request-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+}
