@@ -3,6 +3,8 @@ import { handleAiDocumentDraftRequest } from "../api/ai-document-draft.js";
 import { handleAiExplainRequest } from "../api/ai-explain.js";
 import { handleAiMultiDocumentDraftRequest } from "../api/ai-multi-document-draft.js";
 import { pickAiProviderEnv, resolveProviderConfig } from "../api/ai-provider.js";
+import { requestQuota, type QuotaNamespace } from "./demoQuota.js";
+export { DemoAiQuota } from "./demoQuota.js";
 
 type WorkerAssets = {
   fetch: (request: Request) => Promise<Response>;
@@ -13,7 +15,9 @@ type WorkerEnv = {
   DEMO_PASSWORD?: string;
   DEMO_SESSION_SECRET?: string;
   DEMO_USERNAME?: string;
-  [key: string]: WorkerAssets | string | undefined;
+  DEMO_TEST_PASSWORD?: string;
+  DEMO_AI_QUOTA?: QuotaNamespace;
+  [key: string]: WorkerAssets | QuotaNamespace | string | undefined;
 };
 
 type ApiRouteResult = {
@@ -30,6 +34,7 @@ type ApiHandler = (
 ) => Promise<ApiRouteResult>;
 
 type DemoAccessConfig = {
+  testPassword?: string;
   password: string;
   sessionSecret: string;
   username: string;
@@ -73,6 +78,7 @@ const getDemoAccessConfig = (env: WorkerEnv): DemoAccessConfig | undefined => {
   }
 
   return {
+    testPassword: env.DEMO_TEST_PASSWORD,
     password,
     // A separate secret supports independent session invalidation. The password
     // fallback keeps existing two-variable demo deployments working safely.
@@ -197,14 +203,14 @@ const getDemoSession = async (
       || !Number.isSafeInteger(parsed.expiresAt)
       || parsed.expiresAt <= Math.floor(Date.now() / 1000)
       || typeof parsed.username !== "string"
-      || !equalLengthStringsMatch(parsed.username, config.username)
+      || !(equalLengthStringsMatch(parsed.username, config.username) || (config.testPassword && parsed.username === "test"))
     ) {
       return undefined;
     }
 
     return {
       expiresAt: parsed.expiresAt,
-      username: config.username,
+      username: parsed.username,
     };
   } catch {
     return undefined;
@@ -281,20 +287,19 @@ const handleLoginRequest = async (request: Request, env: WorkerEnv) => {
     const username = typeof body.username === "string" ? body.username.trim() : "";
     const password = typeof body.password === "string" ? body.password : "";
 
-    if (
-      !equalLengthStringsMatch(username, config.username)
-      || !equalLengthStringsMatch(password, config.password)
-    ) {
+    const primaryValid = equalLengthStringsMatch(username, config.username) && equalLengthStringsMatch(password, config.password);
+    const testValid = username === "test" && Boolean(config.testPassword) && equalLengthStringsMatch(password, config.testPassword!);
+    if (!primaryValid && !testValid) {
       return jsonResponse({ error: "아이디 또는 비밀번호가 일치하지 않습니다." }, 401);
     }
 
-    const token = await createDemoSessionToken(config);
+    const token = await createDemoSessionToken({ ...config, username });
 
     return jsonResponse({
       aiEnabled: isWorkerAiConfigured(env),
       authenticated: true,
       loginRequired: true,
-      username: config.username,
+      username,
     }, 200, {
       "Set-Cookie": sessionCookie(token),
     });
@@ -321,6 +326,11 @@ const handleRuntimeConfigRequest = async (request: Request, env: WorkerEnv) => {
   const config = getDemoAccessConfig(env);
   const session = config ? await getDemoSession(request, config) : undefined;
   const aiConfigured = isWorkerAiConfigured(env);
+  let quota: unknown;
+  if (session?.username === "test") {
+    try { quota = (await requestQuota(env.DEMO_AI_QUOTA, session.username, false)).quota; }
+    catch { return jsonResponse({ error: "AI 사용량을 확인하지 못했습니다. 잠시 후 다시 시도하세요." }, 503); }
+  }
 
   return jsonResponse({
     aiConfigured,
@@ -328,6 +338,7 @@ const handleRuntimeConfigRequest = async (request: Request, env: WorkerEnv) => {
     authenticated: Boolean(session),
     loginRequired: Boolean(config),
     username: session?.username,
+    quota,
   });
 };
 
@@ -362,7 +373,8 @@ const handleApiRequest = async (request: Request, env: WorkerEnv, pathname: stri
     }, 503);
   }
 
-  if (!await getDemoSession(request, config)) {
+  const session = await getDemoSession(request, config);
+  if (!session) {
     return loginRequiredResponse();
   }
 
@@ -374,6 +386,14 @@ const handleApiRequest = async (request: Request, env: WorkerEnv, pathname: stri
 
   try {
     const body = await parseJsonRequest(request);
+    if (session.username === "test") {
+      try {
+        const usage = await requestQuota(env.DEMO_AI_QUOTA, session.username, true);
+        if (usage.status === 429) return jsonResponse({ error: "오늘 AI 사용 한도 10회를 모두 사용했습니다. 한국시간 자정 이후 다시 사용할 수 있습니다.", quota: usage.quota }, 429);
+      } catch {
+        return jsonResponse({ error: "AI 사용량을 확인하지 못했습니다. 잠시 후 다시 시도하세요." }, 503);
+      }
+    }
     const result = await handler(body, {
       env: pickAiProviderEnv(env as Record<string, string | undefined>),
       fetcher: fetch,

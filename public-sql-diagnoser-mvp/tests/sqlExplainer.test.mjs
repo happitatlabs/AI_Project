@@ -79,6 +79,7 @@ compileTsFile("api/ai-explain.ts", path.join(tempModuleRoot, "api/ai-explain.js"
 compileTsFile("api/ai-document-draft.ts", path.join(tempModuleRoot, "api/ai-document-draft.js"));
 compileTsFile("api/ai-multi-document-draft.ts", path.join(tempModuleRoot, "api/ai-multi-document-draft.js"));
 compileTsFile("api/ai-data-insights.ts", path.join(tempModuleRoot, "api/ai-data-insights.js"));
+compileTsFile("src/demoQuota.ts", path.join(tempModuleRoot, "src/demoQuota.js"));
 compileTsFile("src/cloudflareWorker.ts", path.join(tempModuleRoot, "src/cloudflareWorker.js"));
 
 const { buildAiSqlExplanationPayload } = await import(
@@ -1780,6 +1781,44 @@ assert.match(loginCookie, /HttpOnly/);
 assert.match(loginCookie, /Secure/);
 assert.match(loginCookie, /SameSite=Strict/);
 const sessionCookie = loginCookie.split(";")[0];
+
+const { DemoAiQuota, quotaDay } = await import(pathToFileURL(path.join(tempModuleRoot, "src/demoQuota.js")).href);
+assert.equal(quotaDay(Date.parse("2026-09-09T14:59:59Z")), "2026-09-09");
+assert.equal(quotaDay(Date.parse("2026-09-09T15:00:00Z")), "2026-09-10");
+let quotaRow;
+const quotaStorage = {
+  transactionSync: callback => callback(),
+  sql: { exec(query, ...params) {
+    if (query.startsWith("INSERT")) quotaRow = { day: params[0], used: params[1] };
+    return { toArray: () => query.startsWith("SELECT") && quotaRow ? [quotaRow] : [] };
+  } },
+};
+let quotaObject = new DemoAiQuota({ storage: quotaStorage });
+const quotaEnv = { ...protectedWorkerEnv, DEMO_TEST_PASSWORD: "test-fixture-password", DEMO_AI_QUOTA: {
+  idFromName: name => name,
+  get: id => { assert.equal(id, "test"); return { fetch: request => quotaObject.fetch(request) }; },
+} };
+const testLogin = await cloudflareWorker.fetch(new Request("https://demo.example/api/auth/login", {
+  method: "POST", body: JSON.stringify({ username: "test", password: quotaEnv.DEMO_TEST_PASSWORD }),
+}), quotaEnv);
+assert.equal(testLogin.status, 200);
+const testCookie = testLogin.headers.get("Set-Cookie").split(";")[0];
+const quotaRequest = (path, body = "{}") => new Request(`https://demo.example${path}`, { method: "POST", headers: { Cookie: testCookie }, body });
+assert.equal((await cloudflareWorker.fetch(quotaRequest("/api/ai-explain", "{"), quotaEnv)).status, 400);
+assert.equal(quotaRow, undefined);
+const trialRoutes = ["/api/ai-explain", "/api/ai-document-draft", "/api/ai-multi-document-draft", "/api/ai-data-insights"];
+const concurrentTrialResponses = await Promise.all(Array.from({ length: 12 }, (_, i) => cloudflareWorker.fetch(quotaRequest(trialRoutes[i % 4]), quotaEnv)));
+assert.equal(concurrentTrialResponses.filter(response => response.status === 429).length, 2);
+assert.equal(quotaRow.used, 10);
+quotaObject = new DemoAiQuota({ storage: quotaStorage });
+assert.equal((await cloudflareWorker.fetch(quotaRequest("/api/ai-explain"), quotaEnv)).status, 429);
+const trialRuntime = await cloudflareWorker.fetch(new Request("https://demo.example/api/runtime-config", { headers: { Cookie: testCookie } }), quotaEnv);
+assert.equal((await trialRuntime.json()).quota.remaining, 0);
+assert.equal((await cloudflareWorker.fetch(quotaRequest("/api/ai-explain"), { ...quotaEnv, DEMO_AI_QUOTA: undefined })).status, 503);
+assert.equal((await cloudflareWorker.fetch(quotaRequest("/api/ai-explain"), { ...quotaEnv, DEMO_TEST_PASSWORD: undefined })).status, 401);
+quotaRow = { day: "2026-01-01", used: 10 };
+assert.equal((await cloudflareWorker.fetch(quotaRequest("/api/ai-explain"), quotaEnv)).status, 400);
+assert.equal(quotaRow.used, 1);
 
 const protectedWorkerInvalidAiRequest = await cloudflareWorker.fetch(
   new Request("https://sql-diagnoser-demo.example/api/ai-explain", {

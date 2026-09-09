@@ -1,5 +1,17 @@
 # SQL Diagnoser
 
+## Limited demo account
+
+Set `DEMO_TEST_PASSWORD` as a Worker secret to enable the additional `test` account.
+Existing `DEMO_USERNAME`, `DEMO_PASSWORD`, and `DEMO_SESSION_SECRET` remain unchanged.
+The test account shares 10 accepted AI requests per Asia/Seoul calendar day across
+all sessions and all four AI endpoints. Failed and cancelled accepted requests also
+count; malformed JSON and unauthenticated requests do not. Rule-based analysis is
+not limited. The `DEMO_AI_QUOTA` SQLite Durable Object reserves each request
+atomically before AI processing and fails closed if storage is unavailable.
+No SQL, passwords, or provider keys are stored in the quota object.
+Removing `DEMO_TEST_PASSWORD` disables the additional account and its sessions.
+
 SQL Diagnoser는 레거시 SQL을 이해하고 변경 전에 위험과 확인 근거를 남기는 룰 기반 검토 도구입니다. 단건 SQL 진단, 변경 전후 비교, 다건 SQL 자산 지도, 실행 결과 데이터 검증을 서로 다른 작업으로 분리합니다.
 
 기본 분석은 AI 없이 동작합니다. AI 기능은 선택적으로 호출하는 설명 보강 레이어이며, 기존 룰 기반 분석 결과를 대체하지 않습니다.
