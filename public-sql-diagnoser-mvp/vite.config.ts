@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import { execFileSync } from "node:child_process";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { handleAiDocumentDraftRequest } from "./api/ai-document-draft";
+import { handleAiSqlRewriteRequest } from "./api/ai-sql-rewrite";
 import { handleAiDataInsightsRequest } from "./api/ai-data-insights";
 import { handleAiExplainRequest } from "./api/ai-explain";
 import { handleAiMultiDocumentDraftRequest } from "./api/ai-multi-document-draft";
@@ -86,6 +87,14 @@ const aiExplainLocalApiPlugin = (
       } catch {
         sendJson(res, 400, { error: "요청 JSON을 해석하지 못했습니다." });
       }
+    });
+
+    server.middlewares.use("/api/ai-sql-rewrite", async (req, res) => {
+      if (req.method !== "POST") { sendJson(res, 405, { error: "POST 요청만 지원합니다." }); return; }
+      try {
+        const result = await handleAiSqlRewriteRequest(await readJsonBody(req), { env: mergedAiEnv() });
+        sendJson(res, result.status, result.body);
+      } catch { sendJson(res, 400, { error: "요청 JSON을 해석하지 못했습니다." }); }
     });
 
     server.middlewares.use("/api/ai-data-insights", async (req, res) => {

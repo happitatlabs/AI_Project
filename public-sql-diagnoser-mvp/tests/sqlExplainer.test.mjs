@@ -80,6 +80,8 @@ compileTsFile("api/ai-document-draft.ts", path.join(tempModuleRoot, "api/ai-docu
 compileTsFile("api/ai-multi-document-draft.ts", path.join(tempModuleRoot, "api/ai-multi-document-draft.js"));
 compileTsFile("api/ai-data-insights.ts", path.join(tempModuleRoot, "api/ai-data-insights.js"));
 compileTsFile("src/demoQuota.ts", path.join(tempModuleRoot, "src/demoQuota.js"));
+compileTsFile("src/sqlRewriteRules.ts", path.join(tempModuleRoot, "src/sqlRewriteRules.js"));
+compileTsFile("api/ai-sql-rewrite.ts", path.join(tempModuleRoot, "api/ai-sql-rewrite.js"));
 compileTsFile("src/cloudflareWorker.ts", path.join(tempModuleRoot, "src/cloudflareWorker.js"));
 
 const { buildAiSqlExplanationPayload } = await import(
@@ -1806,10 +1808,11 @@ const testCookie = testLogin.headers.get("Set-Cookie").split(";")[0];
 const quotaRequest = (path, body = "{}") => new Request(`https://demo.example${path}`, { method: "POST", headers: { Cookie: testCookie }, body });
 assert.equal((await cloudflareWorker.fetch(quotaRequest("/api/ai-explain", "{"), quotaEnv)).status, 400);
 assert.equal(quotaRow, undefined);
-const trialRoutes = ["/api/ai-explain", "/api/ai-document-draft", "/api/ai-multi-document-draft", "/api/ai-data-insights"];
-const concurrentTrialResponses = await Promise.all(Array.from({ length: 12 }, (_, i) => cloudflareWorker.fetch(quotaRequest(trialRoutes[i % 4]), quotaEnv)));
+const trialRoutes = ["/api/ai-explain", "/api/ai-document-draft", "/api/ai-multi-document-draft", "/api/ai-data-insights", "/api/ai-sql-rewrite"];
+const concurrentTrialResponses = await Promise.all(Array.from({ length: 12 }, (_, i) => cloudflareWorker.fetch(quotaRequest(trialRoutes[i % trialRoutes.length]), quotaEnv)));
 assert.equal(concurrentTrialResponses.filter(response => response.status === 429).length, 2);
 assert.equal(quotaRow.used, 10);
+assert.equal((await cloudflareWorker.fetch(quotaRequest("/api/ai-sql-rewrite"), quotaEnv)).status, 429);
 quotaObject = new DemoAiQuota({ storage: quotaStorage });
 assert.equal((await cloudflareWorker.fetch(quotaRequest("/api/ai-explain"), quotaEnv)).status, 429);
 const trialRuntime = await cloudflareWorker.fetch(new Request("https://demo.example/api/runtime-config", { headers: { Cookie: testCookie } }), quotaEnv);
@@ -1819,6 +1822,37 @@ assert.equal((await cloudflareWorker.fetch(quotaRequest("/api/ai-explain"), { ..
 quotaRow = { day: "2026-01-01", used: 10 };
 assert.equal((await cloudflareWorker.fetch(quotaRequest("/api/ai-explain"), quotaEnv)).status, 400);
 assert.equal(quotaRow.used, 1);
+
+const { handleAiSqlRewriteRequest } = await import(pathToFileURL(path.join(tempModuleRoot, "api/ai-sql-rewrite.js")).href);
+let rewriteCallCount = 0;
+const rewriteOptions = {
+  env: protectedWorkerEnv,
+  fetcher: async (_url, init) => {
+    rewriteCallCount++;
+    const requestBody = JSON.parse(init.body);
+    assert.ok(!init.body.includes("fixture-private@example.com"));
+    const payload = JSON.parse(requestBody.input[1].content[0].text);
+    assert.deepEqual(payload.queryRules, { version: 1, rules: [] });
+    return Response.json({ output_text: JSON.stringify({ sql: payload.maskedSql, summary: "조건을 유지한 추천", warnings: [] }) });
+  },
+};
+for (const body of [null, {}, { sql: "" }]) assert.equal((await handleAiSqlRewriteRequest(body, rewriteOptions)).status, 400);
+assert.equal((await handleAiSqlRewriteRequest({ sql: "x".repeat(20001) }, rewriteOptions)).status, 413);
+assert.equal((await handleAiSqlRewriteRequest({ sql: "SELECT 1; DELETE FROM users;" }, rewriteOptions)).status, 422);
+assert.equal(rewriteCallCount, 0);
+const recommended = await handleAiSqlRewriteRequest({ sql: "SELECT id FROM users WHERE email = 'fixture-private@example.com';" }, rewriteOptions);
+assert.equal(recommended.status, 200);
+assert.ok(recommended.body.suggestion.sql.includes("[REDACTED_EMAIL]"));
+assert.equal(recommended.body.suggestion.rulesApplied, false);
+for (const unsafeSql of ["DELETE FROM users;", "UPDATE users SET active = 0;", "UPDATE users SET active = 0 WHERE id=1; DELETE FROM users;"]) {
+  const unsafe = await handleAiSqlRewriteRequest({ sql: "UPDATE users SET active = 0 WHERE id=1;" }, {
+    env: protectedWorkerEnv, fetcher: async () => Response.json({ output_text: JSON.stringify({ sql: unsafeSql, summary: "추천", warnings: [] }) }),
+  });
+  assert.equal(unsafe.status, 502);
+}
+assert.equal((await handleAiSqlRewriteRequest({ sql: "SELECT id FROM users;" }, {
+  env: protectedWorkerEnv, fetcher: async () => { throw new Error("private-provider-error"); },
+})).status, 502);
 
 const protectedWorkerInvalidAiRequest = await cloudflareWorker.fetch(
   new Request("https://sql-diagnoser-demo.example/api/ai-explain", {

@@ -1,4 +1,5 @@
 import { handleAiDataInsightsRequest } from "../api/ai-data-insights.js";
+import { handleAiSqlRewriteRequest } from "../api/ai-sql-rewrite.js";
 import { handleAiDocumentDraftRequest } from "../api/ai-document-draft.js";
 import { handleAiExplainRequest } from "../api/ai-explain.js";
 import { handleAiMultiDocumentDraftRequest } from "../api/ai-multi-document-draft.js";
@@ -50,6 +51,7 @@ const SESSION_COOKIE_NAME = "__Host-sql-diagnoser-demo";
 const SESSION_TTL_SECONDS = 60 * 60 * 8;
 
 const apiHandlers: Record<string, ApiHandler> = {
+  "/api/ai-sql-rewrite": handleAiSqlRewriteRequest as ApiHandler,
   "/api/ai-data-insights": handleAiDataInsightsRequest as ApiHandler,
   "/api/ai-document-draft": handleAiDocumentDraftRequest as ApiHandler,
   "/api/ai-explain": handleAiExplainRequest as ApiHandler,

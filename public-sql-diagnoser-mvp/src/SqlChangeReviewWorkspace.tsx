@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { AiRequestCoordinator } from "./aiExplanationState";
 import {
   buildSqlChangeReview,
   buildSqlChangeReviewMarkdown,
@@ -21,7 +22,18 @@ const DEFAULT_CASE = SQL_CHANGE_REVIEW_CASES[0];
 
 const initialReview = () => buildSqlChangeReview(DEFAULT_CASE.beforeSql, DEFAULT_CASE.afterSql);
 
-export function SqlChangeReviewWorkspace() {
+export function SqlChangeReviewWorkspace({ aiFeatureEnabled = false, onQuotaExceeded }: {
+  aiFeatureEnabled?: boolean;
+  onQuotaExceeded?: () => void;
+}) {
+  const aiRequests = useMemo(() => new AiRequestCoordinator(), []);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const [aiSuggestion, setAiSuggestion] = useState<{ summary: string; warnings: string[] }>();
+  const [previousAfterSql, setPreviousAfterSql] = useState<string>();
+  useEffect(() => () => aiRequests.cancel(), [aiRequests]);
+  useEffect(() => { if (!aiFeatureEnabled) { aiRequests.cancel(); setAiLoading(false); } }, [aiFeatureEnabled, aiRequests]);
+  const cancelRecommendation = () => { aiRequests.cancel(); setAiLoading(false); };
   const [selectedCaseId, setSelectedCaseId] = useState(DEFAULT_CASE.id);
   const [beforeSql, setBeforeSql] = useState(DEFAULT_CASE.beforeSql);
   const [afterSql, setAfterSql] = useState(DEFAULT_CASE.afterSql);
@@ -45,11 +57,18 @@ export function SqlChangeReviewWorkspace() {
   };
 
   const updateBeforeSql = (value: string) => {
+    cancelRecommendation();
+    setAiSuggestion(undefined);
+    setAiError("");
+    setPreviousAfterSql(undefined);
     setBeforeSql(value);
     invalidateReview();
   };
 
   const updateAfterSql = (value: string) => {
+    cancelRecommendation();
+    setAiSuggestion(undefined);
+    setAiError("");
     setAfterSql(value);
     invalidateReview();
   };
@@ -68,6 +87,10 @@ export function SqlChangeReviewWorkspace() {
   };
 
   const loadCase = (caseId: string) => {
+    cancelRecommendation();
+    setAiSuggestion(undefined);
+    setAiError("");
+    setPreviousAfterSql(undefined);
     const selectedCase = SQL_CHANGE_REVIEW_CASES.find((candidate) => candidate.id === caseId) ?? DEFAULT_CASE;
 
     setSelectedCaseId(selectedCase.id);
@@ -91,6 +114,38 @@ export function SqlChangeReviewWorkspace() {
 
   const copyReview = async () => {
     setCopyStatus(await copyText(markdown) ? "copied" : "failed");
+  };
+
+  const recommendSql = async () => {
+    if (!aiFeatureEnabled || !beforeSql.trim() || aiLoading) return;
+    const request = aiRequests.begin("rewrite");
+    const priorSql = afterSql;
+    setAiLoading(true);
+    setAiError("");
+    try {
+      const response = await fetch("/api/ai-sql-rewrite", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql: beforeSql }), signal: request.signal,
+      });
+      const body = await response.json();
+      if (!request.current()) return;
+      request.signal.throwIfAborted();
+      if (response.status === 429 && body?.quota?.remaining === 0) onQuotaExceeded?.();
+      if (!response.ok) throw new Error(typeof body?.error === "string" ? body.error : "SQL 추천 요청에 실패했습니다.");
+      const suggestion = body?.suggestion;
+      if (!suggestion || typeof suggestion.sql !== "string" || !suggestion.sql.trim()
+        || typeof suggestion.summary !== "string" || !Array.isArray(suggestion.warnings)
+        || !suggestion.warnings.every((warning: unknown) => typeof warning === "string")) throw new Error("SQL 추천 응답 형식이 올바르지 않습니다.");
+      setPreviousAfterSql(priorSql);
+      setAfterSql(suggestion.sql);
+      setAiSuggestion({ summary: suggestion.summary, warnings: suggestion.warnings });
+      invalidateReview();
+    } catch (error) {
+      if (request.current()) setAiError(error instanceof Error ? error.message : "SQL 추천 요청에 실패했습니다.");
+    } finally {
+      if (request.current()) setAiLoading(false);
+      request.finish();
+    }
   };
 
   return (
@@ -139,16 +194,31 @@ export function SqlChangeReviewWorkspace() {
           />
         </section>
         <section className="change-sql-panel">
+          <div className="change-after-heading">
           <label htmlFor="after-sql-input">
             <strong>변경 후 SQL</strong>
             <span>배포하거나 검토할 변경안</span>
           </label>
+          <button type="button" className="secondary-button" onClick={() => void recommendSql()}
+            disabled={!aiFeatureEnabled || !beforeSql.trim() || aiLoading}
+            title={aiFeatureEnabled ? "변경 전 SQL 기반 추천 · AI 사용량 1회" : "로그인 및 AI 연결이 필요합니다"}>
+            {aiLoading ? "AI 추천 중" : "AI사용"}
+          </button>
+          </div>
           <textarea
             id="after-sql-input"
             value={afterSql}
             onChange={(event) => updateAfterSql(event.target.value)}
             spellCheck={false}
           />
+          {aiLoading ? <div role="status">SQL 추천을 생성하고 있습니다. <button type="button" className="text-button" onClick={cancelRecommendation}>취소</button></div> : null}
+          {aiError ? <p role="alert" className="change-review-error">{aiError}</p> : null}
+          {aiSuggestion ? <div className="change-ai-suggestion" role="status"><strong>AI 추천 · 사용자 규칙 미적용</strong><p>{aiSuggestion.summary}</p><ul>{aiSuggestion.warnings.map((warning, i) => <li key={i}>{warning}</li>)}</ul></div> : null}
+          {previousAfterSql !== undefined ? <button type="button" className="text-button" onClick={() => { updateAfterSql(previousAfterSql); setPreviousAfterSql(undefined); }}>이전 SQL 복원</button> : null}
+          <details className="change-rule-slot">
+            <summary>쿼리 규칙 · 준비 중</summary>
+            <textarea aria-label="향후 적용할 쿼리 규칙" disabled value="" placeholder="사용자 쿼리 규칙 연결 예정" rows={3} />
+          </details>
         </section>
       </div>
 

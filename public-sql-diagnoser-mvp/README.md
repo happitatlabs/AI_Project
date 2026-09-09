@@ -5,7 +5,7 @@
 Set `DEMO_TEST_PASSWORD` as a Worker secret to enable the additional `test` account.
 Existing `DEMO_USERNAME`, `DEMO_PASSWORD`, and `DEMO_SESSION_SECRET` remain unchanged.
 The test account shares 10 accepted AI requests per Asia/Seoul calendar day across
-all sessions and all four AI endpoints. Failed and cancelled accepted requests also
+all sessions and all AI endpoints, including change-review SQL recommendations. Failed and cancelled accepted requests also
 count; malformed JSON and unauthenticated requests do not. Rule-based analysis is
 not limited. The `DEMO_AI_QUOTA` SQLite Durable Object reserves each request
 atomically before AI processing and fails closed if storage is unavailable.
@@ -46,6 +46,14 @@ SQL Diagnoser는 레거시 SQL을 이해하고 변경 전에 위험과 확인 �
 - 선택형 AI 데이터 인사이트 해석
 
 ## SQL 변경 전후 비교
+
+`변경 후 SQL`의 `AI사용`은 변경 전 SQL을 기준으로 추천 초안을 생성합니다.
+로그인 및 AI 연결이 필요하며 `test` 계정의 하루 10회에 합산됩니다.
+추천 성공 시 변경 후 칸을 채우며 `이전 SQL 복원`으로 되돌릴 수 있습니다.
+입력 수정, 사례 변경, 화면 이탈 시 진행 중인 추천의 결과 반영을 취소합니다.
+SQL을 자동 실행하지 않으며, 마스킹된 민감 값과 의미 보존은 사용자가 검토해야 합니다.
+쿼리 규칙 영역은 준비 중이며 현재 적용되지 않습니다. 향후 서버의
+`src/sqlRewriteRules.ts`에 있는 `SqlRewriteRuleSet`과 `resolveSqlRewriteRules`를 통해 연결합니다.
 
 `변경 비교` 모드는 수정 전 SQL과 배포할 SQL을 함께 입력받아 다음 구조를 기계식으로 비교합니다.
 

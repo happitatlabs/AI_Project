@@ -3240,3 +3240,10 @@ code {
 }
 .quota-notice p { margin: 8px 0; }
 .quota-notice:focus-visible { outline: 2px solid #925100; outline-offset: 2px; }
+.change-after-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-right: 12px; }
+.change-after-heading label { flex: 1; min-width: 130px; }
+.change-after-heading button { flex: 0 0 auto; min-width: 90px; }
+.change-ai-suggestion { padding: 12px 0; overflow-wrap: anywhere; }
+.change-ai-suggestion p, .change-ai-suggestion ul { margin: 8px 0; }
+.change-rule-slot { margin-top: 12px; }
+.change-sql-panel .change-rule-slot textarea { min-height: 80px; height: 80px; margin-top: 8px; }
