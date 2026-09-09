@@ -2642,7 +2642,7 @@ function App() {
         )}
           </>
         ) : analysisMode === "change" ? (
-          <SqlChangeReviewWorkspace />
+          <SqlChangeReviewWorkspace aiFeatureEnabled={isAiFeatureEnabled} onQuotaExceeded={showQuotaNotice} />
         ) : analysisMode === "data" ? (
           <DataInsightWorkspace aiFeatureEnabled={isAiFeatureEnabled} onQuotaExceeded={showQuotaNotice} />
         ) : (
