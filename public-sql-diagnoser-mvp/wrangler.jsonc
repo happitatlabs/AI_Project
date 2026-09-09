@@ -3,6 +3,8 @@
   "name": "sql-diagnoser-demo",
   "compatibility_date": "2026-08-02",
   "main": "./src/cloudflareWorker.ts",
+  "durable_objects": { "bindings": [{ "name": "DEMO_AI_QUOTA", "class_name": "DemoAiQuota" }] },
+  "migrations": [{ "tag": "demo-quota-v1", "new_sqlite_classes": ["DemoAiQuota"] }],
   "assets": {
     "binding": "ASSETS",
     "directory": "./dist",

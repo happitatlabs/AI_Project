@@ -1893,6 +1893,7 @@ function App() {
             {demoAccessState.status === "authenticated" ? (
               <div className="demo-session-control">
                 <span>{demoAccessState.username ?? "테스트 사용자"} 로그인됨</span>
+                {demoAccessState.username === "test" ? <small>AI 하루 10회 · 한국시간 자정 초기화 · 접수된 요청 기준</small> : null}
                 <button
                   className="text-button"
                   disabled={demoLogoutState === "loading"}
