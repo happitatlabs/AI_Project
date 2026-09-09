@@ -24,6 +24,7 @@ import type { SqlAnalysisResult } from "./sqlExplainer";
 type CopyStatus = "idle" | "copied" | "selected" | "failed";
 
 type DataInsightWorkspaceProps = {
+  onQuotaExceeded?: () => void;
   aiFeatureEnabled: boolean;
   sqlAnalysis?: SqlAnalysisResult;
 };
@@ -100,6 +101,7 @@ const candidateFacts = (analysis: ComputedAnalysisResult, candidateId: string) =
 };
 
 export function DataInsightWorkspace({
+  onQuotaExceeded,
   aiFeatureEnabled,
   sqlAnalysis,
 }: DataInsightWorkspaceProps) {
@@ -270,6 +272,7 @@ export function DataInsightWorkspace({
         method: "POST",
       });
       const responseBody = await response.json();
+      if (response.status === 429 && responseBody?.quota?.remaining === 0) onQuotaExceeded?.();
 
       if (!response.ok) {
         throw new Error(
