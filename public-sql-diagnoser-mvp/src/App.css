@@ -3229,3 +3229,14 @@ code {
   gap: 12px;
   padding: 8px 0;
 }
+.quota-notice {
+  padding: 16px;
+  margin: 16px 0;
+  border: 1px solid #be741a;
+  border-left-width: 4px;
+  background: #fff8e8;
+  color: #402b0b;
+  overflow-wrap: anywhere;
+}
+.quota-notice p { margin: 8px 0; }
+.quota-notice:focus-visible { outline: 2px solid #925100; outline-offset: 2px; }

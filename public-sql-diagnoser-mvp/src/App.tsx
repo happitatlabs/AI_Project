@@ -835,6 +835,18 @@ const MODE_GUIDANCE: Record<AnalysisMode, { label: string; description: string }
 };
 
 function App() {
+  const [quotaNotice, setQuotaNotice] = useState(false);
+  const quotaNoticeRef = useRef<HTMLElement>(null);
+  const showQuotaNotice = useCallback(() => setQuotaNotice(true), []);
+  useEffect(() => {
+    if (!quotaNotice) return;
+    quotaNoticeRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    quotaNoticeRef.current?.focus({ preventScroll: true });
+    const shiftedNow = Date.now() + 9 * 60 * 60 * 1000;
+    const untilMidnight = 24 * 60 * 60 * 1000 - shiftedNow % (24 * 60 * 60 * 1000);
+    const timer = setTimeout(() => setQuotaNotice(false), untilMidnight);
+    return () => clearTimeout(timer);
+  }, [quotaNotice]);
   const aiRequests = useMemo(() => new AiRequestCoordinator(), []);
   useEffect(() => () => aiRequests.cancel(), [aiRequests]);
   const cancelAiRequests = () => {
@@ -1400,6 +1412,7 @@ function App() {
       if (!request.current()) return;
       request.signal.throwIfAborted();
 
+      if (response.status === 429 && responseBody?.quota?.remaining === 0) showQuotaNotice();
       if (!response.ok) {
         const errorMessage =
           typeof responseBody?.error === "string"
@@ -1467,6 +1480,7 @@ function App() {
       if (!request.current()) return;
       request.signal.throwIfAborted();
 
+      if (response.status === 429 && responseBody?.quota?.remaining === 0) showQuotaNotice();
       if (!response.ok) {
         const errorMessage =
           typeof responseBody?.error === "string"
@@ -1531,6 +1545,7 @@ function App() {
       if (!request.current()) return;
       request.signal.throwIfAborted();
 
+      if (response.status === 429 && responseBody?.quota?.remaining === 0) showQuotaNotice();
       if (!response.ok) {
         const errorMessage =
           typeof responseBody?.error === "string"
@@ -1601,6 +1616,7 @@ function App() {
       if (!request.current()) return;
       request.signal.throwIfAborted();
 
+      if (response.status === 429 && responseBody?.quota?.remaining === 0) showQuotaNotice();
       if (!response.ok) {
         const errorMessage =
           typeof responseBody?.error === "string"
@@ -1833,6 +1849,7 @@ function App() {
   };
 
   const logoutDemo = async () => {
+    setQuotaNotice(false);
     cancelAiRequests();
     setDemoLogoutState("loading");
 
@@ -1914,6 +1931,14 @@ function App() {
             </ul>
           </div>
         </header>
+        {quotaNotice ? (
+          <section className="quota-notice" role="alert" tabIndex={-1} ref={quotaNoticeRef} aria-labelledby="quota-notice-title">
+            <strong id="quota-notice-title">이 계정의 오늘 AI 사용 한도를 모두 사용했습니다.</strong>
+            <p>하루 10회 제한입니다. 한국시간 다음 날 오전 0시부터 다시 사용할 수 있습니다.</p>
+            <p>SQL 진단과 일반 데이터 분석은 계속 사용할 수 있습니다.</p>
+            <button type="button" className="text-button" onClick={() => setQuotaNotice(false)}>확인</button>
+          </section>
+        ) : null}
         {[aiState.status, multiAiState.status, aiDocumentDraftState.status, multiAiDocumentDraftState.status].includes("loading") ? (
           <div className="ai-request-control" role="status">
             <span>AI 응답을 기다리고 있습니다.</span>
@@ -2619,7 +2644,7 @@ function App() {
         ) : analysisMode === "change" ? (
           <SqlChangeReviewWorkspace />
         ) : analysisMode === "data" ? (
-          <DataInsightWorkspace aiFeatureEnabled={isAiFeatureEnabled} />
+          <DataInsightWorkspace aiFeatureEnabled={isAiFeatureEnabled} onQuotaExceeded={showQuotaNotice} />
         ) : (
           <>
             <section className="sql-input-panel" aria-label="다건 SQL 입력">
