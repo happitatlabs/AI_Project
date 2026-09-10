@@ -2405,6 +2405,16 @@ code {
   font-size: 0.9rem;
 }
 
+.change-report-items > section {
+  padding: 16px 0;
+  border-bottom: 1px solid #d9dfe3;
+  overflow-wrap: anywhere;
+}
+
+.change-report-items h4 { margin: 0 0 8px; font-size: 15px; }
+.change-report-items p { margin: 8px 0; line-height: 1.6; }
+.change-report-items small { color: #52616c; }
+
 .change-review-workspace {
   display: grid;
   gap: 14px;
@@ -3247,3 +3257,4 @@ code {
 .change-ai-suggestion p, .change-ai-suggestion ul { margin: 8px 0; }
 .change-rule-slot { margin-top: 12px; }
 .change-sql-panel .change-rule-slot textarea { min-height: 80px; height: 80px; margin-top: 8px; }
+.change-source-sql { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 480px; overflow: auto; }

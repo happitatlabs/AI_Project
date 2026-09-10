@@ -1,6 +1,8 @@
 import { analyzeMultipleSql } from "./multiSqlAnalysis.js";
 import { analyzeSqlRisks, type SqlRiskFinding } from "./riskDetector.js";
-import { analyzeSql, type SqlAnalysisResult } from "./sqlExplainer.js";
+import { analyzeSql, inspectCommandScope, type SqlAnalysisResult } from "./sqlExplainer.js";
+import { analyzeChangeScopes, briefSql, spanLabel, tokenizeSql, type ScopedSql, type SqlSpan } from "./sqlChangeScope.js";
+import { buildChangeImpacts, type ChangeImpact } from "./sqlChangeImpacts.js";
 
 export type SqlChangeSeverity = "critical" | "warning" | "notice" | "info";
 
@@ -33,6 +35,11 @@ export type SqlChangeGroup = {
 };
 
 export type SqlChangeReviewResult = {
+  scopes: { before: ScopedSql; after: ScopedSql };
+  impacts: ChangeImpact[];
+  counts: { evidenceEntries: number; changedCategories: number; newRiskCategories: number | null };
+  analysisStatus: "partial" | "lexical";
+  direction: string;
   afterAnalysis: SqlAnalysisResult;
   beforeAnalysis: SqlAnalysisResult;
   checklist: SqlChangeChecklistItem[];
@@ -66,33 +73,8 @@ const unique = (values: string[]) => Array.from(new Set(values.filter(Boolean)))
 
 const compact = (value: string) => value.replace(/\s+/g, " ").trim();
 
-const normalizeComparable = (value: string) => compact(value).toUpperCase();
+const normalizeComparable = (value: string) => tokenizeSql(value).tokens.map(t => t.kind === "word" ? t.text.toUpperCase() : t.text).join(" ");
 
-const detectOperation = (sql: string) => {
-  const compactSql = compact(sql.replace(/--[^\r\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " "));
-
-  if (/\bMERGE\s+INTO\b/i.test(compactSql)) {
-    return "MERGE";
-  }
-
-  if (/\bINSERT\s+INTO\b/i.test(compactSql)) {
-    return "INSERT";
-  }
-
-  if (/^\s*UPDATE\b/i.test(compactSql)) {
-    return "UPDATE";
-  }
-
-  if (/^\s*DELETE\b/i.test(compactSql)) {
-    return "DELETE";
-  }
-
-  if (/\bSELECT\b/i.test(compactSql)) {
-    return "SELECT";
-  }
-
-  return "UNKNOWN";
-};
 
 const detectWriteTarget = (sql: string, operation: string) => {
   const patterns: Record<string, RegExp> = {
@@ -127,39 +109,6 @@ const collectionDiff = (
   };
 };
 
-const tableValues = (analysis: SqlAnalysisResult) =>
-  unique(analysis.tables.map((table) => table.rawName));
-
-const joinValues = (analysis: SqlAnalysisResult) =>
-  unique(analysis.joins.map((join) => `${join.left} → ${join.right}${join.joinType ? ` (${join.joinType})` : ""}`));
-
-const filterValues = (analysis: SqlAnalysisResult) =>
-  unique(
-    [...analysis.filters, ...analysis.havingConditions].map(
-      (filter) => `${filter.stage}: ${compact(filter.condition)}`,
-    ),
-  );
-
-const groupByValues = (analysis: SqlAnalysisResult) =>
-  unique(analysis.groupBy.map((group) => `${group.stage}: ${group.columns.join(", ")}`));
-
-const aggregationValues = (analysis: SqlAnalysisResult) =>
-  unique(
-    analysis.aggregations.map(
-      (aggregation) =>
-        `${aggregation.stage}: ${aggregation.functionName} ${compact(aggregation.expression)}${aggregation.alias ? ` AS ${aggregation.alias}` : ""}`,
-    ),
-  );
-
-const stagedStructureValues = (analysis: SqlAnalysisResult) =>
-  unique([
-    ...analysis.ctes.map((cte) => `CTE ${cte.name}${cte.dependencies.length > 0 ? ` ← ${cte.dependencies.join(", ")}` : ""}`),
-    ...analysis.subqueries.map((subquery) => `${subquery.type} 서브쿼리 (${subquery.stage})`),
-    ...analysis.setOperations.map((operation) => operation.operator),
-    ...analysis.windowFunctions.map((windowFunction) =>
-      `${windowFunction.stage}: ${windowFunction.functionName} OVER${windowFunction.alias ? ` AS ${windowFunction.alias}` : ""}`,
-    ),
-  ]);
 
 const risksFor = (sql: string) => analyzeSqlRisks(analyzeMultipleSql(sql)).findings;
 
@@ -197,6 +146,12 @@ const addQuestion = (questions: SqlChangeQuestion[], question: SqlChangeQuestion
 
 const isWriteOperation = (operation: string) => ["DELETE", "INSERT", "MERGE", "UPDATE"].includes(operation);
 
+const scopeDiff = (id: string, label: string, before: Array<{ key: string; span: SqlSpan; block?: string; context?: string; kind?: string; name?: string }>, after: Array<{ key: string; span: SqlSpan; block?: string; context?: string; kind?: string; name?: string }>): SqlChangeGroup => {
+  const old = new Map(before.map(e => [e.key, e])), next = new Map(after.map(e => [e.key, e]));
+  const display = (e: typeof before[number]) => `${e.context ?? ""} ${e.block ?? ""} ${e.kind ?? ""} ${e.name ?? ""} ${spanLabel(e.span)}: ${e.span.text}`;
+  return { id, label, removed: [...old].filter(([key]) => !next.has(key)).map(([, e]) => display(e)), added: [...next].filter(([key]) => !old.has(key)).map(([, e]) => display(e)) };
+};
+
 export const buildSqlChangeReview = (
   beforeSql: string,
   afterSql: string,
@@ -207,21 +162,35 @@ export const buildSqlChangeReview = (
 
   const beforeAnalysis = analyzeSql(beforeSql);
   const afterAnalysis = analyzeSql(afterSql);
-  const beforeOperation = detectOperation(beforeSql);
-  const afterOperation = detectOperation(afterSql);
+  const beforeScope = analyzeChangeScopes(beforeSql), afterScope = analyzeChangeScopes(afterSql);
+  const sameTokens = beforeScope.canonical === afterScope.canonical;
+  const impacts = buildChangeImpacts(beforeScope, afterScope);
+  const partial = beforeScope.partial || afterScope.partial;
+  const beforeOperation = inspectCommandScope(beforeSql).command ?? "UNKNOWN";
+  const afterOperation = inspectCommandScope(afterSql).command ?? "UNKNOWN";
   const beforeTarget = detectWriteTarget(beforeSql, beforeOperation);
   const afterTarget = detectWriteTarget(afterSql, afterOperation);
   const beforeRisks = risksFor(beforeSql);
   const afterRisks = risksFor(afterSql);
-  const introducedRisks = newRisks(beforeRisks, afterRisks);
+  // Legacy risk inference is not used as evidence for partially resolved scopes.
+  const introducedRisks = sameTokens || partial ? [] : newRisks(beforeRisks, afterRisks);
+  const joinKinds = ["explicit_join", "same_block_condition"];
   const changeGroups = [
-    collectionDiff("tables", "참조 테이블", tableValues(beforeAnalysis), tableValues(afterAnalysis)),
-    collectionDiff("joins", "JOIN 관계", joinValues(beforeAnalysis), joinValues(afterAnalysis)),
-    collectionDiff("filters", "WHERE / HAVING 조건", filterValues(beforeAnalysis), filterValues(afterAnalysis)),
-    collectionDiff("group-by", "GROUP BY 기준", groupByValues(beforeAnalysis), groupByValues(afterAnalysis)),
-    collectionDiff("aggregations", "집계 지표", aggregationValues(beforeAnalysis), aggregationValues(afterAnalysis)),
-    collectionDiff("staged-structure", "CTE / 서브쿼리 / 윈도우 / SET", stagedStructureValues(beforeAnalysis), stagedStructureValues(afterAnalysis)),
+    collectionDiff("tables", "참조 테이블", beforeScope.blocks.flatMap(b => b.sources.filter(s => !s.child).map(s => s.table)), afterScope.blocks.flatMap(b => b.sources.filter(s => !s.child).map(s => s.table))),
+    scopeDiff("joins", "명시적 JOIN / 동일 블록 관계", beforeScope.relations.filter(r => joinKinds.includes(r.kind)), afterScope.relations.filter(r => joinKinds.includes(r.kind))),
+    scopeDiff("correlations", "상관 참조 (JOIN 아님)", beforeScope.relations.filter(r => r.kind === "correlation"), afterScope.relations.filter(r => r.kind === "correlation")),
+    scopeDiff("membership", "IN / EXISTS 포함·존재 조건", beforeScope.relations.filter(r => ["in", "exists"].includes(r.kind)), afterScope.relations.filter(r => ["in", "exists"].includes(r.kind))),
+    scopeDiff("unknown-relations", "분류 보류 관계", beforeScope.relations.filter(r => r.kind === "unknown"), afterScope.relations.filter(r => r.kind === "unknown")),
+    scopeDiff("filters", "WHERE / HAVING 조건 표현", beforeScope.filters, afterScope.filters),
+    scopeDiff("group-by", "GROUP BY 기준", beforeScope.groups, afterScope.groups),
+    scopeDiff("aggregations", "집계 함수·계산식 (GROUP BY와 별개)", beforeScope.aggregates, afterScope.aggregates),
+    scopeDiff("staged-structure", "인라인 뷰 위치별 변경", beforeScope.structures, afterScope.structures),
+    collectionDiff("outputs", "최상위 출력 컬럼", beforeScope.outputs.map(o => o.name), afterScope.outputs.map(o => o.name)),
+    scopeDiff("output-expressions", "최상위 출력 표현식", beforeScope.outputs, afterScope.outputs),
+    scopeDiff("order-by", "정렬 표현식 / 순서", beforeScope.order.filter(o => o.block === beforeScope.blocks[0].id).map((o, i) => ({ ...o, key: `${i}/${o.key}` })), afterScope.order.filter(o => o.block === afterScope.blocks[0].id).map((o, i) => ({ ...o, key: `${i}/${o.key}` }))),
   ];
+  if (sameTokens) changeGroups.forEach(g => { g.added = []; g.removed = []; });
+  if (!sameTokens && !changeGroups.some(g => g.added.length || g.removed.length)) changeGroups.push({ id: "unclassified", label: "미분류 토큰 차이", removed: [beforeSql], added: [afterSql] });
   const changedGroups = changeGroups.filter((group) => group.added.length > 0 || group.removed.length > 0);
   const findings: SqlChangeFinding[] = [];
   const questions: SqlChangeQuestion[] = [];
@@ -229,12 +198,17 @@ export const buildSqlChangeReview = (
   const targetChanged = normalizeComparable(beforeTarget ?? "") !== normalizeComparable(afterTarget ?? "");
   const removedAllFilters =
     isWriteOperation(afterOperation) &&
-    beforeAnalysis.filters.length + beforeAnalysis.havingConditions.length > 0 &&
-    afterAnalysis.filters.length + afterAnalysis.havingConditions.length === 0;
+    inspectCommandScope(beforeSql).hasWhere && !inspectCommandScope(afterSql).hasWhere;
   const filterChanges = changedGroups.find((group) => group.id === "filters");
   const joinChanges = changedGroups.find((group) => group.id === "joins");
   const tableChanges = changedGroups.find((group) => group.id === "tables");
   const aggregationChanges = changedGroups.filter((group) => ["aggregations", "group-by"].includes(group.id));
+  const groupByChanged = changedGroups.some(g => g.id === "group-by");
+  const rootGroupByChanged = beforeScope.groups.filter(g => g.block === beforeScope.blocks[0].id).map(g => g.key).join() !== afterScope.groups.filter(g => g.block === afterScope.blocks[0].id).map(g => g.key).join();
+  if (partial) addFinding(findings, { id: "partial-analysis", label: "부분 분석 · 결과 동등성 판단 보류", severity: "warning", statement: "블록·원문 근거는 추출했지만 깊은 중첩 또는 미지원 구문의 대응을 완전히 검증하지 못했습니다.", whyItMatters: "아래 구문 차이는 업무 변경이나 성능 저하의 확정 건수가 아닙니다.", evidence: [...beforeScope.warnings, ...afterScope.warnings] });
+  for (const impact of impacts.filter(i => (i.kind === "calculation" && i.assessment === "observed-risk") || i.kind === "null-handling")) {
+    addFinding(findings, { id: impact.id, label: impact.label, severity: "warning", statement: impact.statement, whyItMatters: impact.condition, evidence: ["블록·행 위치와 원문은 상세 근거에 보존됩니다."] });
+  }
 
   if (operationChanged || (targetChanged && (beforeTarget || afterTarget))) {
     const changesToWrite = !isWriteOperation(beforeOperation) && isWriteOperation(afterOperation);
@@ -251,6 +225,9 @@ export const buildSqlChangeReview = (
     });
   }
 
+  for (const impact of impacts.filter(i => (i.kind === "calculation" && i.assessment === "observed-risk") || ["null-handling", "aggregate-period", "local-filter"].includes(i.kind))) {
+    addQuestion(questions, { id: `verify-${impact.id}`, question: `${impact.label}에 대해 결과가 달라지는 경계 데이터를 확인했나요?`, reason: impact.condition });
+  }
   if (removedAllFilters) {
     addFinding(findings, {
       evidence: filterChanges?.removed ?? ["변경 후 WHERE/HAVING 조건 없음"],
@@ -269,7 +246,7 @@ export const buildSqlChangeReview = (
       id: "filter-change",
       label: "결과 범위 변경",
       severity: "warning",
-      statement: `조건이 ${filterChanges.removed.length}개 제거되고 ${filterChanges.added.length}개 추가되었습니다.`,
+      statement: `대응이 일치하지 않는 조건 표현이 변경 전 ${filterChanges.removed.length}개, 변경 후 ${filterChanges.added.length}개입니다. 논리 조건 전체의 삭제·신설로 단정하지 않습니다.`,
       whyItMatters: "조건 변화는 반환되거나 변경되는 데이터 범위를 바꿀 수 있지만 실제 행 수는 SQL만으로 알 수 없습니다.",
     });
   }
@@ -283,7 +260,7 @@ export const buildSqlChangeReview = (
       id: "join-change",
       label: "JOIN 경로 변경",
       severity: "warning",
-      statement: `JOIN 관계가 ${joinChanges.removed.length}개 제거되고 ${joinChanges.added.length}개 추가되었습니다.`,
+      statement: "명시적 JOIN 또는 같은 쿼리 블록의 연결 조건이 달라졌습니다. JOIN 절과 연결 조건은 중복된 근거일 수 있어 독립 변경 건수로 합산하지 않습니다.",
       whyItMatters: "새 조인 키의 유일성과 관계 수에 따라 결과 행이 늘거나 누락될 가능성이 있습니다.",
     });
   }
@@ -320,10 +297,10 @@ export const buildSqlChangeReview = (
         ...group.added.map((item) => `추가: ${item}`),
       ]),
       id: "aggregation-change",
-      label: "집계 단위 변경",
+      label: groupByChanged ? rootGroupByChanged ? "최상위 GROUP BY 기준 변경" : "내부 GROUP BY 구문 변경" : "집계 계산식 변경",
       severity: "notice",
-      statement: "GROUP BY 기준 또는 집계 지표가 변경되었습니다.",
-      whyItMatters: "집계 단위의 변화는 같은 데이터에서도 결과 숫자의 의미를 바꿀 수 있습니다.",
+      statement: groupByChanged ? rootGroupByChanged ? "최상위 GROUP BY 표현식의 차이가 확인됐습니다. 실제 한 행의 단위는 별도 검증이 필요합니다." : "최상위 GROUP BY는 변경되지 않았습니다. 제거/추가된 출력이나 내부 블록의 GROUP BY 구문 차이가 있습니다." : "집계 함수 또는 입력 계산식이 변경됐습니다. GROUP BY 변경은 확인되지 않았습니다.",
+      whyItMatters: "계산식·대상 필터·NULL 처리는 집계 단위가 같아도 숫자를 바꿀 수 있습니다.",
     });
   }
 
@@ -370,8 +347,8 @@ export const buildSqlChangeReview = (
   if (aggregationChanges.length > 0) {
     addQuestion(questions, {
       id: "verify-aggregation-grain",
-      question: "변경된 집계 기준이 기대하는 한 행의 업무 단위와 일치하나요?",
-      reason: "GROUP BY 또는 집계 지표 변화가 감지되었습니다.",
+      question: rootGroupByChanged ? "변경된 최상위 GROUP BY가 기대하는 한 행의 업무 단위와 일치하나요?" : groupByChanged ? "내부 GROUP BY 변경이 출력 컬럼·하위 블록 제거에 따른 것인지 확인했나요?" : "변경된 계산식과 집계 대상 필터의 결과를 따로 검증했나요?",
+      reason: groupByChanged ? "GROUP BY 표현식 차이가 감지되었습니다." : "GROUP BY 변경 없이 집계식 차이가 감지되었습니다.",
     });
   }
 
@@ -389,8 +366,7 @@ export const buildSqlChangeReview = (
   const changeCount =
     changedGroups.reduce((total, group) => total + group.added.length + group.removed.length, 0) +
     (operationChanged ? 1 : 0) +
-    (targetChanged && (beforeTarget || afterTarget) ? 1 : 0) +
-    introducedRisks.length;
+    (targetChanged && (beforeTarget || afterTarget) ? 1 : 0);
   const keyChanges = sortedFindings.length > 0
     ? sortedFindings.slice(0, MAX_KEY_CHANGES)
     : [{
@@ -402,13 +378,13 @@ export const buildSqlChangeReview = (
         whyItMatters: "표현식, 출력 순서, 주석처럼 요약되지 않은 차이는 원문 비교가 필요합니다.",
       }];
   const severity = keyChanges[0]?.severity ?? "info";
-  const summary = changeCount > 0
-    ? `변경 전후 구조에서 ${changeCount}개의 추가·제거 또는 위험 변화를 확인했습니다.`
-    : "파서가 인식한 주요 SQL 구조는 변경 전후 동일합니다.";
+  const summary = (partial ? "부분 분석입니다. " : "") + (changeCount > 0
+    ? `${changedGroups.length}개 구문 분류에서 차이를 확인했습니다. 계산식·필터·출력 스키마를 구분해 검토해야 하며, 분류 수는 업무 변경·위험 건수가 아닙니다.`
+    : "현재 토큰 분석 범위에서 차이가 없습니다. 결과 동등성의 증명은 아닙니다.");
   const soWhat = severity === "critical"
     ? "이 변경은 데이터 변경 범위나 쓰기 대상에 직접 영향을 줄 수 있습니다. 배포 전에 대상 행 수와 복구 방법을 먼저 확인해야 합니다."
     : severity === "warning"
-      ? "조건이나 JOIN 변화는 실제 결과 범위를 바꿀 수 있습니다. 문장 차이보다 행 수와 관계 수 검증이 우선입니다."
+      ? "계산식, NULL 처리, 집계 대상과 행 선택 조건을 분리해 검증해야 합니다. 상관 참조나 EXISTS 자체는 JOIN 행 증식의 근거가 아닙니다."
       : changeCount > 0
         ? "구조 변화가 확인되었지만 실제 결과·성능 영향은 실행 데이터와 스키마를 함께 확인해야 판단할 수 있습니다."
         : "주요 구조가 같더라도 출력 컬럼, 리터럴, 정렬처럼 파서 요약 밖의 변경은 별도 확인이 필요합니다.";
@@ -426,18 +402,26 @@ export const buildSqlChangeReview = (
     })),
   ];
   const warnings = unique([
+    ...beforeScope.warnings.map(w => `변경 전: ${w}`), ...afterScope.warnings.map(w => `변경 후: ${w}`),
+    "변경 비교는 범위 보존 토큰 분석, 기존 단건 설명·위험 엔진은 정규식과 괄호/문자 스캔을 사용합니다. 완전한 AST 파서는 아닙니다.",
+    "동일 구문이 필터·집계·포함 조건 등의 여러 상세 분류에 나타날 수 있습니다. 상세 항목 수를 업무 변경 수로 합산하지 않습니다.",
+    "블록 대응은 출력 이름과 최상위 조건의 참조 테이블 문맥을 사용합니다. 복잡한 이동·우회 표현의 의미 동등성은 판단하지 않습니다.",
     ...beforeAnalysis.warnings.map((warning) => `변경 전: ${warning}`),
     ...afterAnalysis.warnings.map((warning) => `변경 후: ${warning}`),
     "구조 비교는 SQL을 실행하지 않으며 실제 행 수, 실행 계획, 제약조건을 확인하지 않습니다.",
   ]);
 
   return {
+    scopes: { before: beforeScope, after: afterScope }, impacts,
+    analysisStatus: partial ? "partial" : "lexical",
+    counts: { evidenceEntries: changeCount, changedCategories: changedGroups.length, newRiskCategories: partial ? null : introducedRisks.length },
+    direction: `변경 전 → 변경 후. 최상위 FROM: ${beforeScope.blocks[0].sources.map(s => s.child ? `인라인 뷰 ${s.alias}` : `${s.table} ${s.alias}`).join(", ")} → ${afterScope.blocks[0].sources.map(s => s.child ? `인라인 뷰 ${s.alias}` : `${s.table} ${s.alias}`).join(", ")}`,
     afterAnalysis,
     beforeAnalysis,
     checklist,
     changeCount,
     changeGroups,
-    keyChanges,
+    keyChanges: keyChanges.map(f => ({ ...f, evidence: f.evidence.map(e => briefSql(e)) })),
     nextQuestions: limitedQuestions,
     operation: {
       after: afterOperation,
@@ -452,9 +436,74 @@ export const buildSqlChangeReview = (
   };
 };
 
-export const buildSqlChangeReviewMarkdown = (review: SqlChangeReviewResult) => [
+export type SqlChangeReportItem = {
+  id: string;
+  title: string;
+  observation: string;
+  consequence: string;
+  status: "조건부 영향" | "판단 보류";
+  evidence: string[];
+};
+
+// The UI and exported report share these conclusions; raw parser inventories remain an appendix.
+export const buildSqlChangeReportItems = (review: SqlChangeReviewResult): SqlChangeReportItem[] => {
+  const actionable = review.impacts.filter(i => i.assessment === "observed-risk");
+  const items: SqlChangeReportItem[] = actionable.map(i => ({
+    id: i.id, title: i.label, observation: i.statement, consequence: i.condition,
+    status: "조건부 영향", evidence: i.evidence,
+  }));
+  const unresolved = review.impacts.filter(i => i.assessment === "unresolved"
+    && !actionable.some(a => a.label.split(":")[0] === i.label.split(":")[0]));
+  if (unresolved.length) items.push({
+    id: "unresolved-expressions", title: "표현식과 참조 경로 · 대응 확인 필요",
+    observation: `${unique(unresolved.map(i => i.label.split(":")[0])).join(", ")}의 표현식 또는 참조 경로가 다릅니다.`,
+    consequence: "표현 정리인지 실제 계산 변경인지 아직 구분하지 못했습니다. 인라인 뷰의 출력과 내부 조건을 대조해야 하며, 영향 없음으로 승인하지 않습니다.",
+    status: "판단 보류", evidence: unresolved.flatMap(i => i.evidence),
+  });
+  const rootViews = (scope: ScopedSql) => scope.structures.filter(s => s.block === scope.blocks[0].id);
+  const oldViews = rootViews(review.scopes.before), newViews = rootViews(review.scopes.after);
+  if (oldViews.length !== newViews.length) items.push({
+    id: "root-source-report", title: "최상위 조회 구조",
+    observation: review.direction,
+    consequence: `최상위 인라인 뷰 구성이 달라졌습니다. 변경 후 내부 인라인 뷰 ${review.scopes.after.structures.filter(s => s.block !== review.scopes.after.blocks[0].id).map(s => s.name).join(", ") || "없음"}. 내부 뷰까지 모두 제거되었다는 뜻은 아니며 결과 동등성은 별도 확인이 필요합니다.`,
+    status: "판단 보류", evidence: [...oldViews, ...newViews].map(s => `${s.context} ${spanLabel(s.span)}`),
+  });
+  // Keep changes with no impact adapter visible, rather than silently presenting an empty report.
+  if (!items.length) for (const f of review.keyChanges.filter(f => f.id !== "partial-analysis")) items.push({
+    id: f.id, title: f.label, observation: f.statement, consequence: f.whyItMatters,
+    status: "판단 보류", evidence: f.evidence,
+  });
+  return items;
+};
+
+export const buildSqlChangeReviewMarkdown = (review: SqlChangeReviewResult, checkedIds: string[] = []) => [
+  "# SQL 변경 검토 보고서", "", review.direction,
+  `검증 범위: ${review.analysisStatus === "partial" ? "부분 분석 · 미해석 구간 있음" : "지원 범위 내 구문 비교"}. SQL을 실행하지 않았으며 결과 동등성·성능을 보증하지 않습니다.`,
+  "", "## 핵심 결과",
+  ...review.keyChanges.map(f => `- ${f.label}: ${f.statement}`),
+  "", "## 그래서 무엇이 중요한가", review.soWhat,
+  "", "## 다음으로 확인할 질문",
+  ...review.nextQuestions.map((q, i) => `${i + 1}. ${q.question}`),
+  "", "## 변경별 결과 영향",
+  ...buildSqlChangeReportItems(review).flatMap((item, i) => [
+    `### ${i + 1}. ${item.title}`, `- 확인된 변경: ${item.observation}`,
+    `- 결과 영향·확인 조건: ${item.consequence}`, `- 판단 상태: ${item.status}`,
+    ...unique(item.evidence.map(e => e.match(/^(.*?)L\d+:\d+ \[\d+,\d+\)/)?.[0] ?? "").filter(Boolean)).slice(0, 4).map(e => `- 원문 위치: ${e}`), "",
+  ]),
+  "## 변경 검토 체크리스트",
+  ...review.checklist.map(item => `- [${checkedIds.includes(item.id) ? "x" : " "}] ${item.label}`),
+  "", "## 결론",
+  review.changeCount === 0 ? "정규화 범위 내 구문 차이가 없습니다. 이것이 미지원 구문까지 포함한 의미 동등성 증명은 아닙니다."
+    : "확인된 변경의 발생 조건에 해당하는 데이터를 검증한 뒤 변경 의도와 일치하는지 판단해야 합니다. 미해석 항목은 영향 없음으로 처리하지 않습니다.",
+  "", "전체 SQL·블록별 관계·미대응 구문 목록은 별도 상세 근거 보고서에서 확인합니다.",
+].join("\n");
+
+export const buildSqlChangeReviewTechnicalMarkdown = (review: SqlChangeReviewResult) => [
   "# SQL 변경 검토",
   "",
+  review.direction,
+  `분석 방식: 범위 보존 토큰 비교 (${review.analysisStatus === "partial" ? "부분 분석" : "지원 범위 내 구문 분석"}). SQL 실행·결과 동등성 검증 없음.`,
+  `집계 기준: 구문 분류 ${review.counts.changedCategories}개 / 상세 추가·제거 근거 ${review.counts.evidenceEntries}항목 / 별도 신규 룰 위험 분류 ${review.counts.newRiskCategories === null ? "산정 보류 (부분 분석)" : `${review.counts.newRiskCategories}개`}. 서로 더하지 않습니다.`,
   "## 핵심 결과",
   review.summary,
   "",
@@ -477,12 +526,29 @@ export const buildSqlChangeReviewMarkdown = (review: SqlChangeReviewResult) => [
   ...review.checklist.map((item) => `- [ ] ${item.label}\n  - ${item.reason}`),
   "",
   "## 구조 변경 상세",
+  "### 결과 영향 검토 (발생 조건을 충족할 때 달라질 수 있음)",
+  ...review.impacts.flatMap(impact => [
+    `#### ${impact.label}`,
+    `- 원문 관찰: ${impact.statement}`,
+    `- 영향 조건 / 확인 필요: ${impact.condition}`,
+    `- 판단: ${impact.assessment === "unresolved" ? "결과 영향 판단 보류" : "변경 관찰 + 조건부 영향 가능성 (실행 검증 아님)"}`,
+    ...impact.evidence.map(e => `- 상세 위치: ${briefSql(e, 280)}`), "",
+  ]),
   ...review.changeGroups.flatMap((group) => [
     `### ${group.label}`,
-    ...(group.removed.length > 0 ? group.removed.map((item) => `- 제거: ${item}`) : ["- 제거: 없음"]),
-    ...(group.added.length > 0 ? group.added.map((item) => `- 추가: ${item}`) : ["- 추가: 없음"]),
+    ...(group.removed.length > 0 ? group.removed.map((item) => `- 변경 전 전용 구문: ${briefSql(item, 280)}`) : ["- 변경 전 전용 구문: 없음"]),
+    ...(group.added.length > 0 ? group.added.map((item) => `- 변경 후 전용 구문: ${briefSql(item, 280)}`) : ["- 변경 후 전용 구문: 없음"]),
     "",
   ]),
+  "### 블록별 소스와 관계 (별칭·소속 보존)",
+  ...(["before", "after"] as const).flatMap(side => [
+    `#### ${side === "before" ? "변경 전" : "변경 후"}`,
+    ...review.scopes[side].blocks.map(b => `- ${b.id} / 부모 ${b.parent ?? "없음"} / ${b.context} / ${spanLabel(b.span)} / FROM ${b.sources.map(s => `${s.table} AS ${s.alias}${s.child ? ` (내부 ${s.child})` : ""}`).join(", ") || "없음"}`),
+    ...review.scopes[side].relations.map(r => `- ${r.kind}: ${r.left} → ${r.right} / ${r.block} / ${spanLabel(r.span)}`),
+  ]),
+  "### 원문 전체 (근거 위치의 기준, 0-based 문자 범위 / 1-based 행·열)",
+  "#### 변경 전", "```sql", review.scopes.before.sql, "```",
+  "#### 변경 후", "```sql", review.scopes.after.sql, "```",
   "## 주의 사항",
   ...review.warnings.map((warning) => `- ${warning}`),
 ].join("\n");

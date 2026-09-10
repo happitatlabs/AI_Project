@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "node tests/sqlExplainer.test.mjs"
+    "test": "node tests/sqlExplainer.test.mjs && node tests/change-review-regression.mjs",
+    "test:change-review:report": "node tests/change-review-regression.mjs --report",
+    "test:change-review:db": "node tests/change-review-regression.mjs --report && python tests/change-review-sqlite.py"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.0",
