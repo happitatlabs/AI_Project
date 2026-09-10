@@ -56,6 +56,8 @@ const compileTsFile = (inputPath, outputPath) => {
 
 const tempModuleRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sql-explainer-ai-"));
 compileTsFile("src/sqlExplainer.ts", path.join(tempModuleRoot, "src/sqlExplainer.js"));
+compileTsFile("src/sqlChangeScope.ts", path.join(tempModuleRoot, "src/sqlChangeScope.js"));
+compileTsFile("src/sqlChangeImpacts.ts", path.join(tempModuleRoot, "src/sqlChangeImpacts.js"));
 compileTsFile("src/sqlMasking.ts", path.join(tempModuleRoot, "src/sqlMasking.js"));
 compileTsFile("src/computedAnalysis.ts", path.join(tempModuleRoot, "src/computedAnalysis.js"));
 compileTsFile("src/aiDataInsights.ts", path.join(tempModuleRoot, "src/aiDataInsights.js"));

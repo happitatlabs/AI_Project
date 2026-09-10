@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { AiRequestCoordinator } from "./aiExplanationState";
+import { briefSql, spanLabel } from "./sqlChangeScope";
 import {
   buildSqlChangeReview,
   buildSqlChangeReviewMarkdown,
+  buildSqlChangeReviewTechnicalMarkdown,
+  buildSqlChangeReportItems,
   type SqlChangeReviewResult,
 } from "./sqlChangeReview";
 import { SQL_CHANGE_REVIEW_CASES } from "./sqlChangeReviewCases";
@@ -41,18 +44,21 @@ export function SqlChangeReviewWorkspace({ aiFeatureEnabled = false, onQuotaExce
   const [errorMessage, setErrorMessage] = useState("");
   const [checkedItems, setCheckedItems] = useState<string[]>([]);
   const [copyStatus, setCopyStatus] = useState<CopyStatus>("idle");
+  const [technicalCopyStatus, setTechnicalCopyStatus] = useState<CopyStatus>("idle");
   const completedCount = checkedItems.length;
   const checklistCount = review?.checklist.length ?? 0;
   const progress = checklistCount > 0 ? Math.round((completedCount / checklistCount) * 100) : 0;
   const markdown = useMemo(
-    () => review ? buildSqlChangeReviewMarkdown(review) : "",
-    [review],
+    () => review ? buildSqlChangeReviewMarkdown(review, checkedItems) : "",
+    [review, checkedItems],
   );
+  const reportItems = useMemo(() => review ? buildSqlChangeReportItems(review) : [], [review]);
 
   const invalidateReview = () => {
     setReview(undefined);
     setCheckedItems([]);
     setCopyStatus("idle");
+    setTechnicalCopyStatus("idle");
     setErrorMessage("");
   };
 
@@ -105,6 +111,7 @@ export function SqlChangeReviewWorkspace({ aiFeatureEnabled = false, onQuotaExce
   const selectedCase = SQL_CHANGE_REVIEW_CASES.find((candidate) => candidate.id === selectedCaseId) ?? DEFAULT_CASE;
 
   const toggleChecklistItem = (id: string) => {
+    setCopyStatus("idle");
     setCheckedItems((current) =>
       current.includes(id)
         ? current.filter((item) => item !== id)
@@ -243,6 +250,7 @@ export function SqlChangeReviewWorkspace({ aiFeatureEnabled = false, onQuotaExce
               <p className="section-kicker">룰 기반 변경 검토</p>
               <h2>변경 검토 결과</h2>
               <p>{review.summary}</p>
+              <p>{review.direction}</p>
             </div>
             <div className="change-result-meta" aria-label="변경 요약">
               <span className={`change-severity ${review.severity}`}>
@@ -308,7 +316,24 @@ export function SqlChangeReviewWorkspace({ aiFeatureEnabled = false, onQuotaExce
             </ol>
           </section>
 
-          <section className="change-result-section review-checklist-section">
+          <section className="change-result-section" aria-label="변경별 결과 영향">
+            <h3>변경별 결과 영향</h3>
+            <div className="change-report-items">
+              {reportItems.map(item => <section key={item.id}>
+                <h4>{item.title}</h4>
+                <p>{item.observation}</p>
+                <p><strong>결과 영향·확인 조건</strong> {item.consequence}</p>
+                <small>{item.status} · SQL 실행 검증 아님</small>
+                <details className="finding-evidence">
+                  <summary>원문 근거</summary>
+                  {item.evidence.map((e, i) => <pre className="change-source-sql" key={i}>{e}</pre>)}
+                </details>
+              </section>)}
+            </div>
+          </section>
+
+          <details className="change-detail-section review-checklist-section">
+            <summary>검토 기록 · {completedCount}/{checklistCount} 확인</summary>
             <div className="checklist-header">
               <div>
                 <p className="section-kicker">검토 기록</p>
@@ -341,8 +366,16 @@ export function SqlChangeReviewWorkspace({ aiFeatureEnabled = false, onQuotaExce
                 </label>
               ))}
             </div>
-          </section>
+          </details>
 
+          <details className="change-detail-section">
+            <summary>결과 영향 검토 · 발생 조건과 판단 보류</summary>
+            {review.impacts.map(impact => <section key={impact.id}>
+              <h3>{impact.label}</h3><p>{impact.statement}</p><p>{impact.condition}</p>
+              <small>{impact.assessment === "unresolved" ? "결과 영향 판단 보류" : "조건부 영향 가능성 · 실행 검증 아님"}</small>
+              <ul>{impact.evidence.map((e, i) => <li key={i}>{briefSql(e, 280)}</li>)}</ul>
+            </section>)}
+          </details>
           <details className="change-detail-section">
             <summary>
               <span>구조 변경 상세</span>
@@ -357,15 +390,15 @@ export function SqlChangeReviewWorkspace({ aiFeatureEnabled = false, onQuotaExce
                   ) : (
                     <div className="change-values">
                       <div>
-                        <strong>제거</strong>
+                        <strong>변경 전 전용 구문 (논리적 삭제 확정 아님)</strong>
                         {group.removed.length > 0 ? (
-                          <ul>{group.removed.map((item) => <li key={item}>{item}</li>)}</ul>
+                          <ul>{group.removed.map((item) => <li key={item}>{briefSql(item, 280)}</li>)}</ul>
                         ) : <p>없음</p>}
                       </div>
                       <div>
-                        <strong>추가</strong>
+                        <strong>변경 후 전용 구문 (논리적 신설 확정 아님)</strong>
                         {group.added.length > 0 ? (
-                          <ul>{group.added.map((item) => <li key={item}>{item}</li>)}</ul>
+                          <ul>{group.added.map((item) => <li key={item}>{briefSql(item, 280)}</li>)}</ul>
                         ) : <p>없음</p>}
                       </div>
                     </div>
@@ -384,11 +417,23 @@ export function SqlChangeReviewWorkspace({ aiFeatureEnabled = false, onQuotaExce
               {review.warnings.map((warning) => <li key={warning}>{warning}</li>)}
             </ul>
           </details>
+          <details className="change-detail-section">
+            <summary>블록·별칭·관계와 원문 전체</summary>
+            <button className="secondary-button" type="button" onClick={async () => setTechnicalCopyStatus(await copyText(buildSqlChangeReviewTechnicalMarkdown(review)) ? "copied" : "failed")}>
+              {technicalCopyStatus === "copied" ? "상세 근거 복사됨" : technicalCopyStatus === "failed" ? "상세 근거 복사 실패" : "상세 근거 보고서 복사"}
+            </button>
+            {(["before", "after"] as const).map(side => <section key={side}>
+              <h3>{side === "before" ? "변경 전" : "변경 후"}</h3>
+              <ul>{review.scopes[side].blocks.map(b => <li key={b.id}>{b.id} / {b.context} / {spanLabel(b.span)} / {b.sources.map(s => `${s.table} AS ${s.alias}${s.child ? ` (${s.child})` : ""}`).join(", ")}</li>)}</ul>
+              <ul>{review.scopes[side].relations.map((r, i) => <li key={i}>{r.kind}: {r.left} → {r.right} / {r.block} / {spanLabel(r.span)}</li>)}</ul>
+              <pre className="change-source-sql">{review.scopes[side].sql}</pre>
+            </section>)}
+          </details>
 
           <footer className="change-result-footer">
             <p>확인 결과를 변경 요청서나 리뷰 문서에 남길 수 있습니다.</p>
             <button className="secondary-button" type="button" onClick={() => void copyReview()}>
-              {copyStatus === "copied" ? "검토 메모 복사됨" : copyStatus === "failed" ? "복사 실패" : "검토 메모 복사"}
+              {copyStatus === "copied" ? "검토 보고서 복사됨" : copyStatus === "failed" ? "복사 실패" : "검토 보고서 복사"}
             </button>
           </footer>
         </section>
