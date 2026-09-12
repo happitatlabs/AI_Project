@@ -7,7 +7,7 @@ const providers = {
   naver: { authorize: "https://nid.naver.com/oauth2.0/authorize", token: "https://nid.naver.com/oauth2.0/token", profile: "https://openapi.naver.com/v1/nid/me", scope: "" },
 };
 export type SocialProvider = keyof typeof providers;
-export const availableProviders = (env: Env) => Object.keys(providers).filter(p => memberReady(env) && env.PUBLIC_ORIGIN && env[`OAUTH_${p.toUpperCase()}_CLIENT_ID`] && env[`OAUTH_${p.toUpperCase()}_CLIENT_SECRET`]);
+export const availableProviders = (env: Env) => Object.keys(providers).filter(p => memberReady(env) && env.PUBLIC_ORIGIN && env[`OAUTH_${p.toUpperCase()}_CLIENT_ID`] && (p === "kakao" || env[`OAUTH_${p.toUpperCase()}_CLIENT_SECRET`]));
 const stateCookie = (value: string, age: number) => `__Host-sql-oauth=${value}; Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age=${age}`;
 const finishLogin = (headers: Headers, origin: string, ok: boolean) => {
   const nonce = encode(crypto.getRandomValues(new Uint8Array(16)));
@@ -41,10 +41,12 @@ export async function handleMemberOAuth(request: Request, env: Env): Promise<Res
   try {
     const data = await verify(cookieValue(request, "__Host-sql-oauth"), env.DEMO_SESSION_SECRET!);
     if (!data || data.provider !== provider || typeof data.state !== "string" || data.state !== url.searchParams.get("state") || !url.searchParams.get("code") || url.searchParams.has("error")) throw new Error("Invalid callback");
-    const response = await fetch(config.token, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, signal: AbortSignal.timeout(15000), body: new URLSearchParams({
-      grant_type: "authorization_code", client_id: id, client_secret: secret, code: url.searchParams.get("code")!, redirect_uri: callback, state: data.state,
+    const tokenParams: Record<string, string> = {
+      grant_type: "authorization_code", client_id: id, code: url.searchParams.get("code")!, redirect_uri: callback, state: data.state,
       ...(provider === "google" ? { code_verifier: String(data.verifier) } : {}),
-    }) });
+    };
+    if (secret) tokenParams.client_secret = secret;
+    const response = await fetch(config.token, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, signal: AbortSignal.timeout(15000), body: new URLSearchParams(tokenParams) });
     const token = await response.json() as { access_token?: string };
     if (!response.ok || !token.access_token) throw new Error("Token exchange failed");
     const userResponse = await fetch(config.profile, { headers: { Authorization: `Bearer ${token.access_token}` }, signal: AbortSignal.timeout(15000) });
