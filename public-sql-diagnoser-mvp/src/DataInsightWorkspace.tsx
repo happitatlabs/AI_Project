@@ -1,4 +1,5 @@
 import { useMemo, useState, type ChangeEvent } from "react";
+import { memberAiFetch } from "./memberAiFetch";
 import type { AiDataInsightsResponse } from "./aiDataInsights";
 import {
   errorAiDataInsightsState,
@@ -25,6 +26,7 @@ type CopyStatus = "idle" | "copied" | "selected" | "failed";
 
 type DataInsightWorkspaceProps = {
   onQuotaExceeded?: () => void;
+  beforeAiRequest?: () => boolean;
   aiFeatureEnabled: boolean;
   sqlAnalysis?: SqlAnalysisResult;
 };
@@ -102,6 +104,7 @@ const candidateFacts = (analysis: ComputedAnalysisResult, candidateId: string) =
 
 export function DataInsightWorkspace({
   onQuotaExceeded,
+  beforeAiRequest,
   aiFeatureEnabled,
   sqlAnalysis,
 }: DataInsightWorkspaceProps) {
@@ -248,6 +251,7 @@ export function DataInsightWorkspace({
   };
 
   const requestAiInsights = async () => {
+    if (beforeAiRequest && !beforeAiRequest()) return;
     if (
       !aiFeatureEnabled ||
       !analysis ||
@@ -261,7 +265,7 @@ export function DataInsightWorkspace({
     setCopyStatus("idle");
 
     try {
-      const response = await fetch("/api/ai-data-insights", {
+      const response = await memberAiFetch("/api/ai-data-insights", {
         body: JSON.stringify({
           computedAnalysis: analysis,
           sqlAnalysis,
@@ -272,7 +276,7 @@ export function DataInsightWorkspace({
         method: "POST",
       });
       const responseBody = await response.json();
-      if (response.status === 429 && responseBody?.quota?.remaining === 0) onQuotaExceeded?.();
+      if ([402, 429].includes(response.status) && responseBody?.quota?.remaining === 0) onQuotaExceeded?.();
 
       if (!response.ok) {
         throw new Error(

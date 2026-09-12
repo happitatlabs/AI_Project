@@ -6,6 +6,10 @@ import { handleAiMultiDocumentDraftRequest } from "../api/ai-multi-document-draf
 import { pickAiProviderEnv, resolveProviderConfig } from "../api/ai-provider.js";
 import { requestQuota, type QuotaNamespace } from "./demoQuota.js";
 export { DemoAiQuota } from "./demoQuota.js";
+export { MemberAccount } from "./memberAccount.js";
+import { memberRequest } from "./memberAccount.js";
+import { clearMemberCookie, digest, localMemberLogin, memberReady, readMember, sameOrigin, type Member } from "./memberAuth.js";
+import { availableProviders, handleMemberOAuth } from "./memberOAuth.js";
 
 type WorkerAssets = {
   fetch: (request: Request) => Promise<Response>;
@@ -18,6 +22,7 @@ type WorkerEnv = {
   DEMO_USERNAME?: string;
   DEMO_TEST_PASSWORD?: string;
   DEMO_AI_QUOTA?: QuotaNamespace;
+  MEMBER_ACCOUNTS?: QuotaNamespace;
   [key: string]: WorkerAssets | QuotaNamespace | string | undefined;
 };
 
@@ -325,6 +330,18 @@ const handleLogoutRequest = (request: Request) => {
 };
 
 const handleRuntimeConfigRequest = async (request: Request, env: WorkerEnv) => {
+  if (env.AI_CREDITS_ENABLED === "true") {
+    const member = await accessMember(request, env);
+    let credits: unknown;
+    let creditError = false;
+    if (member) {
+      try { credits = member.unlimited ? { unlimited: true, remaining: null } : await (await memberRequest(env.MEMBER_ACCOUNTS, member.id, "/balance")).json(); }
+      catch { creditError = true; }
+    }
+    return jsonResponse({ aiConfigured: isWorkerAiConfigured(env), aiEnabled: Boolean(member && !creditError && isWorkerAiConfigured(env)), authenticated: Boolean(member),
+      loginRequired: false, aiLoginRequired: true, creditsMode: true, username: member?.username, credits, creditError,
+      registrationEnabled: memberReady(env), providers: availableProviders(env), paymentsEnabled: false });
+  }
   const config = getDemoAccessConfig(env);
   const session = config ? await getDemoSession(request, config) : undefined;
   const aiConfigured = isWorkerAiConfigured(env);
@@ -365,6 +382,38 @@ const handleApiRequest = async (request: Request, env: WorkerEnv, pathname: stri
 
   if (request.method !== "POST") {
     return jsonResponse({ error: "POST 요청만 지원합니다." }, 405);
+  }
+
+  if (env.AI_CREDITS_ENABLED === "true") {
+    if (!sameOrigin(request)) return jsonResponse({ error: "허용되지 않은 요청입니다." }, 403);
+    const member = await accessMember(request, env);
+    if (!member) return jsonResponse({ error: "AI 사용에는 로그인이 필요합니다.", loginRequired: true }, 401);
+    if (!isWorkerAiConfigured(env)) return jsonResponse({ error: "AI 연결이 준비되지 않았습니다." }, 503);
+    let reserved = false;
+    const id = request.headers.get("X-Request-Id") || crypto.randomUUID();
+    try {
+      const body = await parseJsonRequest(request);
+      if (!member.unlimited) {
+        const reservation = await memberRequest(env.MEMBER_ACCOUNTS, member.id, "/reserve", { id });
+        if (reservation.status === 402) return jsonResponse({ error: "AI 이용권을 모두 사용했습니다. 충전 후 다시 이용해 주세요.", quota: { remaining: 0 }, credits: { remaining: 0, unlimited: false } }, 402);
+        if (!reservation.ok) return jsonResponse({ error: "요청이 중복되었거나 이용권을 확인하지 못했습니다." }, reservation.status);
+        reserved = true;
+      }
+      const result = await handler(body, {
+        env: pickAiProviderEnv(env as Record<string, string | undefined>),
+        fetcher: (input, init) => fetch(input, { ...init, signal: AbortSignal.any([AbortSignal.timeout(90000), request.signal, ...(init?.signal ? [init.signal] : [])]) }),
+      });
+      if (reserved) {
+        const settlement = await memberRequest(env.MEMBER_ACCOUNTS, member.id, result.status >= 200 && result.status < 300 && !request.signal.aborted ? "/complete" : "/release", { id });
+        if (!settlement.ok) throw new Error("Credit settlement failed");
+        reserved = false;
+      }
+      return jsonResponse(result.body, result.status);
+    } catch (error) {
+      return jsonResponse({ error: error instanceof RangeError ? error.message : "AI 요청을 완료하지 못했습니다. 이용권 내역을 다시 확인해 주세요." }, error instanceof RangeError ? 413 : 503);
+    } finally {
+      if (reserved) { try { await memberRequest(env.MEMBER_ACCOUNTS, member.id, "/release", { id }); } catch { /* Expiring reservation recovers after a storage outage. */ } }
+    }
   }
 
   const config = getDemoAccessConfig(env);
@@ -415,6 +464,36 @@ export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(request.url);
 
+    if (env.AI_CREDITS_ENABLED === "true") {
+      const social = await handleMemberOAuth(request, env);
+      if (social) return social;
+      if (url.pathname === "/api/auth/register" || url.pathname === "/api/auth/member-login") return localMemberLogin(request, env, url.pathname.endsWith("register"));
+      if (request.method === "POST" && url.pathname.startsWith("/api/auth/") && !sameOrigin(request)) return jsonResponse({ error: "허용되지 않은 요청입니다." }, 403);
+      if (url.pathname === "/api/auth/login" && request.method === "POST") {
+        try {
+          const limit = await memberRequest(env.MEMBER_ACCOUNTS, `auth-ip:${await digest(request.headers.get("CF-Connecting-IP") || "unknown")}`, "/throttle", {});
+          if (!limit.ok) return limit;
+        } catch { return jsonResponse({ error: "로그인 서비스를 확인하지 못했습니다." }, 503); }
+      }
+      if (url.pathname === "/api/auth/logout") {
+        if (request.method !== "POST") return new Response(null, { status: 405 });
+        const headers = new Headers({ "Cache-Control": "no-store" });
+        headers.append("Set-Cookie", expiredSessionCookie()); headers.append("Set-Cookie", clearMemberCookie());
+        return new Response(JSON.stringify({ authenticated: false }), { headers });
+      }
+      if (url.pathname === "/api/credits/cancel") {
+        if (request.method !== "POST" || !sameOrigin(request)) return new Response(null, { status: 403 });
+        const member = await accessMember(request, env);
+        if (!member) return jsonResponse({ error: "로그인이 필요합니다." }, 401);
+        if (member.unlimited) return jsonResponse({ ok: true });
+        try {
+          const body = await parseJsonRequest(request) as { id?: unknown };
+          return await memberRequest(env.MEMBER_ACCOUNTS, member.id, "/release", { id: body.id });
+        } catch { return jsonResponse({ error: "취소 상태를 확인하지 못했습니다." }, 503); }
+      }
+      if (url.pathname.startsWith("/api/credits/") || url.pathname.startsWith("/api/payments/")) return jsonResponse({ error: "결제 서비스 연결 전입니다. 현재 결제나 충전은 지원하지 않습니다." }, 503);
+    }
+
     if (url.pathname === "/api/runtime-config") {
       return handleRuntimeConfigRequest(request, env);
     }
@@ -434,3 +513,13 @@ export default {
     return env.ASSETS.fetch(request);
   },
 };
+
+async function accessMember(request: Request, env: WorkerEnv): Promise<Member | undefined> {
+  const member = await readMember(request, env);
+  if (member) return member;
+  const config = getDemoAccessConfig(env);
+  const legacy = config ? await getDemoSession(request, config) : undefined;
+  if (!legacy) return;
+  return { id: `legacy:${legacy.username}`, username: legacy.username,
+    unlimited: legacy.username.toLowerCase() === "plushome58@naver.com" && legacy.username === config!.username };
+}

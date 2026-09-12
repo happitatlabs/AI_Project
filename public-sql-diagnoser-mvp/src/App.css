@@ -2405,6 +2405,26 @@ code {
   font-size: 0.9rem;
 }
 
+.member-dialog {
+  width: min(440px, calc(100% - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  border: 1px solid #cbd2d8;
+  border-radius: 8px;
+  padding: 24px;
+  color: #202a32;
+  background: #fff;
+}
+.member-dialog::backdrop { background: #0007; }
+.member-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.member-dialog h2 { font-size: 20px; margin: 0; }
+.member-dialog p { line-height: 1.5; }
+.member-dialog form, .member-dialog label, .member-socials { display: grid; gap: 10px; }
+.member-socials { margin: 20px 0; }
+.member-dialog button, .member-dialog input { min-height: 40px; }
+.member-dialog input { width: 100%; box-sizing: border-box; }
+.member-dialog [role="alert"] { color: #a61c26; }
+
 .change-report-items > section {
   padding: 16px 0;
   border-bottom: 1px solid #d9dfe3;

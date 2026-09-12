@@ -82,6 +82,9 @@ compileTsFile("api/ai-document-draft.ts", path.join(tempModuleRoot, "api/ai-docu
 compileTsFile("api/ai-multi-document-draft.ts", path.join(tempModuleRoot, "api/ai-multi-document-draft.js"));
 compileTsFile("api/ai-data-insights.ts", path.join(tempModuleRoot, "api/ai-data-insights.js"));
 compileTsFile("src/demoQuota.ts", path.join(tempModuleRoot, "src/demoQuota.js"));
+compileTsFile("src/memberAccount.ts", path.join(tempModuleRoot, "src/memberAccount.js"));
+compileTsFile("src/memberAuth.ts", path.join(tempModuleRoot, "src/memberAuth.js"));
+compileTsFile("src/memberOAuth.ts", path.join(tempModuleRoot, "src/memberOAuth.js"));
 compileTsFile("src/sqlRewriteRules.ts", path.join(tempModuleRoot, "src/sqlRewriteRules.js"));
 compileTsFile("api/ai-sql-rewrite.ts", path.join(tempModuleRoot, "api/ai-sql-rewrite.js"));
 compileTsFile("src/cloudflareWorker.ts", path.join(tempModuleRoot, "src/cloudflareWorker.js"));
