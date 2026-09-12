@@ -1,6 +1,15 @@
 # SQL Diagnoser
 
-## Limited demo account
+## Member credits (new mode)
+
+`wrangler.jsonc` enables `AI_CREDITS_ENABLED=true`. General SQL features are public;
+AI requires login. New member wallets receive one lifetime trial credit, and each
+successful AI request consumes one credit. The legacy primary account
+`plushome58@naver.com` is unlimited after password authentication. See
+[member-credits.md](./member-credits.md) for activation, external prerequisites,
+security boundaries and payment limitations. No live checkout is implemented.
+
+## Limited demo account (legacy mode only)
 
 Set `DEMO_TEST_PASSWORD` as a Worker secret to enable the additional `test` account.
 Existing `DEMO_USERNAME`, `DEMO_PASSWORD`, and `DEMO_SESSION_SECRET` remain unchanged.

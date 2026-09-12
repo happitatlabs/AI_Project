@@ -4,9 +4,10 @@ import {
   useMemo,
   useRef,
   useState,
-  type FormEvent,
   type ReactNode,
 } from "react";
+import { MemberLogin } from "./MemberLogin";
+import { memberAiFetch } from "./memberAiFetch";
 import { DataInsightWorkspace } from "./DataInsightWorkspace";
 import { SqlChangeReviewWorkspace } from "./SqlChangeReviewWorkspace";
 import {
@@ -599,6 +600,10 @@ type DemoAccessState = {
   username?: string;
 };
 type RuntimeConfig = {
+  creditsMode?: boolean;
+  credits?: { remaining: number | null; unlimited: boolean };
+  providers?: string[];
+  registrationEnabled?: boolean;
   aiConfigured: boolean;
   aiEnabled: boolean;
   authenticated: boolean;
@@ -612,6 +617,10 @@ const readRuntimeConfig = (value: unknown): RuntimeConfig | undefined => {
   }
 
   const config = value as {
+    creditsMode?: unknown;
+    credits?: { remaining?: unknown; unlimited?: unknown };
+    providers?: unknown;
+    registrationEnabled?: unknown;
     aiConfigured?: unknown;
     aiEnabled?: unknown;
     authenticated?: unknown;
@@ -624,6 +633,10 @@ const readRuntimeConfig = (value: unknown): RuntimeConfig | undefined => {
   }
 
   return {
+    creditsMode: config.creditsMode === true,
+    credits: config.credits && (typeof config.credits.remaining === "number" || config.credits.remaining === null) ? { remaining: config.credits.remaining, unlimited: config.credits.unlimited === true } : undefined,
+    providers: Array.isArray(config.providers) ? config.providers.filter((p): p is string => typeof p === "string" && ["google", "kakao", "naver"].includes(p)) : [],
+    registrationEnabled: config.registrationEnabled === true,
     aiConfigured: config.aiConfigured === true,
     aiEnabled: config.aiEnabled,
     authenticated: config.authenticated === true,
@@ -631,87 +644,6 @@ const readRuntimeConfig = (value: unknown): RuntimeConfig | undefined => {
     username: typeof config.username === "string" ? config.username : undefined,
   };
 };
-
-type DemoLoginScreenProps = {
-  connectionError?: boolean;
-  errorMessage?: string;
-  isChecking?: boolean;
-  isSubmitting: boolean;
-  onPasswordChange: (value: string) => void;
-  onRetryConnection: () => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  onUsernameChange: (value: string) => void;
-  password: string;
-  username: string;
-};
-
-function DemoLoginScreen({
-  connectionError = false,
-  errorMessage,
-  isChecking = false,
-  isSubmitting,
-  onPasswordChange,
-  onRetryConnection,
-  onSubmit,
-  onUsernameChange,
-  password,
-  username,
-}: DemoLoginScreenProps) {
-  return (
-    <main className="demo-login-shell">
-      <section className="demo-login-panel" aria-labelledby="demo-login-title">
-        <p className="eyebrow">Protected SQL Diagnoser</p>
-        <h1 id="demo-login-title">테스트 계정 로그인</h1>
-        <p className="demo-login-description">
-          지정된 테스트 계정으로 로그인하면 AI 설명 보강과 문서 초안을 사용할 수 있습니다.
-        </p>
-
-        {isChecking ? (
-          <p className="demo-login-checking" role="status">접근 상태를 확인하고 있습니다.</p>
-        ) : connectionError ? (
-          <div className="demo-login-connection-error" role="alert">
-            <p>보호된 데모의 접근 상태를 확인하지 못했습니다.</p>
-            <button className="secondary-button" type="button" onClick={onRetryConnection}>
-              다시 확인
-            </button>
-          </div>
-        ) : (
-          <form className="demo-login-form" onSubmit={onSubmit}>
-            <label htmlFor="demo-username">
-              아이디
-              <input
-                id="demo-username"
-                autoComplete="username"
-                disabled={isSubmitting}
-                value={username}
-                onChange={(event) => onUsernameChange(event.target.value)}
-              />
-            </label>
-            <label htmlFor="demo-password">
-              비밀번호
-              <input
-                id="demo-password"
-                autoComplete="current-password"
-                disabled={isSubmitting}
-                type="password"
-                value={password}
-                onChange={(event) => onPasswordChange(event.target.value)}
-              />
-            </label>
-            {errorMessage ? <p className="demo-login-error" role="alert">{errorMessage}</p> : null}
-            <button className="primary-button" disabled={isSubmitting} type="submit">
-              {isSubmitting ? "로그인 확인 중" : "로그인"}
-            </button>
-          </form>
-        )}
-
-        <p className="demo-login-help">
-          테스트 계정이 없거나 로그인할 수 없으면 데모 관리자에게 요청하세요.
-        </p>
-      </section>
-    </main>
-  );
-}
 
 const tableAssetImportanceLabel = (importance: TableAssetProfile["importance"]) => {
   if (importance === "high") {
@@ -836,6 +768,8 @@ const MODE_GUIDANCE: Record<AnalysisMode, { label: string; description: string }
 
 function App() {
   const [quotaNotice, setQuotaNotice] = useState(false);
+  const [memberLoginOpen, setMemberLoginOpen] = useState(false);
+  const [memberConfig, setMemberConfig] = useState<{ credits?: { remaining: number | null; unlimited: boolean }; providers: string[]; registrationEnabled: boolean; creditsMode: boolean }>({ providers: [], registrationEnabled: false, creditsMode: false });
   const quotaNoticeRef = useRef<HTMLElement>(null);
   const showQuotaNotice = useCallback(() => setQuotaNotice(true), []);
   useEffect(() => {
@@ -864,12 +798,6 @@ function App() {
     loginRequired: false,
     status: isDemoMode ? "checking" : "public",
   }));
-  const [demoUsername, setDemoUsername] = useState("");
-  const [demoPassword, setDemoPassword] = useState("");
-  const [demoLoginState, setDemoLoginState] = useState<{
-    errorMessage?: string;
-    status: "idle" | "loading";
-  }>({ status: "idle" });
   const [demoLogoutState, setDemoLogoutState] = useState<"idle" | "loading" | "error">("idle");
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>("single");
   const [sql, setSql] = useState(DEFAULT_SQL);
@@ -912,7 +840,12 @@ function App() {
   const [systemGraphMode, setSystemGraphMode] = useState<SystemGraphMode>("overview");
   const [selectedSystemNodeId, setSelectedSystemNodeId] = useState("");
   const [riskFilter, setRiskFilter] = useState<RiskFilter>("all");
-  const isAiFeatureEnabled = runtimeAiFeatureEnabled;
+  const isAiFeatureEnabled = runtimeAiFeatureEnabled || !demoAccessState.authenticated;
+  const beforeAiRequest = () => {
+    if (!demoAccessState.authenticated && (isDemoMode || memberConfig.creditsMode || demoAccessState.loginRequired)) { setMemberLoginOpen(true); return false; }
+    if (memberConfig.creditsMode && memberConfig.credits && !memberConfig.credits.unlimited && memberConfig.credits.remaining === 0) { showQuotaNotice(); return false; }
+    return true;
+  };
   const hasSingleSqlInput = sql.trim().length > 0;
   const hasMultiSqlInput = multiSql.trim().length > 0;
   const isSingleAnalysisCurrent =
@@ -921,27 +854,15 @@ function App() {
     hasMultiSqlInput && multiSql.trim() === analyzedMultiSql.trim();
 
   const applyRuntimeConfig = useCallback((config: RuntimeConfig) => {
-    if (isDemoMode && !config.loginRequired) {
-      setRuntimeAiFeatureEnabled(false);
-      setDemoAccessState({
-        aiConfigured: config.aiConfigured,
-        authenticated: false,
-        loginRequired: false,
-        status: "error",
-      });
-      return;
-    }
-
     setRuntimeAiFeatureEnabled(config.aiEnabled);
     setDemoAccessState({
       aiConfigured: config.aiConfigured,
       authenticated: config.authenticated,
       loginRequired: config.loginRequired,
-      status: config.loginRequired
-        ? config.authenticated ? "authenticated" : "unauthenticated"
-        : "public",
+      status: config.authenticated ? "authenticated" : config.loginRequired ? "unauthenticated" : "public",
       username: config.username,
     });
+    setMemberConfig({ credits: config.credits, providers: config.providers ?? [], registrationEnabled: config.registrationEnabled === true, creditsMode: config.creditsMode === true });
   }, []);
 
   const refreshDemoRuntimeConfig = useCallback(async () => {
@@ -987,6 +908,11 @@ function App() {
 
   useEffect(() => {
     void refreshDemoRuntimeConfig();
+    const refresh = () => { void refreshDemoRuntimeConfig(); };
+    const login = () => setMemberLoginOpen(true);
+    window.addEventListener("sql-ai-complete", refresh);
+    window.addEventListener("sql-login-required", login);
+    return () => { window.removeEventListener("sql-ai-complete", refresh); window.removeEventListener("sql-login-required", login); };
   }, [refreshDemoRuntimeConfig]);
   const tableAssetMap = useMemo(
     () => buildTableAssetMap(multiAnalysis),
@@ -1377,6 +1303,7 @@ function App() {
   };
 
   const requestAiExplanation = async () => {
+    if (!beforeAiRequest()) return;
     const trimmedSql = sql.trim();
 
     if (
@@ -1397,7 +1324,7 @@ function App() {
 
     const request = aiRequests.begin("single");
     try {
-      const response = await fetch("/api/ai-explain", {
+      const response = await memberAiFetch("/api/ai-explain", {
         signal: request.signal,
         body: JSON.stringify({
           analysis: latestAnalysis,
@@ -1412,7 +1339,7 @@ function App() {
       if (!request.current()) return;
       request.signal.throwIfAborted();
 
-      if (response.status === 429 && responseBody?.quota?.remaining === 0) showQuotaNotice();
+      if ([402, 429].includes(response.status) && responseBody?.quota?.remaining === 0) showQuotaNotice();
       if (!response.ok) {
         const errorMessage =
           typeof responseBody?.error === "string"
@@ -1441,6 +1368,7 @@ function App() {
   };
 
   const requestMultiAiExplanation = async () => {
+    if (!beforeAiRequest()) return;
     const trimmedSql = multiSql.trim();
 
     if (
@@ -1465,7 +1393,7 @@ function App() {
 
     const request = aiRequests.begin("multi");
     try {
-      const response = await fetch("/api/ai-explain", {
+      const response = await memberAiFetch("/api/ai-explain", {
         signal: request.signal,
         body: JSON.stringify({
           analysis: aiAnalysis,
@@ -1480,7 +1408,7 @@ function App() {
       if (!request.current()) return;
       request.signal.throwIfAborted();
 
-      if (response.status === 429 && responseBody?.quota?.remaining === 0) showQuotaNotice();
+      if ([402, 429].includes(response.status) && responseBody?.quota?.remaining === 0) showQuotaNotice();
       if (!response.ok) {
         const errorMessage =
           typeof responseBody?.error === "string"
@@ -1508,6 +1436,7 @@ function App() {
   };
 
   const requestAiDocumentDraft = async () => {
+    if (!beforeAiRequest()) return;
     const trimmedSql = sql.trim();
 
     if (
@@ -1529,7 +1458,7 @@ function App() {
 
     const request = aiRequests.begin("document");
     try {
-      const response = await fetch("/api/ai-document-draft", {
+      const response = await memberAiFetch("/api/ai-document-draft", {
         signal: request.signal,
         body: JSON.stringify({
           analysis: latestAnalysis,
@@ -1545,7 +1474,7 @@ function App() {
       if (!request.current()) return;
       request.signal.throwIfAborted();
 
-      if (response.status === 429 && responseBody?.quota?.remaining === 0) showQuotaNotice();
+      if ([402, 429].includes(response.status) && responseBody?.quota?.remaining === 0) showQuotaNotice();
       if (!response.ok) {
         const errorMessage =
           typeof responseBody?.error === "string"
@@ -1579,6 +1508,7 @@ function App() {
   };
 
   const requestMultiAiDocumentDraft = async () => {
+    if (!beforeAiRequest()) return;
     const trimmedSql = multiSql.trim();
 
     if (
@@ -1601,7 +1531,7 @@ function App() {
 
     const request = aiRequests.begin("multi-document");
     try {
-      const response = await fetch("/api/ai-multi-document-draft", {
+      const response = await memberAiFetch("/api/ai-multi-document-draft", {
         signal: request.signal,
         body: JSON.stringify({
           documentType: multiAiDocumentType,
@@ -1616,7 +1546,7 @@ function App() {
       if (!request.current()) return;
       request.signal.throwIfAborted();
 
-      if (response.status === 429 && responseBody?.quota?.remaining === 0) showQuotaNotice();
+      if ([402, 429].includes(response.status) && responseBody?.quota?.remaining === 0) showQuotaNotice();
       if (!response.ok) {
         const errorMessage =
           typeof responseBody?.error === "string"
@@ -1800,54 +1730,6 @@ function App() {
     );
   };
 
-  const submitDemoLogin = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    if (!demoUsername.trim() || !demoPassword) {
-      setDemoLoginState({
-        errorMessage: "아이디와 비밀번호를 모두 입력하세요.",
-        status: "idle",
-      });
-      return;
-    }
-
-    setDemoLoginState({ status: "loading" });
-
-    try {
-      const response = await fetch("/api/auth/login", {
-        body: JSON.stringify({
-          password: demoPassword,
-          username: demoUsername.trim(),
-        }),
-        credentials: "same-origin",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        method: "POST",
-      });
-      const body = await response.json().catch(() => undefined);
-
-      if (!response.ok) {
-        throw new Error(
-          typeof body?.error === "string"
-            ? body.error
-            : "로그인에 실패했습니다. 입력한 계정을 확인하세요.",
-        );
-      }
-
-      setDemoPassword("");
-      setDemoLoginState({ status: "idle" });
-      await refreshDemoRuntimeConfig();
-    } catch (error) {
-      setDemoLoginState({
-        errorMessage: error instanceof Error
-          ? error.message
-          : "로그인에 실패했습니다. 잠시 후 다시 시도하세요.",
-        status: "idle",
-      });
-    }
-  };
-
   const logoutDemo = async () => {
     setQuotaNotice(false);
     cancelAiRequests();
@@ -1863,7 +1745,6 @@ function App() {
         throw new Error("logout failed");
       }
 
-      setDemoPassword("");
       setDemoLogoutState("idle");
       await refreshDemoRuntimeConfig();
     } catch {
@@ -1871,31 +1752,11 @@ function App() {
     }
   };
 
-  const showDemoLogin =
-    demoAccessState.status === "unauthenticated"
-    || (isDemoMode && ["checking", "error"].includes(demoAccessState.status));
-
-  if (showDemoLogin) {
-    return (
-      <DemoLoginScreen
-        connectionError={demoAccessState.status === "error"}
-        errorMessage={demoLoginState.errorMessage}
-        isChecking={demoAccessState.status === "checking"}
-        isSubmitting={demoLoginState.status === "loading"}
-        password={demoPassword}
-        username={demoUsername}
-        onPasswordChange={setDemoPassword}
-        onRetryConnection={() => void refreshDemoRuntimeConfig()}
-        onSubmit={(event) => void submitDemoLogin(event)}
-        onUsernameChange={setDemoUsername}
-      />
-    );
-  }
-
   return (
     <main
       className={`app-shell ${isDemoMode ? "demo-mode" : ""} ${!isAiFeatureEnabled ? "ai-disabled" : ""}`.trim()}
     >
+      {memberLoginOpen ? <MemberLogin onClose={() => setMemberLoginOpen(false)} onSignedIn={refreshDemoRuntimeConfig} providers={memberConfig.providers} registrationEnabled={memberConfig.registrationEnabled} /> : null}
       <section className="workspace">
         <header className="app-header">
           <div className="app-header-copy">
@@ -1910,7 +1771,7 @@ function App() {
             {demoAccessState.status === "authenticated" ? (
               <div className="demo-session-control">
                 <span>{demoAccessState.username ?? "테스트 사용자"} 로그인됨</span>
-                {demoAccessState.username === "test" ? <small>AI 하루 10회 · 한국시간 자정 초기화 · 접수된 요청 기준</small> : null}
+                {memberConfig.creditsMode ? <small>{memberConfig.credits?.unlimited ? "AI 무제한 · 테스트 계정" : `AI 이용권 ${memberConfig.credits?.remaining ?? "확인 중"}개 · 성공 1회당 1개`}</small> : null}
                 <button
                   className="text-button"
                   disabled={demoLogoutState === "loading"}
@@ -1923,7 +1784,7 @@ function App() {
                   <small role="alert">로그아웃 처리에 실패했습니다.</small>
                 ) : null}
               </div>
-            ) : null}
+            ) : <button type="button" className="text-button" onClick={() => setMemberLoginOpen(true)}>로그인 / 가입</button>}
             <ul className="trust-indicators" aria-label="분석 원칙">
               <li>SQL 실행 없음</li>
               <li>룰 기반 우선</li>
@@ -1933,8 +1794,8 @@ function App() {
         </header>
         {quotaNotice ? (
           <section className="quota-notice" role="alert" tabIndex={-1} ref={quotaNoticeRef} aria-labelledby="quota-notice-title">
-            <strong id="quota-notice-title">이 계정의 오늘 AI 사용 한도를 모두 사용했습니다.</strong>
-            <p>하루 10회 제한입니다. 한국시간 다음 날 오전 0시부터 다시 사용할 수 있습니다.</p>
+            <strong id="quota-notice-title">AI 이용권을 모두 사용했습니다.</strong>
+            <p>AI 성공 1회에 이용권 1개가 필요합니다. 충전 결제는 현재 연결 준비 중입니다.</p>
             <p>SQL 진단과 일반 데이터 분석은 계속 사용할 수 있습니다.</p>
             <button type="button" className="text-button" onClick={() => setQuotaNotice(false)}>확인</button>
           </section>
@@ -1960,7 +1821,7 @@ function App() {
           <aside className="demo-safety-banner" aria-label="보호된 데모 안내">
             <strong>보호된 데모 환경</strong>
             <p>
-              이 화면은 승인된 테스트 계정에서만 사용합니다. SQL을 실행하지 않고 브라우저에
+              일반 SQL 분석은 로그인 없이 무료로 사용할 수 있습니다. SQL을 실행하지 않고 브라우저에
               저장하지 않지만, 실제 운영 SQL·개인정보·고객 식별값은 입력하지 마세요. AI 보강은
               로그인 후에만 사용할 수 있으며, 마스킹된 SQL과 분석 결과만 provider에 전송됩니다.
             </p>
@@ -2642,9 +2503,9 @@ function App() {
         )}
           </>
         ) : analysisMode === "change" ? (
-          <SqlChangeReviewWorkspace aiFeatureEnabled={isAiFeatureEnabled} onQuotaExceeded={showQuotaNotice} />
+          <SqlChangeReviewWorkspace beforeAiRequest={beforeAiRequest} aiFeatureEnabled={isAiFeatureEnabled} onQuotaExceeded={showQuotaNotice} />
         ) : analysisMode === "data" ? (
-          <DataInsightWorkspace aiFeatureEnabled={isAiFeatureEnabled} onQuotaExceeded={showQuotaNotice} />
+          <DataInsightWorkspace beforeAiRequest={beforeAiRequest} aiFeatureEnabled={isAiFeatureEnabled} onQuotaExceeded={showQuotaNotice} />
         ) : (
           <>
             <section className="sql-input-panel" aria-label="다건 SQL 입력">

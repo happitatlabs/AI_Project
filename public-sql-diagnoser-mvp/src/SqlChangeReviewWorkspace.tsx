@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { memberAiFetch } from "./memberAiFetch";
 import { AiRequestCoordinator } from "./aiExplanationState";
 import { briefSql, spanLabel } from "./sqlChangeScope";
 import {
@@ -25,9 +26,10 @@ const DEFAULT_CASE = SQL_CHANGE_REVIEW_CASES[0];
 
 const initialReview = () => buildSqlChangeReview(DEFAULT_CASE.beforeSql, DEFAULT_CASE.afterSql);
 
-export function SqlChangeReviewWorkspace({ aiFeatureEnabled = false, onQuotaExceeded }: {
+export function SqlChangeReviewWorkspace({ aiFeatureEnabled = false, onQuotaExceeded, beforeAiRequest }: {
   aiFeatureEnabled?: boolean;
   onQuotaExceeded?: () => void;
+  beforeAiRequest?: () => boolean;
 }) {
   const aiRequests = useMemo(() => new AiRequestCoordinator(), []);
   const [aiLoading, setAiLoading] = useState(false);
@@ -124,20 +126,21 @@ export function SqlChangeReviewWorkspace({ aiFeatureEnabled = false, onQuotaExce
   };
 
   const recommendSql = async () => {
+    if (beforeAiRequest && !beforeAiRequest()) return;
     if (!aiFeatureEnabled || !beforeSql.trim() || aiLoading) return;
     const request = aiRequests.begin("rewrite");
     const priorSql = afterSql;
     setAiLoading(true);
     setAiError("");
     try {
-      const response = await fetch("/api/ai-sql-rewrite", {
+      const response = await memberAiFetch("/api/ai-sql-rewrite", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: beforeSql }), signal: request.signal,
       });
       const body = await response.json();
       if (!request.current()) return;
       request.signal.throwIfAborted();
-      if (response.status === 429 && body?.quota?.remaining === 0) onQuotaExceeded?.();
+      if ([402, 429].includes(response.status) && body?.quota?.remaining === 0) onQuotaExceeded?.();
       if (!response.ok) throw new Error(typeof body?.error === "string" ? body.error : "SQL 추천 요청에 실패했습니다.");
       const suggestion = body?.suggestion;
       if (!suggestion || typeof suggestion.sql !== "string" || !suggestion.sql.trim()

@@ -3,8 +3,9 @@
   "name": "sql-diagnoser-demo",
   "compatibility_date": "2026-08-02",
   "main": "./src/cloudflareWorker.ts",
-  "durable_objects": { "bindings": [{ "name": "DEMO_AI_QUOTA", "class_name": "DemoAiQuota" }] },
-  "migrations": [{ "tag": "demo-quota-v1", "new_sqlite_classes": ["DemoAiQuota"] }],
+  "vars": { "AI_CREDITS_ENABLED": "true", "PUBLIC_ORIGIN": "https://sql-diagnoser-demo.pletta900114.workers.dev" },
+  "durable_objects": { "bindings": [{ "name": "DEMO_AI_QUOTA", "class_name": "DemoAiQuota" }, { "name": "MEMBER_ACCOUNTS", "class_name": "MemberAccount" }] },
+  "migrations": [{ "tag": "demo-quota-v1", "new_sqlite_classes": ["DemoAiQuota"] }, { "tag": "member-credits-v1", "new_sqlite_classes": ["MemberAccount"] }],
   "assets": {
     "binding": "ASSETS",
     "directory": "./dist",
