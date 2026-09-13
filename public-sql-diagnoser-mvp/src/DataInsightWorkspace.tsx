@@ -1,5 +1,6 @@
 import { useMemo, useState, type ChangeEvent } from "react";
 import { memberAiFetch } from "./memberAiFetch";
+import { creditCostLabel, type CreditOperation } from "./creditPolicy";
 import type { AiDataInsightsResponse } from "./aiDataInsights";
 import {
   errorAiDataInsightsState,
@@ -26,7 +27,7 @@ type CopyStatus = "idle" | "copied" | "selected" | "failed";
 
 type DataInsightWorkspaceProps = {
   onQuotaExceeded?: () => void;
-  beforeAiRequest?: () => boolean;
+  beforeAiRequest?: (operation: CreditOperation) => Promise<boolean>;
   aiFeatureEnabled: boolean;
   sqlAnalysis?: SqlAnalysisResult;
 };
@@ -251,7 +252,7 @@ export function DataInsightWorkspace({
   };
 
   const requestAiInsights = async () => {
-    if (beforeAiRequest && !beforeAiRequest()) return;
+    if (beforeAiRequest && !await beforeAiRequest("insights")) return;
     if (
       !aiFeatureEnabled ||
       !analysis ||
@@ -477,7 +478,7 @@ export function DataInsightWorkspace({
             disabled={!analysis || analysis.reportFindings.length === 0 || aiState.status === "loading"}
             onClick={() => void requestAiInsights()}
           >
-            {aiState.status === "loading" ? "AI 문장 보강 중" : "AI로 보고서 문장 보강"}
+            {aiState.status === "loading" ? "AI 문장 보강 중" : `AI로 보고서 문장 보강 · ${creditCostLabel("insights")}`}
           </button>
         ) : null}
       </div>

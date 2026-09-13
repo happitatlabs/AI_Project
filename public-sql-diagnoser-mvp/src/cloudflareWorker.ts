@@ -10,6 +10,7 @@ export { MemberAccount } from "./memberAccount.js";
 import { memberRequest } from "./memberAccount.js";
 import { clearMemberCookie, digest, localMemberLogin, memberReady, readMember, sameOrigin, type Member } from "./memberAuth.js";
 import { availableProviders, handleMemberOAuth } from "./memberOAuth.js";
+import { CREDIT_OPERATIONS, CREDIT_PACKS, SIGNUP_CREDITS, resolveCreditOperation } from "./creditPolicy.js";
 
 type WorkerAssets = {
   fetch: (request: Request) => Promise<Response>;
@@ -340,7 +341,8 @@ const handleRuntimeConfigRequest = async (request: Request, env: WorkerEnv) => {
     }
     return jsonResponse({ aiConfigured: isWorkerAiConfigured(env), aiEnabled: Boolean(member && !creditError && isWorkerAiConfigured(env)), authenticated: Boolean(member),
       loginRequired: false, aiLoginRequired: true, creditsMode: true, username: member?.username, credits, creditError,
-      registrationEnabled: memberReady(env), providers: availableProviders(env), paymentsEnabled: false });
+      registrationEnabled: memberReady(env), providers: availableProviders(env), paymentsEnabled: false,
+      signupCredits: SIGNUP_CREDITS, creditOperations: CREDIT_OPERATIONS });
   }
   const config = getDemoAccessConfig(env);
   const session = config ? await getDemoSession(request, config) : undefined;
@@ -393,9 +395,13 @@ const handleApiRequest = async (request: Request, env: WorkerEnv, pathname: stri
     const id = request.headers.get("X-Request-Id") || crypto.randomUUID();
     try {
       const body = await parseJsonRequest(request);
-      if (!member.unlimited) {
-        const reservation = await memberRequest(env.MEMBER_ACCOUNTS, member.id, "/reserve", { id });
-        if (reservation.status === 402) return jsonResponse({ error: "AI 이용권을 모두 사용했습니다. 충전 후 다시 이용해 주세요.", quota: { remaining: 0 }, credits: { remaining: 0, unlimited: false } }, 402);
+      {
+        const operation = resolveCreditOperation(pathname, body);
+        const reservation = await memberRequest(env.MEMBER_ACCOUNTS, member.id, "/reserve", { id, operation, unlimited: member.unlimited });
+        if (reservation.status === 402) {
+          const credits = await reservation.json() as { remaining: number; required: number };
+          return jsonResponse({ error: `Credits가 부족합니다. 필요 ${credits.required} Credits / 잔여 ${credits.remaining} Credits.`, credits: { ...credits, unlimited: false } }, 402);
+        }
         if (!reservation.ok) return jsonResponse({ error: "요청이 중복되었거나 이용권을 확인하지 못했습니다." }, reservation.status);
         reserved = true;
       }
@@ -485,11 +491,26 @@ export default {
         if (request.method !== "POST" || !sameOrigin(request)) return new Response(null, { status: 403 });
         const member = await accessMember(request, env);
         if (!member) return jsonResponse({ error: "로그인이 필요합니다." }, 401);
-        if (member.unlimited) return jsonResponse({ ok: true });
         try {
           const body = await parseJsonRequest(request) as { id?: unknown };
           return await memberRequest(env.MEMBER_ACCOUNTS, member.id, "/release", { id: body.id });
         } catch { return jsonResponse({ error: "취소 상태를 확인하지 못했습니다." }, 503); }
+      }
+      if (url.pathname === "/api/credits/packs") {
+        if (request.method !== "GET") return new Response(null, { status: 405 });
+        return jsonResponse({ packs: CREDIT_PACKS, paymentsEnabled: false });
+      }
+      if (url.pathname === "/api/credits/history") {
+        if (request.method !== "GET") return new Response(null, { status: 405 });
+        const member = await accessMember(request, env);
+        if (!member) return jsonResponse({ error: "로그인이 필요합니다." }, 401);
+        const cursor = url.searchParams.get("before");
+        if (cursor !== null && (!/^\d+$/.test(cursor) || !Number.isSafeInteger(Number(cursor)) || Number(cursor) < 1)) return new Response(null, { status: 400 });
+        try {
+          const response = await memberRequest(env.MEMBER_ACCOUNTS, member.id, `/history${cursor ? `?before=${cursor}` : ""}`);
+          const result = await response.json() as { entries: Record<string, unknown>[]; nextCursor: number | null };
+          return jsonResponse({ ...result, entries: result.entries.map(entry => ({ ...entry, remaining: member.unlimited ? null : entry.remaining })), unlimited: member.unlimited }, response.status);
+        } catch { return jsonResponse({ error: "사용 이력을 불러오지 못했습니다." }, 503); }
       }
       if (url.pathname.startsWith("/api/credits/") || url.pathname.startsWith("/api/payments/")) return jsonResponse({ error: "결제 서비스 연결 전입니다. 현재 결제나 충전은 지원하지 않습니다." }, 503);
     }

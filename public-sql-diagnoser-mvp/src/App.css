@@ -2425,6 +2425,57 @@ code {
 .member-dialog input { width: 100%; box-sizing: border-box; }
 .member-dialog [role="alert"] { color: #a61c26; }
 
+.credits-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  min-height: 54px;
+  margin-bottom: 18px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #ccd6d4;
+  background: #fff;
+  color: #185b4c;
+}
+.credits-bar > strong { font-size: 14px; overflow-wrap: anywhere; }
+.credits-bar > div { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.credits-bar button { min-height: 36px; background: #fff; border: 1px solid #cbd2d8; border-radius: 4px; padding: 4px 8px; font-size: 13px; cursor: pointer; }
+.credits-dialog { width: min(760px, calc(100% - 32px)); }
+.credits-dialog-balance { color: #185b4c; font-weight: 700; }
+.credits-tabs { display: flex; gap: 4px; border-bottom: 1px solid #d9dfe3; margin-bottom: 16px; }
+.credits-tabs button { border: 0; border-bottom: 3px solid transparent; background: transparent; padding: 8px 16px; cursor: pointer; }
+.credits-tabs [aria-selected="true"] { color: #185b4c; border-bottom-color: #185b4c; font-weight: 700; }
+.credit-history-scroll { overflow-x: auto; }
+.credit-history-table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.credit-history-table th, .credit-history-table td { padding: 10px 8px; border-bottom: 1px solid #e2e6e8; text-align: right; }
+.credit-history-table th:nth-child(-n+2), .credit-history-table td:nth-child(-n+2) { text-align: left; }
+.credit-history-table th { white-space: nowrap; }
+.credit-history-table td:first-child { min-width: 90px; }
+.credit-history-table td:nth-child(2) { min-width: 128px; }
+.credit-history-table small { display: block; color: #536069; }
+.credit-history-table strong { font-weight: 500; }
+.credit-packs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.credit-pack { padding: 16px; border: 1px solid #d9dfe3; border-radius: 6px; }
+.credit-pack h3 { margin: 0; font-size: 18px; }
+.credit-pack button { width: 100%; }
+.credit-pack p { color: #536069; }
+.credit-price-table { width: 100%; border-collapse: collapse; margin-top: 24px; font-size: 14px; }
+.credit-price-table caption { text-align: left; font-weight: 700; padding-bottom: 8px; }
+.credit-price-table th, .credit-price-table td { padding: 8px 0; border-bottom: 1px solid #e2e6e8; }
+.credit-price-table th { text-align: left; font-weight: 400; }
+.credit-price-table td { text-align: right; white-space: nowrap; }
+@media (max-width: 560px) {
+  .credits-dialog { padding: 16px; }
+  .credit-packs { grid-template-columns: 1fr; }
+  .credit-pack { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; padding: 12px; }
+  .credit-pack p { margin: 0; }
+  .credit-pack button { grid-column: 1 / -1; }
+  .credits-bar { padding: 8px 4px; }
+}
+
 .change-report-items > section {
   padding: 16px 0;
   border-bottom: 1px solid #d9dfe3;

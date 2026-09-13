@@ -8,6 +8,8 @@ import {
 } from "react";
 import { MemberLogin } from "./MemberLogin";
 import { memberAiFetch } from "./memberAiFetch";
+import { CREDIT_OPERATIONS, creditCostLabel, resolveCreditOperation, type CreditOperation } from "./creditPolicy";
+import { CreditsDialog } from "./CreditsDialog";
 import { DataInsightWorkspace } from "./DataInsightWorkspace";
 import { SqlChangeReviewWorkspace } from "./SqlChangeReviewWorkspace";
 import {
@@ -768,6 +770,9 @@ const MODE_GUIDANCE: Record<AnalysisMode, { label: string; description: string }
 
 function App() {
   const [quotaNotice, setQuotaNotice] = useState(false);
+  const [creditNotice, setCreditNotice] = useState("Credits가 부족합니다.");
+  const [creditsTab, setCreditsTab] = useState<"history" | "packs" | null>(null);
+  const creditCheckPending = useRef(false);
   const [memberLoginOpen, setMemberLoginOpen] = useState(false);
   const [memberConfig, setMemberConfig] = useState<{ credits?: { remaining: number | null; unlimited: boolean }; providers: string[]; registrationEnabled: boolean; creditsMode: boolean }>({ providers: [], registrationEnabled: false, creditsMode: false });
   const quotaNoticeRef = useRef<HTMLElement>(null);
@@ -776,10 +781,6 @@ function App() {
     if (!quotaNotice) return;
     quotaNoticeRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
     quotaNoticeRef.current?.focus({ preventScroll: true });
-    const shiftedNow = Date.now() + 9 * 60 * 60 * 1000;
-    const untilMidnight = 24 * 60 * 60 * 1000 - shiftedNow % (24 * 60 * 60 * 1000);
-    const timer = setTimeout(() => setQuotaNotice(false), untilMidnight);
-    return () => clearTimeout(timer);
   }, [quotaNotice]);
   const aiRequests = useMemo(() => new AiRequestCoordinator(), []);
   useEffect(() => () => aiRequests.cancel(), [aiRequests]);
@@ -841,9 +842,23 @@ function App() {
   const [selectedSystemNodeId, setSelectedSystemNodeId] = useState("");
   const [riskFilter, setRiskFilter] = useState<RiskFilter>("all");
   const isAiFeatureEnabled = runtimeAiFeatureEnabled || !demoAccessState.authenticated;
-  const beforeAiRequest = () => {
+  const beforeAiRequest = async (operation: CreditOperation) => {
+    if (creditCheckPending.current) return false;
     if (!demoAccessState.authenticated && (isDemoMode || memberConfig.creditsMode || demoAccessState.loginRequired)) { setMemberLoginOpen(true); return false; }
-    if (memberConfig.creditsMode && memberConfig.credits && !memberConfig.credits.unlimited && memberConfig.credits.remaining === 0) { showQuotaNotice(); return false; }
+    if (memberConfig.creditsMode) {
+      creditCheckPending.current = true;
+      const config = await refreshDemoRuntimeConfig().finally(() => { creditCheckPending.current = false; });
+      if (config && !config.authenticated) { setMemberLoginOpen(true); return false; }
+      const credits = config?.credits;
+      const cost = CREDIT_OPERATIONS[operation].cost;
+      if (!credits || (!credits.unlimited && typeof credits.remaining !== "number")) {
+        setCreditNotice("잔여 Credits를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요."); showQuotaNotice(); return false;
+      }
+      if (!credits.unlimited && credits.remaining! < cost) {
+        setCreditNotice(`필요 ${cost} Credits / 잔여 ${credits.remaining} Credits. 크레딧 팩 결제는 준비 중입니다.`); showQuotaNotice(); return false;
+      }
+    }
+    setQuotaNotice(false);
     return true;
   };
   const hasSingleSqlInput = sql.trim().length > 0;
@@ -910,9 +925,12 @@ function App() {
     void refreshDemoRuntimeConfig();
     const refresh = () => { void refreshDemoRuntimeConfig(); };
     const login = () => setMemberLoginOpen(true);
+    const shortage = (event: Event) => { setCreditNotice((event as CustomEvent<string>).detail); showQuotaNotice(); };
     window.addEventListener("sql-ai-complete", refresh);
     window.addEventListener("sql-login-required", login);
-    return () => { window.removeEventListener("sql-ai-complete", refresh); window.removeEventListener("sql-login-required", login); };
+    window.addEventListener("focus", refresh);
+    window.addEventListener("sql-credit-shortage", shortage);
+    return () => { window.removeEventListener("sql-ai-complete", refresh); window.removeEventListener("sql-login-required", login); window.removeEventListener("focus", refresh); window.removeEventListener("sql-credit-shortage", shortage); };
   }, [refreshDemoRuntimeConfig]);
   const tableAssetMap = useMemo(
     () => buildTableAssetMap(multiAnalysis),
@@ -1303,7 +1321,7 @@ function App() {
   };
 
   const requestAiExplanation = async () => {
-    if (!beforeAiRequest()) return;
+    if (!await beforeAiRequest(resolveCreditOperation("/api/ai-explain", { sql }))) return;
     const trimmedSql = sql.trim();
 
     if (
@@ -1368,7 +1386,7 @@ function App() {
   };
 
   const requestMultiAiExplanation = async () => {
-    if (!beforeAiRequest()) return;
+    if (!await beforeAiRequest("multi")) return;
     const trimmedSql = multiSql.trim();
 
     if (
@@ -1397,6 +1415,7 @@ function App() {
         signal: request.signal,
         body: JSON.stringify({
           analysis: aiAnalysis,
+          mode: "multi",
           sql: trimmedSql,
         }),
         headers: {
@@ -1436,7 +1455,7 @@ function App() {
   };
 
   const requestAiDocumentDraft = async () => {
-    if (!beforeAiRequest()) return;
+    if (!await beforeAiRequest(resolveCreditOperation("/api/ai-document-draft", { sql }))) return;
     const trimmedSql = sql.trim();
 
     if (
@@ -1508,7 +1527,7 @@ function App() {
   };
 
   const requestMultiAiDocumentDraft = async () => {
-    if (!beforeAiRequest()) return;
+    if (!await beforeAiRequest("multiDocument")) return;
     const trimmedSql = multiSql.trim();
 
     if (
@@ -1757,7 +1776,12 @@ function App() {
       className={`app-shell ${isDemoMode ? "demo-mode" : ""} ${!isAiFeatureEnabled ? "ai-disabled" : ""}`.trim()}
     >
       {memberLoginOpen ? <MemberLogin onClose={() => setMemberLoginOpen(false)} onSignedIn={refreshDemoRuntimeConfig} providers={memberConfig.providers} registrationEnabled={memberConfig.registrationEnabled} /> : null}
+      {creditsTab ? <CreditsDialog onClose={() => setCreditsTab(null)} balance={memberConfig.credits} authenticated={demoAccessState.authenticated} initialTab={creditsTab} /> : null}
       <section className="workspace">
+        <div className="credits-bar" aria-label="잔여 Credits">
+          <strong role="status">{demoAccessState.authenticated ? memberConfig.credits?.unlimited ? "Credits 무제한" : `잔여 ${memberConfig.credits?.remaining ?? "확인 중"} Credits` : "무료 가입 시 10 Credits"}</strong>
+          <div><button type="button" onClick={() => demoAccessState.authenticated ? setCreditsTab("history") : setMemberLoginOpen(true)}>사용 이력</button><button type="button" onClick={() => setCreditsTab("packs")}>크레딧 팩</button></div>
+        </div>
         <header className="app-header">
           <div className="app-header-copy">
             <p className="eyebrow">Legacy SQL Change Review</p>
@@ -1771,7 +1795,7 @@ function App() {
             {demoAccessState.status === "authenticated" ? (
               <div className="demo-session-control">
                 <span>{demoAccessState.username ?? "테스트 사용자"} 로그인됨</span>
-                {memberConfig.creditsMode ? <small>{memberConfig.credits?.unlimited ? "AI 무제한 · 테스트 계정" : `AI 이용권 ${memberConfig.credits?.remaining ?? "확인 중"}개 · 성공 1회당 1개`}</small> : null}
+                {memberConfig.credits?.unlimited ? <small>무제한 테스트 계정</small> : null}
                 <button
                   className="text-button"
                   disabled={demoLogoutState === "loading"}
@@ -1794,10 +1818,11 @@ function App() {
         </header>
         {quotaNotice ? (
           <section className="quota-notice" role="alert" tabIndex={-1} ref={quotaNoticeRef} aria-labelledby="quota-notice-title">
-            <strong id="quota-notice-title">AI 이용권을 모두 사용했습니다.</strong>
-            <p>AI 성공 1회에 이용권 1개가 필요합니다. 충전 결제는 현재 연결 준비 중입니다.</p>
+            <strong id="quota-notice-title">AI 분석을 실행할 수 없습니다.</strong>
+            <p>{creditNotice}</p>
             <p>SQL 진단과 일반 데이터 분석은 계속 사용할 수 있습니다.</p>
             <button type="button" className="text-button" onClick={() => setQuotaNotice(false)}>확인</button>
+            <button type="button" className="text-button" onClick={() => setCreditsTab("packs")}>크레딧 팩 보기</button>
           </section>
         ) : null}
         {[aiState.status, multiAiState.status, aiDocumentDraftState.status, multiAiDocumentDraftState.status].includes("loading") ? (
@@ -1933,7 +1958,7 @@ function App() {
               disabled={!isSingleAnalysisCurrent || aiState.status === "loading"}
               onClick={() => void requestAiExplanation()}
             >
-              {aiState.status === "loading" ? "AI 설명 요청 중" : "AI로 설명 보강하기"}
+              {aiState.status === "loading" ? "AI 설명 요청 중" : `AI로 설명 보강하기 · ${creditCostLabel(resolveCreditOperation("/api/ai-explain", { sql }))}`}
             </button>
           ) : null}
         </div>
@@ -2307,7 +2332,7 @@ function App() {
               >
                 {aiDocumentDraftState.status === "loading"
                   ? "AI 문서 초안 생성 중"
-                  : "AI 문서 초안 생성"}
+                  : `AI 문서 초안 생성 · ${creditCostLabel(resolveCreditOperation("/api/ai-document-draft", { sql }))}`}
               </button>
             </div>
 
@@ -2547,7 +2572,7 @@ function App() {
                 >
                   {multiAiState.status === "loading"
                     ? "다건 AI 설명 요청 중"
-                    : "AI로 설명 보강하기"}
+                    : `AI로 설명 보강하기 · ${creditCostLabel("multi")}`}
                 </button>
               ) : null}
             </div>
@@ -3307,7 +3332,7 @@ function App() {
                   >
                     {multiAiDocumentDraftState.status === "loading"
                       ? "다건 문서 초안 생성 중"
-                      : "AI 다건 문서 초안 생성"}
+                      : `AI 다건 문서 초안 생성 · ${creditCostLabel("multiDocument")}`}
                   </button>
                 </div>
 

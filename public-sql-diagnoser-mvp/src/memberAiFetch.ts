@@ -9,6 +9,10 @@ export async function memberAiFetch(url: string, init: RequestInit): Promise<Res
   try {
     const response = await fetch(url, { ...init, headers });
     if (response.status === 401) window.dispatchEvent(new Event("sql-login-required"));
+    if (response.status === 402) {
+      const body = await response.clone().json().catch(() => ({}));
+      window.dispatchEvent(new CustomEvent("sql-credit-shortage", { detail: typeof body.error === "string" ? body.error : "Credits가 부족합니다." }));
+    }
     return response;
   } finally { init.signal?.removeEventListener("abort", cancel); window.dispatchEvent(new Event("sql-ai-complete")); }
 }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { SIGNUP_CREDITS } from "./creditPolicy";
 
 export function MemberLogin({ onClose, onSignedIn, providers, registrationEnabled }: {
   onClose: () => void; onSignedIn: () => Promise<unknown>; providers: string[]; registrationEnabled: boolean;
@@ -35,7 +36,7 @@ export function MemberLogin({ onClose, onSignedIn, providers, registrationEnable
   };
   return <dialog ref={dialog} className="member-dialog" onCancel={onClose} aria-labelledby="member-title">
     <header><h2 id="member-title">{register ? "사이트 계정 가입" : "AI 이용을 위한 로그인"}</h2><button type="button" aria-label="로그인 닫기" onClick={onClose}>닫기</button></header>
-    <p>일반 SQL 분석은 무료입니다. 신규 회원은 AI 이용권 1개를 받습니다.</p>
+    <p>무료 가입 시 {SIGNUP_CREDITS} Credits가 지급됩니다. 일반 SQL 분석은 무료입니다.</p>
     <div className="member-socials">{[["google", "구글"], ["kakao", "카카오"], ["naver", "네이버"]].map(([id, label]) =>
       <button key={id} type="button" disabled={!providers.includes(id) || busy} onClick={() => { popup.current = window.open(`/api/auth/${id}/start`, "sql-member-login", "popup,width=500,height=700"); if (!popup.current) setError("로그인 팝업을 허용해 주세요."); }}>{label}로 계속하기{!providers.includes(id) ? " · 연결 준비 중" : ""}</button>)}</div>
     <form onSubmit={event => void submit(event)}>
