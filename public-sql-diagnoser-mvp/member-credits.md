@@ -6,10 +6,16 @@
 - AI actions open a login dialog without discarding the input.
 - Site username/password registration and login. Passwords use salted PBKDF2-SHA256, 100,000 iterations; plaintext passwords are not stored.
 - Social authorization-code flows for Google, Kakao and Naver. Buttons remain disabled until provider credentials and origin are configured.
-- Each immutable member ID receives one initial credit, not one per login or day.
+- Each new immutable member ID receives 10 initial Credits, once per account.
+- Costs are defined in `src/creditPolicy.ts`: single SQL AI explanation/documentation 1, multi SQL AI explanation/documentation 2, data insights and SQL recommendations 3.
+- The server derives cost from the route and SQL. A submitted cost or unlimited flag cannot override it. Multi explanation mode costs 2 even with one statement. Multi-statement SQL on the single route costs 2; quoted semicolons and comments do not create extra statements.
+- The browser refreshes balance before sending an AI request; the server atomically checks the required cost again. A balance of 1 cannot start a 3-Credit request.
 - A per-member SQLite Durable Object transaction reserves credits. Success commits; handler errors release. Duplicate request IDs cannot invoke the provider twice.
 - Cancellation attempts to release an in-progress reservation. A completed request is not refunded by a later cancellation. Undelivered/abandoned reservations recover after ten minutes; provider calls have a 90-second upper bound.
 - All five AI routes share the wallet, including SQL recommendations and data insights.
+- A sticky balance bar remains visible during scrolling. AI action buttons show their Credit cost. Usage history is private to the current member and paginated in groups of 50.
+- History records timestamp, operation, used Credits, balance change and remaining Credits. Reservation deducts the balance, completion confirms usage with zero additional balance change, and failure/cancellation returns the exact reserved amount. Unlimited requests are recorded with zero charge.
+- Existing v1 wallets are upgraded transactionally without refilling the balance. Their history starts with the known opening balance; prior event timestamps/balances are not reconstructed. In-flight v1 requests still refund exactly 1 Credit.
 - Credit shortage does not block rule-based SQL work. No purchase endpoint accepts user-supplied quantities or payment-success claims.
 
 ## Unlimited test account
@@ -39,7 +45,7 @@ Register service domains, consent screens and production permissions with each p
 
 ## Payments: not enabled
 
-Actual checkout, payment confirmation, purchased-credit issuance, refunds and payment history are NOT implemented. The public payments/grant routes fail closed and the UI explicitly says charging is pending.
+Credit pack catalog: 30 / 100 / 300 Credits, prices not yet specified. `GET /api/credits/packs` provides the public catalog; purchase buttons remain disabled. Actual checkout, payment confirmation, purchased-credit issuance, refunds and payment history are NOT implemented. The public payments/grant routes fail closed and the UI explicitly says charging is pending.
 Before implementation, choose a PG, merchant account, credit package price/currency and refund policy. Credit issuance must follow a server-verified payment amount/order and a unique payment ledger entry, not a browser success redirect. Do not enable a mock payment in production.
 
 ## Remaining launch work
@@ -47,16 +53,16 @@ Before implementation, choose a PG, merchant account, credit package price/curre
 - Real provider consent/login verification with configured developer apps. Current automated tests mock provider responses; they are not production OAuth verification.
 - Password recovery, account deletion and explicit account linking are not implemented. Do not market this as a complete commercial membership system yet.
 - Provider identities and site IDs are separate accounts; no email-based auto-linking. Multiple accounts can receive separate trials. IP/account throttling (20 auth attempts/hour) is an initial safeguard, not strong person-level anti-abuse. Consider verified signup/CAPTCHA before open promotion.
-- Credits are internal AI usage units, not model input/output tokens. Different AI features may have different provider costs even when each uses one credit.
-- SQL is not stored in the member/wallet ledger. It stores credential hashes, balance, opaque request IDs and settlement state.
+- Credits are internal AI usage units, not model input/output tokens. There is no subscription or recurring billing.
+- SQL is not stored in the member/wallet ledger. It stores credential hashes, balance, opaque request IDs, operation codes and credit events.
 - A cancelled client connection may race with completed provider work; completed requests stay charged. Explicit cancellation and timeout recovery cover pending reservations, not a general payment refund policy.
 
 ## Verification
 
 `npm test` includes legacy regressions, change comparison and `tests/member-credits.test.mjs`.
-The new suite uses Node's SQLite engine and checks signup, credentials, trial persistence, concurrent reservations, idempotency, failures, cancellation settlement, admin impersonation, disabled payments, OAuth state and unverified-email rejection.
+The suite uses Node's SQLite engine and checks 10-Credit signup, operation pricing, positive-but-insufficient balances, concurrent reservations, idempotency, variable-cost refunds, expiry, history isolation/pagination, v1 migration, unlimited authorization, disabled packs/payments and OAuth state.
 `npm run build` checks types and assets. `npx wrangler deploy --dry-run` checks the Worker bundle and bindings without deployment.
-Local Wrangler UI verified: guest SQL access, AI-triggered dialog, member login and one-credit balance. No actual paid transaction or external AI charge was made during these checks.
+Local Wrangler UI verified (2026-09-13): guest SQL access, registration with 10 Credits, persistent balance, usage history, sticky balance bar, insufficient-credit preflight without an AI call, and disabled pack purchase at 1360/390/320px. Browser balance shortage and AI availability were simulated; registration, wallet and history used the local Worker and its SQLite storage. No actual paid transaction or external AI charge was made. Windows local persistence uses a short temporary path to avoid long-path storage errors.
 
 Official integration references:
 - https://developers.google.com/identity/protocols/oauth2/web-server

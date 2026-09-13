@@ -1,4 +1,10 @@
 import type { QuotaNamespace } from "./demoQuota.js";
+import { CREDIT_OPERATIONS, SIGNUP_CREDITS, type CreditOperation } from "./creditPolicy.js";
+
+export type CreditEvent = {
+  seq: number; at: number; kind: string; operation: string; used: number; delta: number; remaining: number;
+};
+type Reservation = { id: string; status: string; charged: number; operation: string; unlimited: number };
 
 type Storage = {
   sql: { exec<T>(query: string, ...params: (string | number)[]): { toArray(): T[] } };
@@ -13,6 +19,18 @@ export class MemberAccount {
     sql.exec("CREATE TABLE IF NOT EXISTS ledger (id TEXT PRIMARY KEY, status TEXT NOT NULL, expires INTEGER NOT NULL)");
     sql.exec("CREATE TABLE IF NOT EXISTS credential (id INTEGER PRIMARY KEY, salt TEXT NOT NULL, hash TEXT NOT NULL)");
     sql.exec("CREATE TABLE IF NOT EXISTS throttle (id INTEGER PRIMARY KEY, window INTEGER NOT NULL, used INTEGER NOT NULL)");
+    ctx.storage.transactionSync(() => {
+      const columns = new Set(sql.exec<{ name: string }>("PRAGMA table_info(ledger)").toArray().map(column => column.name));
+      if (!columns.has("charged")) sql.exec("ALTER TABLE ledger ADD COLUMN charged INTEGER NOT NULL DEFAULT 1");
+      if (!columns.has("operation")) sql.exec("ALTER TABLE ledger ADD COLUMN operation TEXT NOT NULL DEFAULT 'legacy'");
+      if (!columns.has("unlimited")) sql.exec("ALTER TABLE ledger ADD COLUMN unlimited INTEGER NOT NULL DEFAULT 0");
+      sql.exec("CREATE TABLE IF NOT EXISTS credit_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, kind TEXT NOT NULL, operation TEXT NOT NULL, used INTEGER NOT NULL, delta INTEGER NOT NULL, remaining INTEGER NOT NULL)");
+      const wallet = sql.exec<{ balance: number }>("SELECT balance FROM wallet WHERE id=1").toArray()[0];
+      if (wallet && !sql.exec("SELECT seq FROM credit_events LIMIT 1").toArray().length) {
+        // Old wallets have no historical balance snapshots. Preserve the balance without inventing prior events.
+        sql.exec("INSERT INTO credit_events (at, kind, operation, used, delta, remaining) VALUES (?, 'opening', '', 0, 0, ?)", Date.now(), wallet.balance);
+      }
+    });
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -23,6 +41,16 @@ export class MemberAccount {
       return Response.json(sql.exec("SELECT salt, hash FROM credential WHERE id=1").toArray()[0] ?? null);
     }
     return this.ctx.storage.transactionSync(() => {
+      const balance = () => sql.exec<{ balance: number }>("SELECT balance FROM wallet WHERE id=1").toArray()[0].balance;
+      const event = (kind: string, operation = "", used = 0, delta = 0) => {
+        sql.exec("INSERT INTO credit_events (at, kind, operation, used, delta, remaining) VALUES (?, ?, ?, ?, ?, ?)", Date.now(), kind, operation, used, delta, balance());
+      };
+      const initialize = () => {
+        if (!sql.exec("SELECT id FROM wallet WHERE id=1").toArray().length) {
+          sql.exec("INSERT INTO wallet VALUES (1, ?)", SIGNUP_CREDITS);
+          event("signup", "", 0, SIGNUP_CREDITS);
+        }
+      };
       if (path === "/throttle") {
         const window = Math.floor(Date.now() / 3600000);
         const row = sql.exec<{ window: number; used: number }>("SELECT window, used FROM throttle WHERE id=1").toArray()[0];
@@ -35,29 +63,42 @@ export class MemberAccount {
         if (typeof body.salt !== "string" || typeof body.hash !== "string") return new Response(null, { status: 400 });
         if (sql.exec("SELECT id FROM credential WHERE id=1").toArray().length) return Response.json({ error: "사용할 수 없는 아이디입니다." }, { status: 409 });
         sql.exec("INSERT INTO credential VALUES (1, ?, ?)", body.salt, body.hash);
-        sql.exec("INSERT OR IGNORE INTO wallet VALUES (1, 1)");
+        initialize();
         return Response.json({ ok: true });
       }
-      if (!["/balance", "/reserve", "/complete", "/release"].includes(path)) return new Response(null, { status: 404 });
-      sql.exec("INSERT OR IGNORE INTO wallet VALUES (1, 1)");
+      if (!["/balance", "/history", "/reserve", "/complete", "/release"].includes(path)) return new Response(null, { status: 404 });
+      initialize();
       // Provider requests time out in 90 seconds; expired reservations recover after 10 minutes.
-      const expired = sql.exec<{ id: string }>("SELECT id FROM ledger WHERE status='reserved' AND expires < ?", Date.now()).toArray();
-      if (expired.length) {
-        sql.exec("UPDATE wallet SET balance=balance+? WHERE id=1", expired.length);
-        sql.exec("UPDATE ledger SET status='released' WHERE status='reserved' AND expires < ?", Date.now());
+      const expired = sql.exec<Reservation>("SELECT id, charged, operation, unlimited FROM ledger WHERE status='reserved' AND expires < ?", Date.now()).toArray();
+      for (const pending of expired) {
+        sql.exec("UPDATE wallet SET balance=balance+? WHERE id=1", pending.charged);
+        sql.exec("UPDATE ledger SET status='released' WHERE id=?", pending.id);
+        event("expired", pending.operation, 0, pending.charged);
       }
-      const balance = () => sql.exec<{ balance: number }>("SELECT balance FROM wallet WHERE id=1").toArray()[0].balance;
       if (path === "/balance") return Response.json({ remaining: balance(), unlimited: false });
+      if (path === "/history") {
+        const cursor = Number(new URL(request.url).searchParams.get("before")) || Number.MAX_SAFE_INTEGER;
+        if (!Number.isSafeInteger(cursor) || cursor < 1) return new Response(null, { status: 400 });
+        const rows = sql.exec<CreditEvent>("SELECT * FROM credit_events WHERE seq < ? ORDER BY seq DESC LIMIT 51", cursor).toArray();
+        return Response.json({ entries: rows.slice(0, 50), nextCursor: rows.length > 50 ? rows[49].seq : null });
+      }
       if (typeof body.id !== "string" || !/^[a-zA-Z0-9-]{16,80}$/.test(body.id)) return new Response(null, { status: 400 });
-      const row = sql.exec<{ status: string }>("SELECT status FROM ledger WHERE id=?", body.id).toArray()[0];
+      const row = sql.exec<Reservation>("SELECT * FROM ledger WHERE id=?", body.id).toArray()[0];
       if (path === "/reserve") {
         if (row) return Response.json({ error: "이미 처리 중이거나 처리된 요청입니다." }, { status: 409 });
-        if (!balance()) return Response.json({ remaining: 0, unlimited: false }, { status: 402 });
-        sql.exec("UPDATE wallet SET balance=balance-1 WHERE id=1");
-        sql.exec("INSERT INTO ledger VALUES (?, 'reserved', ?)", body.id, Date.now() + 600000);
+        if (typeof body.operation !== "string" || !Object.prototype.hasOwnProperty.call(CREDIT_OPERATIONS, body.operation)) return new Response(null, { status: 400 });
+        const required = CREDIT_OPERATIONS[body.operation as CreditOperation].cost;
+        const charged = body.unlimited === true ? 0 : required;
+        if (balance() < charged) return Response.json({ remaining: balance(), required, unlimited: false }, { status: 402 });
+        sql.exec("UPDATE wallet SET balance=balance-? WHERE id=1", charged);
+        sql.exec("INSERT INTO ledger (id, status, expires, charged, operation, unlimited) VALUES (?, 'reserved', ?, ?, ?, ?)", body.id, Date.now() + 600000, charged, body.operation, body.unlimited === true ? 1 : 0);
+        event("reserved", body.operation, 0, -charged);
       } else if (row?.status === "reserved") {
         sql.exec("UPDATE ledger SET status=? WHERE id=?", path === "/complete" ? "spent" : "released", body.id);
-        if (path === "/release") sql.exec("UPDATE wallet SET balance=balance+1 WHERE id=1");
+        if (path === "/release") {
+          sql.exec("UPDATE wallet SET balance=balance+? WHERE id=1", row.charged);
+          event("released", row.operation, 0, row.charged);
+        } else event(row.unlimited ? "unlimited" : "spent", row.operation, row.charged);
       } else if (!row || (path === "/complete" && row.status !== "spent")) return new Response(null, { status: 409 });
       return Response.json({ remaining: balance(), unlimited: false });
     });

@@ -25,7 +25,7 @@ export async function handleMemberOAuth(request: Request, env: Env): Promise<Res
   if (!availableProviders(env).includes(provider) || url.origin !== env.PUBLIC_ORIGIN) return Response.json({ error: "아직 연결되지 않은 로그인 서비스입니다." }, { status: 503 });
   const config = providers[provider];
   const id = String(env[`OAUTH_${provider.toUpperCase()}_CLIENT_ID`]);
-  const secret = String(env[`OAUTH_${provider.toUpperCase()}_CLIENT_SECRET`]);
+  const secret = String(env[`OAUTH_${provider.toUpperCase()}_CLIENT_SECRET`] ?? "");
   const callback = `${url.origin}/api/auth/${provider}/callback`;
   if (match[2] === "start") {
     const state = encode(crypto.getRandomValues(new Uint8Array(32)));

@@ -3,8 +3,11 @@
 ## Member credits (new mode)
 
 `wrangler.jsonc` enables `AI_CREDITS_ENABLED=true`. General SQL features are public;
-AI requires login. New member wallets receive one lifetime trial credit, and each
-successful AI request consumes one credit. The legacy primary account
+AI requires login. New member wallets receive 10 signup Credits once. Single SQL
+AI diagnosis/documentation costs 1 Credit, multi SQL diagnosis/documentation 2,
+and data insights/SQL recommendations 3. Existing wallets retain their balance.
+The sticky balance bar includes account usage history and credit packs (checkout pending).
+The legacy primary account
 `plushome58@naver.com` is unlimited after password authentication. See
 [member-credits.md](./member-credits.md) for activation, external prerequisites,
 security boundaries and payment limitations. No live checkout is implemented.

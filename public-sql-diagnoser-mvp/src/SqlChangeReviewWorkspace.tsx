@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { memberAiFetch } from "./memberAiFetch";
+import { creditCostLabel, type CreditOperation } from "./creditPolicy";
 import { AiRequestCoordinator } from "./aiExplanationState";
 import { briefSql, spanLabel } from "./sqlChangeScope";
 import {
@@ -29,7 +30,7 @@ const initialReview = () => buildSqlChangeReview(DEFAULT_CASE.beforeSql, DEFAULT
 export function SqlChangeReviewWorkspace({ aiFeatureEnabled = false, onQuotaExceeded, beforeAiRequest }: {
   aiFeatureEnabled?: boolean;
   onQuotaExceeded?: () => void;
-  beforeAiRequest?: () => boolean;
+  beforeAiRequest?: (operation: CreditOperation) => Promise<boolean>;
 }) {
   const aiRequests = useMemo(() => new AiRequestCoordinator(), []);
   const [aiLoading, setAiLoading] = useState(false);
@@ -126,7 +127,7 @@ export function SqlChangeReviewWorkspace({ aiFeatureEnabled = false, onQuotaExce
   };
 
   const recommendSql = async () => {
-    if (beforeAiRequest && !beforeAiRequest()) return;
+    if (beforeAiRequest && !await beforeAiRequest("rewrite")) return;
     if (!aiFeatureEnabled || !beforeSql.trim() || aiLoading) return;
     const request = aiRequests.begin("rewrite");
     const priorSql = afterSql;
@@ -211,8 +212,8 @@ export function SqlChangeReviewWorkspace({ aiFeatureEnabled = false, onQuotaExce
           </label>
           <button type="button" className="secondary-button" onClick={() => void recommendSql()}
             disabled={!aiFeatureEnabled || !beforeSql.trim() || aiLoading}
-            title={aiFeatureEnabled ? "변경 전 SQL 기반 추천 · AI 사용량 1회" : "로그인 및 AI 연결이 필요합니다"}>
-            {aiLoading ? "AI 추천 중" : "AI사용"}
+            title={aiFeatureEnabled ? `변경 전 SQL 기반 추천 · ${creditCostLabel("rewrite")}` : "로그인 및 AI 연결이 필요합니다"}>
+            {aiLoading ? "AI 추천 중" : `AI사용 · ${creditCostLabel("rewrite")}`}
           </button>
           </div>
           <textarea
